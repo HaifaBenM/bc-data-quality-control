@@ -1,0 +1,11 @@
+[theme]
+# Couleurs principales du thème BC Quality Control
+primaryColor = "#2E6FBF"
+backgroundColor = "#F8FAFC"
+secondaryBackgroundColor = "#EFF6FF"
+textColor = "#1E293B"
+font = "sans serif"
+
+[server]
+# Taille maximale d'upload : 50 MB (fichiers Excel clients)
+maxUploadSize = 50
