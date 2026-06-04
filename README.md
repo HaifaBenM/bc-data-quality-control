@@ -65,7 +65,7 @@ L'application est déployée automatiquement sur Streamlit Community Cloud
 | Sprint | Fonctionnalité | Statut |
 |--------|---------------|--------|
 | 0 | Setup & squelette | ✅ Terminé |
-| 1 | Upload + vérification structurelle | 🚧 À venir |
+| 1 | Upload + vérification structurelle | ✅ Terminé |
 | 2 | Profils clients + règles métier | 🚧 À venir |
 | 3 | Connexion BC + metadata | 🚧 À venir |
 | 4 | Validation Axe A | 🚧 À venir |
