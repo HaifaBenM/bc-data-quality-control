@@ -1,108 +1,104 @@
 """
-Module de validation structurelle du fichier.
-Vérifie que la structure du fichier correspond au template BC attendu.
+Module de validation structurelle.
+Valide le format et la cohérence du fichier BC Configuration Package.
 """
 
 
-def validate_file_structure(
-    parse_result: dict,
-    expected_sheets: list,
-    master_data_name: str = ""
-) -> dict:
+def validate_file_structure(parse_result: dict) -> dict:
     """
-    Valide la structure du fichier par rapport aux onglets attendus.
-
-    Args:
-        parse_result   : résultat du parsing (depuis file_parser.py)
-        expected_sheets: liste des onglets attendus (sélectionnés par l'équipe BC)
-        master_data_name: nom de la Master Data (pour les messages)
-
-    Retourne un dict avec :
-    - is_valid (bool)         : True si aucune erreur bloquante
-    - blocking_errors (list)  : erreurs qui empêchent l'analyse
-    - warnings (list)         : avertissements non bloquants
-    - missing_sheets (list)   : onglets attendus mais absents
-    - extra_sheets (list)     : onglets présents mais non attendus
-    - conforming_sheets (list): onglets présents et conformes
-    - details (dict)          : détail par onglet
+    Valide la structure du fichier après auto-détection.
+    Ne nécessite plus de liste d'onglets attendus — tout est auto-détecté.
     """
     result = {
-        "is_valid": True,
+        "is_valid":        True,
         "blocking_errors": [],
-        "warnings": [],
-        "missing_sheets": [],
-        "extra_sheets": [],
-        "conforming_sheets": [],
-        "details": {}
+        "warnings":        [],
+        "data_tables":     [],   # tables de données validées
+        "ref_tables":      [],   # tables de référence détectées
+        "summary":         {}
     }
 
-    # Si le parsing a échoué, on ne peut pas valider
     if not parse_result.get("success"):
         result["is_valid"] = False
         result["blocking_errors"].extend(parse_result.get("errors", []))
         return result
 
-    # Récupérer les onglets présents dans le fichier
-    file_sheets = list(parse_result.get("sheet_names", []))
+    data_tables = parse_result.get("data_tables", [])
+    ref_tables  = parse_result.get("ref_tables", [])
+    metadata    = parse_result.get("metadata", {})
+    sheets      = parse_result.get("sheets", {})
+    total_rows  = parse_result.get("total_rows", {})
 
-    # ── Vérification 1 : Onglets attendus présents ? ─────────────────────────
-    for expected in expected_sheets:
-        if expected not in file_sheets:
-            result["blocking_errors"].append(
-                f"Onglet manquant : '{expected}' — "
-                "cet onglet était présent dans le template envoyé au client."
+    # ── Vérification 1 : Le fichier contient-il des tables de données ? ───────
+    if not data_tables:
+        result["is_valid"] = False
+        result["blocking_errors"].append(
+            "Aucune table de données BC détectée dans ce fichier. "
+            "Vérifiez que le fichier est bien un export de Package de Configuration BC "
+            "(Clients, Fournisseurs, Articles, Plan comptable...)."
+        )
+        return result
+
+    # ── Vérification 2 : Tables de données vides ─────────────────────────────
+    empty_data = []
+    for sheet in data_tables:
+        rows = total_rows.get(sheet, 0)
+        meta = metadata.get(sheet, {})
+        label = meta.get("label", sheet)
+
+        if rows == 0:
+            empty_data.append(sheet)
+            result["warnings"].append(
+                f"⚠ Table de données '{sheet}' ({label}) : "
+                "aucune ligne — le client n'a pas saisi de données sur cet onglet."
             )
-            result["missing_sheets"].append(expected)
-            result["is_valid"] = False
         else:
-            result["conforming_sheets"].append(expected)
-            result["details"][expected] = {"status": "ok", "issues": []}
+            result["data_tables"].append({
+                "sheet":    sheet,
+                "label":    label,
+                "table_id": meta.get("table_id", "?"),
+                "rows":     rows,
+                "cols":     len(sheets.get(sheet, {}).columns) if sheet in sheets else 0,
+            })
 
-    # ── Vérification 2 : Onglets supplémentaires non prévus ──────────────────
-    for sheet in file_sheets:
-        if sheet not in expected_sheets:
-            result["warnings"].append(
-                f"Onglet non attendu : '{sheet}' — "
-                "cet onglet ne fait pas partie du template. Il sera ignoré lors du contrôle."
-            )
-            result["extra_sheets"].append(sheet)
+    # ── Vérification 3 : Tables de référence présentes ? ─────────────────────
+    result["ref_tables"] = [
+        {
+            "sheet":    sheet,
+            "label":    metadata.get(sheet, {}).get("label", sheet),
+            "table_id": metadata.get(sheet, {}).get("table_id", "?"),
+            "rows":     total_rows.get(sheet, 0),
+        }
+        for sheet in ref_tables
+    ]
 
-    # ── Vérification 3 : Onglets présents mais vides ─────────────────────────
-    for sheet in result["conforming_sheets"]:
-        df = parse_result["sheets"].get(sheet)
-        if df is not None and df.empty:
-            result["warnings"].append(
-                f"Onglet '{sheet}' : présent mais vide — "
-                "aucune donnée à contrôler."
-            )
-            result["details"][sheet]["status"] = "empty"
-            result["details"][sheet]["issues"].append("Onglet vide")
+    if not ref_tables:
+        result["warnings"].append(
+            "⚠ Aucune table de référence détectée. "
+            "La validation des codes (pays, conditions paiement...) "
+            "ne pourra pas être effectuée (Sprint 5)."
+        )
 
-    # ── Reprendre les warnings du parsing (formules, colonnes sans nom) ───────
+    # ── Reprendre les warnings du parsing ─────────────────────────────────────
     for warning in parse_result.get("warnings", []):
         result["warnings"].append(warning)
 
     # ── Résumé ────────────────────────────────────────────────────────────────
-    nb_ok = len(result["conforming_sheets"])
-    nb_missing = len(result["missing_sheets"])
-    nb_extra = len(result["extra_sheets"])
+    nb_data_ok = len(result["data_tables"])
+    nb_data_empty = len(empty_data)
 
     result["summary"] = {
-        "total_expected": len(expected_sheets),
-        "conforming": nb_ok,
-        "missing": nb_missing,
-        "extra": nb_extra,
+        "nb_data_tables":    len(data_tables),
+        "nb_data_with_rows": nb_data_ok,
+        "nb_data_empty":     nb_data_empty,
+        "nb_ref_tables":     len(ref_tables),
         "status": (
-            "✅ Structure conforme"
-            if result["is_valid"] and nb_ok > 0
-            else "❌ Structure non conforme" if not result["is_valid"]
-            else "⚠️ Structure avec avertissements"
+            "✅ Fichier conforme — prêt pour l'analyse qualité"
+            if result["is_valid"] and nb_data_ok > 0
+            else "⚠️ Fichier conforme avec avertissements"
+            if result["is_valid"]
+            else "❌ Fichier non conforme"
         )
     }
 
     return result
-
-
-def get_validation_color(is_valid: bool) -> str:
-    """Retourne la couleur selon le statut de validation."""
-    return "green" if is_valid else "red"
