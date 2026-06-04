@@ -119,7 +119,7 @@ with col_status:
                     unsafe_allow_html=True)
 
 with col_version:
-    st.markdown('<span class="status-badge status-warning">🚧 Sprint 0 — Squelette</span>',
+    st.markdown('<span class="status-badge status-warning">🚧 Sprint 1 — Upload & Validation</span>',
                 unsafe_allow_html=True)
 
 st.markdown("---")
