@@ -1,8 +1,16 @@
 """
-Page Règles Métier — Configurer les règles de validation par client.
-Cette page sera développée au Sprint 2.
+Page Règles Métier — Sprint 2.
+Saisie et gestion des règles de validation par profil client.
 """
 import streamlit as st
+from app.db.supabase_client import test_connection
+from app.db.profiles_db import get_profiles_for_select
+from app.db.rules_db import (
+    get_rules_by_master_data, get_rules_for_profile,
+    create_rule, delete_rule, toggle_rule, copy_rules_to_profile,
+    RULE_TYPES, RULE_TYPES_HELP, SEVERITIES, AUTO_CORRECT_TYPES
+)
+from app.core.master_data_config import get_master_data_list
 
 st.set_page_config(
     page_title="Règles Métier — BC Quality Control",
@@ -10,64 +18,267 @@ st.set_page_config(
     layout="wide"
 )
 
-# ── Header ───────────────────────────────────────────────────────────────────
+st.markdown("""
+<style>
+    .rule-card {
+        background: white; border: 1px solid #E2E8F0;
+        border-radius: 8px; padding: 12px 16px; margin-bottom: 8px;
+    }
+    .rule-card.inactive { opacity: 0.5; }
+    .rule-label  { font-size: 13px; font-weight: 600; color: #1B3A6B; }
+    .rule-detail { font-size: 12px; color: #64748B; margin-top: 3px; }
+    .badge {
+        display: inline-block; font-size: 10px; font-weight: 600;
+        padding: 2px 7px; border-radius: 4px; margin-right: 5px;
+    }
+    .badge-major { background: #FAECE7; color: #993C1D; }
+    .badge-minor { background: #FAEEDA; color: #854F0B; }
+    .badge-info  { background: #EFF6FF; color: #2E6FBF; }
+    .badge-auto  { background: #E1F5EE; color: #0F6E56; }
+    .badge-type  { background: #EEEDFE; color: #534AB7; }
+    .section-title {
+        font-size: 14px; font-weight: 600; color: #1B3A6B;
+        padding: 8px 0; border-bottom: 2px solid #EFF6FF;
+        margin-bottom: 10px;
+    }
+    #MainMenu { visibility: hidden; }
+    footer    { visibility: hidden; }
+</style>
+""", unsafe_allow_html=True)
+
 st.markdown("# ⚙️ Règles Métier")
-st.markdown("Configurer les règles de validation spécifiques à chaque client.")
+st.markdown("Configurez les règles de validation spécifiques à chaque client.")
 st.markdown("---")
 
-# ── Types de règles disponibles ──────────────────────────────────────────────
-st.markdown("### Types de règles disponibles")
+connected, msg = test_connection()
+if not connected:
+    st.error(f"❌ Base de données non connectée : {msg}")
+    st.stop()
 
-col1, col2 = st.columns(2)
+profiles = get_profiles_for_select()
+if not profiles:
+    st.warning(
+        "Aucun profil client. "
+        "Créez d'abord un profil dans **Profils Clients**."
+    )
+    st.stop()
 
-with col1:
-    st.markdown("""
-    | Type | Description |
-    |------|-------------|
-    | **Valeur par défaut** | Si champ vide → mettre une valeur fixe |
-    | **Transformation** | Remplacer valeur A par valeur B |
-    | **Table de correspondance** | Mapper une liste de valeurs |
-    | **Condition métier** | Vérifier cohérence entre champs |
-    """)
+# Pré-sélectionner si on vient de la page Profils Clients
+default_idx = 0
+if "selected_profile_for_rules" in st.session_state:
+    codes = [p["code"] for p in profiles]
+    pre   = st.session_state.get("selected_profile_for_rules", "")
+    if pre in codes:
+        default_idx = codes.index(pre)
 
-with col2:
-    st.markdown("""
-    | Type | Description |
-    |------|-------------|
-    | **Format obligatoire** | Vérifier le format d'un champ |
-    | **Plage de valeurs** | Vérifier un intervalle numérique |
-    | **Exclusion de ligne** | Exclure certaines lignes de l'import |
-    | **Détection doublon** | Signaler les lignes dupliquées |
-    """)
+selected_label = st.selectbox(
+    "Client",
+    [p["label"] for p in profiles],
+    index=default_idx
+)
+selected_code = next(
+    (p["code"] for p in profiles if p["label"] == selected_label), None
+)
+if not selected_code:
+    st.stop()
 
 st.markdown("---")
 
-# ── Placeholder ──────────────────────────────────────────────────────────────
-st.info("""
-🚧 **Sprint 2** — Cette page permettra de :
-- Sélectionner un client et voir ses règles existantes
-- Ajouter une nouvelle règle via un formulaire guidé
-- Activer / désactiver des règles sans les supprimer
-- Tester une règle sur un jeu de données exemple
-- Copier des règles d'un profil client vers un autre
-""")
+tab1, tab2, tab3 = st.tabs([
+    "📋 Règles existantes",
+    "➕ Ajouter une règle",
+    "📤 Copier depuis un autre client"
+])
 
-# ── Aperçu formulaire ────────────────────────────────────────────────────────
-with st.expander("👀 Aperçu du formulaire d'une règle (non fonctionnel)"):
-    col1, col2 = st.columns(2)
-    with col1:
-        st.selectbox("Client", ["— Sélectionner —"], disabled=True)
-        st.text_input("Libellé de la règle", placeholder="Pays par défaut = France", disabled=True)
-        st.selectbox("Master Data", ["Clients", "Fournisseurs", "Articles"], disabled=True)
-        st.selectbox("Champ cible", ["—"], disabled=True)
-    with col2:
-        st.selectbox("Type de règle", [
-            "Valeur par défaut", "Transformation", "Table de correspondance",
-            "Condition métier", "Format obligatoire", "Plage de valeurs",
-            "Exclusion de ligne", "Détection doublon"
-        ], disabled=True)
-        st.text_input("Condition (Si...)", placeholder="Si Pays est vide", disabled=True)
-        st.text_input("Action (Alors...)", placeholder="Mettre 'FR'", disabled=True)
-        st.selectbox("Sévérité", ["Mineure", "Majeure", "Info"], disabled=True)
-        st.checkbox("Correction automatique", disabled=True)
-    st.button("💾 Enregistrer la règle", disabled=True)
+# ════════════════════════════════════════════════════════════════════════════
+# TAB 1 — LISTE
+# ════════════════════════════════════════════════════════════════════════════
+with tab1:
+
+    rules_by_md = get_rules_by_master_data(selected_code)
+
+    if not rules_by_md:
+        st.info("Aucune règle pour ce client. Utilisez **'Ajouter une règle'**.")
+    else:
+        total  = sum(len(r) for r in rules_by_md.values())
+        active = sum(
+            1 for rules in rules_by_md.values()
+            for r in rules if r.get("active", True)
+        )
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Total règles", total)
+        c2.metric("Règles actives", active)
+        c3.metric("Règles inactives", total - active)
+        st.markdown("---")
+
+        for master_data, rules in rules_by_md.items():
+            st.markdown(
+                f'<div class="section-title">📌 {master_data} '
+                f'<span style="font-weight:400;color:#94A3B8">'
+                f'({len(rules)} règle(s))</span></div>',
+                unsafe_allow_html=True
+            )
+
+            for rule in rules:
+                rule_id   = rule.get("id", "")
+                is_active = rule.get("active", True)
+                severity  = rule.get("severity", "Mineure")
+                auto      = rule.get("auto_correct", False)
+                rule_type = rule.get("rule_type", "")
+                condition = rule.get("condition", "")
+                action    = rule.get("action", "")
+                field     = rule.get("field_name", "")
+
+                sev_class = {
+                    "Majeure": "badge-major",
+                    "Mineure": "badge-minor",
+                    "Info":    "badge-info"
+                }.get(severity, "badge-minor")
+
+                parts = []
+                if field:     parts.append(f"Champ : <b>{field}</b>")
+                if condition: parts.append(f"Si : {condition}")
+                if action:    parts.append(f"Alors : {action}")
+                detail_html = " · ".join(parts)
+
+                auto_badge = (
+                    '<span class="badge badge-auto">⚡ Auto</span>'
+                    if auto else ""
+                )
+
+                col_r, col_t, col_d = st.columns([7, 1, 1])
+                with col_r:
+                    css = "rule-card" + ("" if is_active else " inactive")
+                    st.markdown(
+                        f'<div class="{css}">'
+                        f'<span class="rule-label">{rule.get("label", "")}</span>'
+                        f'<div style="margin:4px 0">'
+                        f'<span class="badge badge-type">{rule_type}</span>'
+                        f'<span class="badge {sev_class}">{severity}</span>'
+                        f'{auto_badge}'
+                        f'</div>'
+                        f'<div class="rule-detail">{detail_html}</div>'
+                        f'</div>',
+                        unsafe_allow_html=True
+                    )
+                with col_t:
+                    new_state = st.toggle(
+                        "Actif", value=is_active,
+                        key=f"tgl_{rule_id}",
+                        label_visibility="collapsed"
+                    )
+                    if new_state != is_active:
+                        ok, err = toggle_rule(rule_id, new_state)
+                        if ok:
+                            st.rerun()
+                with col_d:
+                    if st.button("🗑️", key=f"del_{rule_id}"):
+                        ok, err = delete_rule(rule_id)
+                        if ok:
+                            st.rerun()
+
+# ════════════════════════════════════════════════════════════════════════════
+# TAB 2 — AJOUTER
+# ════════════════════════════════════════════════════════════════════════════
+with tab2:
+
+    st.markdown("### Ajouter une règle métier")
+
+    with st.form("add_rule_form", clear_on_submit=True):
+        col1, col2 = st.columns(2)
+
+        with col1:
+            rule_label = st.text_input(
+                "Libellé de la règle *",
+                placeholder="Ex: Pays par défaut = France"
+            )
+            rule_md = st.selectbox("Master Data *", get_master_data_list())
+            rule_field = st.text_input(
+                "Champ BC cible",
+                placeholder="Ex: Country/Region Code"
+            )
+            rule_type = st.selectbox(
+                "Type de règle *",
+                RULE_TYPES,
+                help="\n".join(f"• {k} : {v}" for k, v in RULE_TYPES_HELP.items())
+            )
+
+        with col2:
+            rule_cond = st.text_input(
+                "Condition (Si...)",
+                placeholder="Ex: Si Pays est vide"
+            )
+            rule_action = st.text_area(
+                "Action (Alors...)",
+                placeholder="Ex: Mettre 'FR'",
+                height=80
+            )
+            rule_sev  = st.selectbox("Sévérité", SEVERITIES)
+            rule_auto = st.checkbox(
+                "⚡ Correction automatique",
+                value=rule_type in AUTO_CORRECT_TYPES if rule_type else False
+            )
+
+        if st.form_submit_button(
+            "💾 Enregistrer la règle",
+            type="primary",
+            use_container_width=True
+        ):
+            if not rule_label.strip():
+                st.error("Le libellé est obligatoire.")
+            else:
+                ok, err = create_rule({
+                    "profile_code": selected_code,
+                    "label":        rule_label.strip(),
+                    "master_data":  rule_md,
+                    "field_name":   rule_field.strip(),
+                    "rule_type":    rule_type,
+                    "condition":    rule_cond.strip(),
+                    "action":       rule_action.strip(),
+                    "severity":     rule_sev,
+                    "auto_correct": rule_auto,
+                    "active":       True,
+                })
+                if ok:
+                    st.success(f"✅ Règle **{rule_label}** enregistrée !")
+                    st.rerun()
+                else:
+                    st.error(f"❌ {err}")
+
+    with st.expander("💡 Guide des types de règles"):
+        for rt, help_text in RULE_TYPES_HELP.items():
+            auto_txt = " *(correction automatique possible)*" \
+                if rt in AUTO_CORRECT_TYPES else ""
+            st.markdown(f"**{rt}** : {help_text}{auto_txt}")
+
+# ════════════════════════════════════════════════════════════════════════════
+# TAB 3 — COPIER
+# ════════════════════════════════════════════════════════════════════════════
+with tab3:
+
+    st.markdown("### Copier les règles depuis un autre profil")
+
+    others = [p for p in profiles if p["code"] != selected_code]
+    if not others:
+        st.info("Aucun autre profil disponible pour la copie.")
+    else:
+        source_label = st.selectbox(
+            "Copier les règles depuis",
+            [p["label"] for p in others]
+        )
+        source_code = next(
+            (p["code"] for p in others if p["label"] == source_label), None
+        )
+        if source_code:
+            src_rules = get_rules_for_profile(source_code)
+            st.info(f"Ce profil contient **{len(src_rules)} règle(s)**.")
+            if src_rules and st.button(
+                f"📋 Copier {len(src_rules)} règle(s)",
+                type="primary"
+            ):
+                ok, msg_c, nb = copy_rules_to_profile(source_code, selected_code)
+                if ok:
+                    st.success(f"✅ {msg_c}")
+                    st.rerun()
+                else:
+                    st.error(f"❌ {msg_c}")

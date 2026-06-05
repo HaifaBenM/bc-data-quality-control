@@ -1,21 +1,17 @@
 """
-Module de validation structurelle.
-Valide le format et la cohérence du fichier BC Configuration Package.
+Module de validation structurelle du fichier BC Configuration Package.
 """
 
 
 def validate_file_structure(parse_result: dict) -> dict:
-    """
-    Valide la structure du fichier après auto-détection.
-    Ne nécessite plus de liste d'onglets attendus — tout est auto-détecté.
-    """
+    """Valide la structure du fichier après auto-détection."""
     result = {
         "is_valid":        True,
         "blocking_errors": [],
         "warnings":        [],
-        "data_tables":     [],   # tables de données validées
-        "ref_tables":      [],   # tables de référence détectées
-        "summary":         {}
+        "data_tables":     [],
+        "ref_tables":      [],
+        "summary":         {},
     }
 
     if not parse_result.get("success"):
@@ -29,28 +25,26 @@ def validate_file_structure(parse_result: dict) -> dict:
     sheets      = parse_result.get("sheets", {})
     total_rows  = parse_result.get("total_rows", {})
 
-    # ── Vérification 1 : Le fichier contient-il des tables de données ? ───────
+    # Vérification 1 : au moins une table de données
     if not data_tables:
         result["is_valid"] = False
         result["blocking_errors"].append(
             "Aucune table de données BC détectée dans ce fichier. "
-            "Vérifiez que le fichier est bien un export de Package de Configuration BC "
-            "(Clients, Fournisseurs, Articles, Plan comptable...)."
+            "Vérifiez que le fichier est bien un export de Package de "
+            "Configuration BC (Clients, Fournisseurs, Articles...)."
         )
         return result
 
-    # ── Vérification 2 : Tables de données vides ─────────────────────────────
-    empty_data = []
+    # Vérification 2 : tables de données
     for sheet in data_tables:
         rows = total_rows.get(sheet, 0)
         meta = metadata.get(sheet, {})
         label = meta.get("label", sheet)
+        cols  = len(sheets.get(sheet, {}).columns) if sheet in sheets else 0
 
         if rows == 0:
-            empty_data.append(sheet)
             result["warnings"].append(
-                f"⚠ Table de données '{sheet}' ({label}) : "
-                "aucune ligne — le client n'a pas saisi de données sur cet onglet."
+                f"⚠ Table '{sheet}' ({label}) : aucune ligne de données."
             )
         else:
             result["data_tables"].append({
@@ -58,47 +52,43 @@ def validate_file_structure(parse_result: dict) -> dict:
                 "label":    label,
                 "table_id": meta.get("table_id", "?"),
                 "rows":     rows,
-                "cols":     len(sheets.get(sheet, {}).columns) if sheet in sheets else 0,
+                "cols":     cols,
             })
 
-    # ── Vérification 3 : Tables de référence présentes ? ─────────────────────
+    # Vérification 3 : tables de référence
     result["ref_tables"] = [
         {
-            "sheet":    sheet,
-            "label":    metadata.get(sheet, {}).get("label", sheet),
-            "table_id": metadata.get(sheet, {}).get("table_id", "?"),
-            "rows":     total_rows.get(sheet, 0),
+            "sheet":    s,
+            "label":    metadata.get(s, {}).get("label", s),
+            "table_id": metadata.get(s, {}).get("table_id", "?"),
+            "rows":     total_rows.get(s, 0),
         }
-        for sheet in ref_tables
+        for s in ref_tables
     ]
 
     if not ref_tables:
         result["warnings"].append(
-            "⚠ Aucune table de référence détectée. "
-            "La validation des codes (pays, conditions paiement...) "
-            "ne pourra pas être effectuée (Sprint 5)."
+            "⚠ Aucune table de référence. La validation des codes "
+            "(pays, conditions paiement...) ne pourra pas être effectuée."
         )
 
-    # ── Reprendre les warnings du parsing ─────────────────────────────────────
-    for warning in parse_result.get("warnings", []):
-        result["warnings"].append(warning)
+    # Reprendre les avertissements du parsing
+    for w in parse_result.get("warnings", []):
+        result["warnings"].append(w)
 
-    # ── Résumé ────────────────────────────────────────────────────────────────
-    nb_data_ok = len(result["data_tables"])
-    nb_data_empty = len(empty_data)
-
+    # Résumé
+    nb_ok = len(result["data_tables"])
     result["summary"] = {
         "nb_data_tables":    len(data_tables),
-        "nb_data_with_rows": nb_data_ok,
-        "nb_data_empty":     nb_data_empty,
+        "nb_data_with_rows": nb_ok,
         "nb_ref_tables":     len(ref_tables),
         "status": (
             "✅ Fichier conforme — prêt pour l'analyse qualité"
-            if result["is_valid"] and nb_data_ok > 0
+            if result["is_valid"] and nb_ok > 0
             else "⚠️ Fichier conforme avec avertissements"
             if result["is_valid"]
             else "❌ Fichier non conforme"
-        )
+        ),
     }
 
     return result
