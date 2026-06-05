@@ -62,7 +62,7 @@ with col_status:
         )
 with col_version:
     st.markdown(
-        '<span class="status-badge status-warning">🚧 Sprint 2 — Profils & Règles</span>',
+        '<span class="status-badge status-warning">🚧 Sprint 3 — Connexion BC + metadata</span>',
         unsafe_allow_html=True
     )
 
