@@ -1,6 +1,7 @@
 """
-Page Profils Clients — Sprint 2 v2.
-Ajout des champs de connexion BC par client.
+Page Profils Clients — Sprint 2 v4.
+Credentials BC complets par client (Tenant ID + Client ID + Secret).
+Bouton de test de connexion BC.
 """
 import streamlit as st
 from app.db.supabase_client import test_connection
@@ -9,6 +10,7 @@ from app.db.profiles_db import (
     delete_profile, get_profile_stats, get_profiles_for_select
 )
 from app.db.rules_db import copy_rules_to_profile
+from app.core.bc_connector import test_bc_connection
 
 st.set_page_config(
     page_title="Profils Clients — BC Quality Control",
@@ -35,53 +37,57 @@ st.markdown("""
     .badge-bc-none  { background: #F1F5F9; color: #64748B; }
     .section-bc {
         background: #F8FAFC; border: 1px solid #E2E8F0;
-        border-radius: 8px; padding: 16px; margin-top: 8px;
+        border-radius: 8px; padding: 16px; margin: 12px 0;
     }
     .section-bc-title {
-        font-size: 13px; font-weight: 600; color: #1B3A6B;
-        margin: 0 0 12px;
+        font-size: 13px; font-weight: 600; color: #1B3A6B; margin: 0 0 8px;
     }
     #MainMenu { visibility: hidden; }
     footer    { visibility: hidden; }
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown("# 👥 Profils Clients")
-st.markdown("Gérez les profils clients, leurs credentials BC et leurs règles métier.")
+st.markdown("# Profils Clients")
+st.markdown("Gerez les profils clients, leurs credentials BC et leurs regles metier.")
 st.markdown("---")
 
 connected, msg = test_connection()
 if not connected:
-    st.error(f"❌ Base de données non connectée : {msg}")
+    st.error(f"Base de donnees non connectee : {msg}")
     st.stop()
 
-if "confirm_delete" not in st.session_state:
-    st.session_state.confirm_delete = None
-if "edit_profile" not in st.session_state:
-    st.session_state.edit_profile = None
+for key, default in [
+    ("confirm_delete", None),
+    ("edit_profile",   None),
+    ("bc_test_result", {}),
+]:
+    if key not in st.session_state:
+        st.session_state[key] = default
 
-tab1, tab2 = st.tabs(["👥 Mes profils", "➕ Nouveau profil"])
+tab1, tab2 = st.tabs(["Mes profils", "Nouveau profil"])
 
 # ════════════════════════════════════════════════════════════════════════════
-# TAB 1 — LISTE DES PROFILS
+# TAB 1 - LISTE
 # ════════════════════════════════════════════════════════════════════════════
 with tab1:
 
     profiles = get_all_profiles()
 
     if not profiles:
-        st.info(
-            "Aucun profil client créé. "
-            "Utilisez l'onglet **'Nouveau profil'** pour commencer."
-        )
+        st.info("Aucun profil. Utilisez 'Nouveau profil' pour commencer.")
     else:
-        st.markdown(f"**{len(profiles)} profil(s) client(s)**")
+        st.markdown(f"**{len(profiles)} profil(s)**")
         st.markdown("---")
 
         for profile in profiles:
             code   = profile.get("code", "")
             stats  = get_profile_stats(code)
-            has_bc = bool(profile.get("bc_tenant_id") and profile.get("bc_client_id"))
+            # BC configure si les 3 credentials sont presents
+            has_bc = bool(
+                profile.get("bc_tenant_id") and
+                profile.get("bc_client_id") and
+                profile.get("bc_client_secret")
+            )
 
             col_info, col_actions = st.columns([7, 3])
 
@@ -95,33 +101,29 @@ with tab1:
                     if sector else ""
                 )
                 rules_badge = (
-                    f'<span class="badge badge-rules">'
-                    f'{nb_active} règle(s) active(s)</span>'
-                    if nb_rules > 0
-                    else '<span class="badge badge-no-rules">Aucune règle</span>'
+                    f'<span class="badge badge-rules">{nb_active} regle(s)</span>'
+                    if nb_rules > 0 else
+                    '<span class="badge badge-no-rules">Aucune regle</span>'
                 )
                 bc_badge = (
-                    '<span class="badge badge-bc-ok">🔌 BC configuré</span>'
-                    if has_bc
-                    else '<span class="badge badge-bc-none">⚙️ BC non configuré</span>'
+                    '<span class="badge badge-bc-ok">BC configure</span>'
+                    if has_bc else
+                    '<span class="badge badge-bc-none">BC non configure</span>'
                 )
-
                 bc_url = profile.get("bc_url", "")
                 bc_env = profile.get("bc_environment", "")
-                bc_info = ""
-                if bc_url:
-                    bc_info = f'<span style="font-size:11px;color:#94A3B8">{bc_url}'
-                    if bc_env:
-                        bc_info += f' · {bc_env}'
-                    bc_info += '</span>'
+                bc_info = (
+                    f'<span style="font-size:11px;color:#94A3B8">'
+                    f'{bc_url}{" - " + bc_env if bc_env else ""}</span>'
+                    if bc_url else ""
+                )
 
                 st.markdown(
                     f'<div class="profile-card">'
-                    f'<p class="profile-name">{profile.get("name", "")}</p>'
+                    f'<p class="profile-name">{profile.get("name","")}</p>'
                     f'<p class="profile-code">Code : {code}</p>'
                     f'<div style="margin-top:8px">'
-                    f'{sector_badge}{rules_badge}{bc_badge}'
-                    f'</div>'
+                    f'{sector_badge}{rules_badge}{bc_badge}</div>'
                     f'{"<div style=margin-top:4px>" + bc_info + "</div>" if bc_info else ""}'
                     f'</div>',
                     unsafe_allow_html=True
@@ -131,295 +133,332 @@ with tab1:
                 st.markdown("<div style='padding-top:14px'>", unsafe_allow_html=True)
                 c1, c2, c3 = st.columns(3)
                 with c1:
-                    if st.button("⚙️", key=f"rules_{code}",
-                                 use_container_width=True,
-                                 help="Règles métier"):
+                    if st.button("Regles", key=f"rules_{code}",
+                                 use_container_width=True):
                         st.session_state["selected_profile_for_rules"] = code
                         st.switch_page("pages/4_Regles_Metier.py")
                 with c2:
-                    if st.button("✏️", key=f"edit_{code}",
-                                 use_container_width=True,
-                                 help="Modifier le profil"):
-                        st.session_state.edit_profile = code
+                    if st.button("Editer", key=f"edit_{code}",
+                                 use_container_width=True):
+                        st.session_state.edit_profile   = code
+                        st.session_state.bc_test_result = {}
                 with c3:
-                    if st.button("🗑️", key=f"del_{code}",
-                                 use_container_width=True,
-                                 help="Supprimer"):
+                    if st.button("Suppr.", key=f"del_{code}",
+                                 use_container_width=True):
                         st.session_state.confirm_delete = code
                 st.markdown("</div>", unsafe_allow_html=True)
 
             # ── Formulaire de modification ─────────────────────────────────
             if st.session_state.edit_profile == code:
                 with st.expander(
-                    f"✏️ Modifier le profil — {profile.get('name', '')}",
+                    f"Modifier - {profile.get('name','')}",
                     expanded=True
                 ):
-                    with st.form(f"edit_form_{code}"):
-                        ec1, ec2 = st.columns(2)
-                        with ec1:
-                            e_name   = st.text_input("Nom client", value=profile.get("name", ""))
-                            e_sector = st.text_input("Secteur", value=profile.get("sector", ""))
-                            e_lang   = st.selectbox(
-                                "Langue des données",
-                                ["Français", "Anglais", "Arabe", "Autre"],
-                                index=["Français", "Anglais", "Arabe", "Autre"].index(
-                                    profile.get("data_language", "Français")
-                                ) if profile.get("data_language") in
-                                ["Français", "Anglais", "Arabe", "Autre"] else 0
-                            )
-                        with ec2:
-                            e_url = st.text_input(
-                                "URL BC",
-                                value=profile.get("bc_url", ""),
-                                placeholder="https://abc.businesscentral.dynamics.com"
-                            )
-                            e_env = st.text_input(
-                                "Nom de l'environnement BC",
-                                value=profile.get("bc_environment", ""),
-                                placeholder="Ex: Production, Sandbox"
-                            )
+                    # Informations generales
+                    ec1, ec2 = st.columns(2)
+                    with ec1:
+                        e_name   = st.text_input("Nom client",
+                            value=profile.get("name",""), key=f"e_name_{code}")
+                        e_sector = st.text_input("Secteur",
+                            value=profile.get("sector",""), key=f"e_sector_{code}")
+                        langs    = ["Francais","Anglais","Arabe","Autre"]
+                        cur_lang = profile.get("data_language","Francais")
+                        e_lang   = st.selectbox("Langue", langs,
+                            index=langs.index(cur_lang) if cur_lang in langs else 0,
+                            key=f"e_lang_{code}")
+                    with ec2:
+                        e_url = st.text_input("URL BC",
+                            value=profile.get("bc_url",""),
+                            placeholder="https://abc.businesscentral.dynamics.com",
+                            key=f"e_url_{code}")
+                        e_env = st.text_input("Environnement BC",
+                            value=profile.get("bc_environment",""),
+                            placeholder="Ex: Production, Sandbox",
+                            key=f"e_env_{code}")
 
-                        # Credentials BC
-                        st.markdown(
-                            '<div class="section-bc">'
-                            '<p class="section-bc-title">'
-                            '🔌 Credentials de connexion BC</p>',
-                            unsafe_allow_html=True
-                        )
-                        st.caption(
-                            "Ces informations sont fournies par l'administrateur IT "
-                            "du client depuis le portail Azure (Entra ID). "
-                            "Laissez vide si pas encore disponible."
-                        )
-                        bc1, bc2 = st.columns(2)
-                        with bc1:
-                            e_tenant = st.text_input(
-                                "Tenant ID",
-                                value=profile.get("bc_tenant_id", ""),
-                                placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
-                                type="password"
-                            )
-                            e_client_id = st.text_input(
-                                "Client ID",
-                                value=profile.get("bc_client_id", ""),
-                                placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
-                                type="password"
-                            )
-                        with bc2:
-                            e_secret = st.text_input(
-                                "Client Secret",
-                                value=profile.get("bc_client_secret", ""),
-                                placeholder="Valeur du secret créé dans Entra ID",
-                                type="password"
-                            )
-                            st.info(
-                                "🔒 Stocké de façon sécurisée dans Supabase. "
-                                "Non visible après enregistrement."
-                            )
-                        st.markdown("</div>", unsafe_allow_html=True)
+                    # Credentials BC - les 3 champs par client
+                    st.markdown(
+                        '<div class="section-bc">'
+                        '<p class="section-bc-title">'
+                        'Credentials de connexion BC</p>',
+                        unsafe_allow_html=True
+                    )
+                    st.caption(
+                        "Ces 3 informations sont specifiques a ce client. "
+                        "Demandez-les a l'administrateur IT du client (portail Azure / Entra ID). "
+                        "Laissez vide si pas encore disponible."
+                    )
 
-                        e_notes = st.text_area(
-                            "Notes", value=profile.get("notes", ""), height=60
-                        )
+                    bc1, bc2, bc3 = st.columns(3)
+                    with bc1:
+                        e_tenant = st.text_input("Tenant ID",
+                            value=profile.get("bc_tenant_id",""),
+                            placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+                            type="password",
+                            key=f"e_tenant_{code}",
+                            help="Trouve dans BC : aide > signaler un probleme > ID abonne Entra")
+                    with bc2:
+                        e_client_id = st.text_input("Client ID",
+                            value=profile.get("bc_client_id",""),
+                            placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+                            type="password",
+                            key=f"e_cid_{code}",
+                            help="ID de l'application creee dans Entra ID du client")
+                    with bc3:
+                        e_secret = st.text_input("Client Secret",
+                            value=profile.get("bc_client_secret",""),
+                            placeholder="Valeur du secret",
+                            type="password",
+                            key=f"e_secret_{code}",
+                            help="Secret cree dans Entra ID > Certificats et secrets")
 
-                        col_save, col_cancel, _ = st.columns([2, 2, 6])
-                        with col_save:
-                            save = st.form_submit_button(
-                                "💾 Enregistrer",
-                                type="primary",
-                                use_container_width=True
-                            )
-                        with col_cancel:
-                            cancel = st.form_submit_button(
-                                "Annuler",
-                                use_container_width=True
-                            )
+                    # Bouton de test
+                    col_test, col_result = st.columns([2, 5])
+                    with col_test:
+                        if st.button(
+                            "Tester la connexion BC",
+                            key=f"test_{code}",
+                            use_container_width=True
+                        ):
+                            missing = []
+                            if not str(e_tenant or "").strip():
+                                missing.append("Tenant ID")
+                            if not str(e_client_id or "").strip():
+                                missing.append("Client ID")
+                            if not str(e_secret or "").strip():
+                                missing.append("Client Secret")
 
-                        if save:
+                            if missing:
+                                st.session_state.bc_test_result[code] = (
+                                    False,
+                                    f"Champs manquants : {', '.join(missing)}"
+                                )
+                            else:
+                                with st.spinner("Test en cours..."):
+                                    ok_t, msg_t = test_bc_connection(
+                                        tenant_id=str(e_tenant).strip(),
+                                        client_id=str(e_client_id).strip(),
+                                        client_secret=str(e_secret).strip(),
+                                        environment=str(e_env or "").strip()
+                                    )
+                                st.session_state.bc_test_result[code] = (ok_t, msg_t)
+                            st.rerun()
+
+                    with col_result:
+                        res = st.session_state.bc_test_result.get(code)
+                        if res:
+                            if res[0]:
+                                st.success(f"OK - {res[1]}")
+                            else:
+                                st.error(f"Echec - {res[1]}")
+
+                    st.markdown("</div>", unsafe_allow_html=True)
+
+                    e_notes = st.text_area("Notes",
+                        value=profile.get("notes",""), height=60,
+                        key=f"e_notes_{code}")
+
+                    cs, cc, _ = st.columns([2, 2, 6])
+                    with cs:
+                        if st.button("Enregistrer", key=f"save_{code}",
+                                     type="primary", use_container_width=True):
                             ok, err = update_profile(code, {
-                                "name":              e_name.strip(),
-                                "sector":            e_sector.strip(),
-                                "data_language":     e_lang,
-                                "bc_url":            e_url.strip(),
-                                "bc_environment":    e_env.strip(),
-                                "bc_tenant_id":      e_tenant.strip() or None,
-                                "bc_client_id":      e_client_id.strip() or None,
-                                "bc_client_secret":  e_secret.strip() or None,
-                                "notes":             e_notes.strip(),
+                                "name":             str(e_name or "").strip(),
+                                "sector":           str(e_sector or "").strip(),
+                                "data_language":    e_lang,
+                                "bc_url":           str(e_url or "").strip(),
+                                "bc_environment":   str(e_env or "").strip(),
+                                "bc_tenant_id":     str(e_tenant or "").strip() or None,
+                                "bc_client_id":     str(e_client_id or "").strip() or None,
+                                "bc_client_secret": str(e_secret or "").strip() or None,
+                                "notes":            str(e_notes or "").strip(),
                             })
                             if ok:
-                                st.success("✅ Profil mis à jour !")
-                                st.session_state.edit_profile = None
+                                st.success("Profil mis a jour !")
+                                st.session_state.edit_profile   = None
+                                st.session_state.bc_test_result = {}
                                 st.rerun()
                             else:
-                                st.error(f"❌ {err}")
-
-                        if cancel:
-                            st.session_state.edit_profile = None
+                                st.error(err)
+                    with cc:
+                        if st.button("Annuler", key=f"cancel_{code}",
+                                     use_container_width=True):
+                            st.session_state.edit_profile   = None
+                            st.session_state.bc_test_result = {}
                             st.rerun()
 
             # ── Confirmation suppression ───────────────────────────────────
             if st.session_state.confirm_delete == code:
                 st.warning(
-                    f"⚠️ Supprimer **{profile.get('name', '')}** ? "
-                    "Toutes ses règles seront supprimées."
+                    f"Supprimer {profile.get('name','')} ? "
+                    "Toutes ses regles seront supprimees."
                 )
-                c_yes, c_no, _ = st.columns([2, 2, 6])
-                with c_yes:
-                    if st.button("✅ Confirmer", key=f"yes_{code}", type="primary"):
+                cy, cn, _ = st.columns([2, 2, 6])
+                with cy:
+                    if st.button("Confirmer", key=f"yes_{code}", type="primary"):
                         ok, err = delete_profile(code)
                         if ok:
-                            st.success("Profil supprimé.")
+                            st.success("Profil supprime.")
                             st.session_state.confirm_delete = None
                             st.rerun()
                         else:
                             st.error(err)
-                with c_no:
-                    if st.button("❌ Annuler", key=f"no_{code}"):
+                with cn:
+                    if st.button("Annuler supp.", key=f"no_{code}"):
                         st.session_state.confirm_delete = None
                         st.rerun()
 
 # ════════════════════════════════════════════════════════════════════════════
-# TAB 2 — NOUVEAU PROFIL
+# TAB 2 - NOUVEAU PROFIL
 # ════════════════════════════════════════════════════════════════════════════
 with tab2:
 
-    st.markdown("### Créer un nouveau profil client")
+    st.markdown("### Nouveau profil client")
     st.caption(
-        "Renseignez les informations du client. "
-        "Les credentials BC peuvent être ajoutés plus tard "
-        "en modifiant le profil."
+        "Les credentials BC (Tenant ID, Client ID, Secret) peuvent etre "
+        "ajoutes plus tard en modifiant le profil."
     )
     st.markdown("---")
 
-    with st.form("create_profile_form", clear_on_submit=True):
+    nc1, nc2 = st.columns(2)
+    with nc1:
+        new_code   = st.text_input("Code client *", placeholder="CLT-ABC-001",
+                                   key="new_code")
+        new_name   = st.text_input("Nom client *",
+                                   placeholder="ABC Distribution SARL",
+                                   key="new_name")
+        new_sector = st.text_input("Secteur", placeholder="Distribution B2B",
+                                   key="new_sector")
+        new_lang   = st.selectbox("Langue",
+                                  ["Francais","Anglais","Arabe","Autre"],
+                                  key="new_lang")
+    with nc2:
+        new_url   = st.text_input("URL BC",
+                                  placeholder="https://abc.businesscentral.dynamics.com",
+                                  key="new_url")
+        new_env   = st.text_input("Environnement BC",
+                                  placeholder="Production, Sandbox...",
+                                  key="new_env")
+        new_notes = st.text_area("Notes", height=97, key="new_notes")
 
-        col1, col2 = st.columns(2)
-        with col1:
-            new_code   = st.text_input(
-                "Code client *",
-                placeholder="Ex: CLT-ABC-001"
-            )
-            new_name   = st.text_input(
-                "Nom client *",
-                placeholder="Ex: ABC Distribution SARL"
-            )
-            new_sector = st.text_input(
-                "Secteur d'activité",
-                placeholder="Ex: Distribution B2B"
-            )
-            new_lang   = st.selectbox(
-                "Langue des données",
-                ["Français", "Anglais", "Arabe", "Autre"]
-            )
-        with col2:
-            new_url = st.text_input(
-                "URL environnement BC",
-                placeholder="https://abc.businesscentral.dynamics.com"
-            )
-            new_env = st.text_input(
-                "Nom de l'environnement BC",
-                placeholder="Ex: Production, Sandbox"
-            )
-            new_notes = st.text_area(
-                "Notes projet",
-                placeholder="Contexte, ancien système...",
-                height=97
-            )
+    # Credentials BC
+    st.markdown("---")
+    st.markdown(
+        '<div class="section-bc">'
+        '<p class="section-bc-title">Credentials de connexion BC (optionnel)</p>',
+        unsafe_allow_html=True
+    )
+    st.caption(
+        "Ces 3 informations sont specifiques a ce client. "
+        "Vous pouvez les ajouter maintenant ou plus tard via 'Editer'."
+    )
 
-        # Credentials BC — optionnels à la création
-        st.markdown("---")
-        st.markdown(
-            '<div class="section-bc">'
-            '<p class="section-bc-title">'
-            '🔌 Credentials de connexion BC (optionnel)</p>',
-            unsafe_allow_html=True
-        )
-        st.caption(
-            "Vous pouvez laisser ces champs vides maintenant "
-            "et les renseigner plus tard en modifiant le profil. "
-            "Ces informations sont fournies par l'administrateur IT du client."
-        )
-        bc1, bc2, bc3 = st.columns(3)
-        with bc1:
-            new_tenant = st.text_input(
-                "Tenant ID",
-                placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
-                type="password"
-            )
-        with bc2:
-            new_client_id = st.text_input(
-                "Client ID",
-                placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
-                type="password"
-            )
-        with bc3:
-            new_secret = st.text_input(
-                "Client Secret",
-                placeholder="Valeur du secret",
-                type="password"
-            )
-        st.markdown("</div>", unsafe_allow_html=True)
+    nb1, nb2, nb3 = st.columns(3)
+    with nb1:
+        new_tenant = st.text_input("Tenant ID",
+            placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+            type="password", key="new_tenant",
+            help="Trouve dans BC : aide > signaler un probleme")
+    with nb2:
+        new_client_id = st.text_input("Client ID",
+            placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+            type="password", key="new_client_id",
+            help="ID application Entra ID du client")
+    with nb3:
+        new_secret = st.text_input("Client Secret",
+            placeholder="Valeur du secret",
+            type="password", key="new_secret",
+            help="Entra ID > Certificats et secrets")
 
-        # Copier les règles d'un profil existant
-        profiles_for_copy = get_profiles_for_select()
-        copy_from = None
-        if profiles_for_copy:
-            st.markdown("---")
-            options_copy = ["— Ne pas copier de règles —"] + [
-                p["label"] for p in profiles_for_copy
-            ]
-            copy_choice = st.selectbox(
-                "Copier les règles depuis un profil existant (optionnel)",
-                options_copy
-            )
-            if copy_choice != "— Ne pas copier de règles —":
-                copy_from = next(
-                    (p["code"] for p in profiles_for_copy
-                     if p["label"] == copy_choice),
-                    None
+    # Bouton test
+    col_t, col_r = st.columns([2, 5])
+    with col_t:
+        if st.button("Tester la connexion BC",
+                     key="test_new", use_container_width=True):
+            missing = []
+            if not str(new_tenant or "").strip():
+                missing.append("Tenant ID")
+            if not str(new_client_id or "").strip():
+                missing.append("Client ID")
+            if not str(new_secret or "").strip():
+                missing.append("Client Secret")
+
+            if missing:
+                st.session_state.bc_test_result["new"] = (
+                    False,
+                    f"Champs manquants : {', '.join(missing)}"
                 )
-
-        submitted = st.form_submit_button(
-            "💾 Créer le profil",
-            type="primary",
-            use_container_width=True
-        )
-
-        if submitted:
-            errors = []
-            if not new_code.strip():
-                errors.append("Le code client est obligatoire.")
-            if not new_name.strip():
-                errors.append("Le nom client est obligatoire.")
-            if errors:
-                for e in errors:
-                    st.error(e)
             else:
-                profile_data = {
-                    "code":             new_code.strip().upper(),
-                    "name":             new_name.strip(),
-                    "sector":           new_sector.strip(),
-                    "data_language":    new_lang,
-                    "bc_url":           new_url.strip(),
-                    "bc_environment":   new_env.strip(),
-                    "bc_tenant_id":     new_tenant.strip() or None,
-                    "bc_client_id":     new_client_id.strip() or None,
-                    "bc_client_secret": new_secret.strip() or None,
-                    "notes":            new_notes.strip(),
-                }
-                ok, err = create_profile(profile_data)
-                if ok:
-                    st.success(
-                        f"✅ Profil **{new_name}** ({new_code.upper()}) créé !"
+                with st.spinner("Test en cours..."):
+                    ok_t, msg_t = test_bc_connection(
+                        tenant_id=str(new_tenant).strip(),
+                        client_id=str(new_client_id).strip(),
+                        client_secret=str(new_secret).strip(),
+                        environment=str(new_env or "").strip()
                     )
-                    if copy_from:
-                        ok_c, msg_c, _ = copy_rules_to_profile(
-                            copy_from, new_code.strip().upper()
-                        )
-                        if ok_c:
-                            st.info(f"📋 {msg_c}")
-                    st.balloons()
-                    st.rerun()
-                else:
-                    st.error(f"❌ {err}")
+                st.session_state.bc_test_result["new"] = (ok_t, msg_t)
+            st.rerun()
+
+    with col_r:
+        res = st.session_state.bc_test_result.get("new")
+        if res:
+            if res[0]:
+                st.success(f"OK - {res[1]}")
+            else:
+                st.error(f"Echec - {res[1]}")
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    # Copier les regles
+    profiles_for_copy = get_profiles_for_select()
+    copy_from = None
+    if profiles_for_copy:
+        st.markdown("---")
+        opts   = ["Ne pas copier de regles"] + [p["label"] for p in profiles_for_copy]
+        choice = st.selectbox("Copier regles depuis", opts, key="copy_choice")
+        if choice != "Ne pas copier de regles":
+            copy_from = next(
+                (p["code"] for p in profiles_for_copy if p["label"] == choice),
+                None
+            )
+
+    st.markdown("---")
+    if st.button("Creer le profil", type="primary", key="btn_create"):
+        errors = []
+        if not new_code or not new_code.strip():
+            errors.append("Code client obligatoire.")
+        if not new_name or not new_name.strip():
+            errors.append("Nom client obligatoire.")
+        if errors:
+            for e in errors:
+                st.error(e)
+        else:
+            ok, err = create_profile({
+                "code":             new_code.strip().upper(),
+                "name":             new_name.strip(),
+                "sector":           str(new_sector or "").strip(),
+                "data_language":    new_lang,
+                "bc_url":           str(new_url or "").strip(),
+                "bc_environment":   str(new_env or "").strip(),
+                "bc_tenant_id":     str(new_tenant or "").strip() or None,
+                "bc_client_id":     str(new_client_id or "").strip() or None,
+                "bc_client_secret": str(new_secret or "").strip() or None,
+                "notes":            str(new_notes or "").strip(),
+            })
+            if ok:
+                st.success(f"Profil {new_name} cree !")
+                if copy_from:
+                    ok_c, msg_c, _ = copy_rules_to_profile(
+                        copy_from, new_code.strip().upper()
+                    )
+                    if ok_c:
+                        st.info(msg_c)
+                st.session_state.bc_test_result = {}
+                st.balloons()
+                st.rerun()
+            else:
+                st.error(err)
+
+    # Aussi ajouter bc_client_id dans la table si pas encore fait
+    # ALTER TABLE client_profiles ADD COLUMN IF NOT EXISTS bc_client_id text;
+    # ALTER TABLE client_profiles ADD COLUMN IF NOT EXISTS bc_client_secret text;
