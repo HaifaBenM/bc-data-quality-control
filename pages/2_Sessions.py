@@ -1,6 +1,6 @@
 """
-Page Sessions — Sprint 5.
-Analyse complète : Axe A (contraintes BC) + Axe B (références BC).
+Page Sessions — Sprint 5 v2.
+Ajouts : boutons retour entre toutes les étapes + sauvegarde session Supabase.
 """
 import streamlit as st
 import pandas as pd
@@ -10,6 +10,7 @@ from app.core.validator_axe_a import validate_file_axe_a, get_anomalies_datafram
 from app.core.validator_axe_b import validate_file_axe_b
 from app.db.profiles_db import get_profiles_for_select
 from app.db.rules_db import get_active_rules_for_profile
+from app.db.sessions_db import save_session, get_all_sessions, SESSION_STATUSES, STATUS_COLORS
 
 st.set_page_config(
     page_title="Sessions — BC Quality Control",
@@ -30,9 +31,13 @@ st.markdown("""
     .card-major { background:#FAECE7;border-left:4px solid #993C1D;border-radius:8px;padding:10px 14px;margin-bottom:6px;font-size:12px; }
     .card-minor { background:#FAEEDA;border-left:4px solid #854F0B;border-radius:8px;padding:10px 14px;margin-bottom:6px;font-size:12px; }
     .card-info  { background:#EFF6FF;border-left:4px solid #2E6FBF;border-radius:8px;padding:10px 14px;margin-bottom:6px;font-size:12px; }
+    .card-session { background:white;border:1px solid #E2E8F0;border-radius:10px;padding:14px 18px;margin-bottom:8px; }
+    .session-name { font-size:14px;font-weight:600;color:#1B3A6B;margin:0; }
+    .session-meta { font-size:12px;color:#64748B;margin:4px 0 0; }
     .stat-box   { background:white;border:1px solid #E2E8F0;border-radius:8px;padding:12px;text-align:center; }
     .stat-num   { font-size:2rem;font-weight:700;margin:0; }
     .stat-lbl   { font-size:11px;color:#64748B;margin:0; }
+    .save-box   { background:#E1F5EE;border:1px solid #0F6E56;border-radius:8px;padding:12px 16px;margin:8px 0; }
     .tag { display:inline-block;font-size:10px;font-weight:600;padding:2px 7px;border-radius:4px;margin-right:4px; }
     .tag-major { background:#993C1D;color:white; }
     .tag-minor { background:#854F0B;color:white; }
@@ -45,14 +50,14 @@ st.markdown("""
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# FONCTION HELPER — définie EN PREMIER avant tout appel
+# FONCTION HELPER — définie avant tout appel
 # ════════════════════════════════════════════════════════════════════════════
 def display_axe_results(axe_result: dict, axe_label: str):
     """Affiche les résultats d'un axe avec tabs par onglet."""
     total    = axe_result.get("total_anomalies", 0)
     major    = axe_result.get("major", 0)
     minor    = axe_result.get("minor", 0)
-    info     = axe_result.get("info",  0)
+    info     = axe_result.get("info", 0)
     by_sheet = axe_result.get("by_sheet", {})
 
     if total == 0:
@@ -98,8 +103,7 @@ def display_axe_results(axe_result: dict, axe_label: str):
 
                 severities = sorted(set(a["Sévérité"] for a in real_anomalies))
                 filter_sev = st.multiselect(
-                    "Filtrer par sévérité", severities,
-                    default=severities,
+                    "Filtrer", severities, default=severities,
                     key=f"filt_{axe_label}_{sheet_name}"
                 )
                 filtered = [a for a in real_anomalies if a["Sévérité"] in filter_sev]
@@ -115,8 +119,7 @@ def display_axe_results(axe_result: dict, axe_label: str):
 
                     st.dataframe(
                         df_an.style.apply(color_row, axis=1),
-                        use_container_width=True,
-                        hide_index=True,
+                        use_container_width=True, hide_index=True,
                         height=min(400, 50 + len(filtered) * 35)
                     )
 
@@ -129,8 +132,7 @@ def display_axe_results(axe_result: dict, axe_label: str):
                             )
                             st.markdown(
                                 f'<div class="{css}">'
-                                f'<b>Ligne {a["Ligne"]}</b> · '
-                                f'<b>{a["Champ"]}</b> · '
+                                f'<b>Ligne {a["Ligne"]}</b> · <b>{a["Champ"]}</b> · '
                                 f'<span class="tag tag-{"major" if a["Sévérité"]=="Majeure" else "minor"}">'
                                 f'{a["Sévérité"]}</span>'
                                 f'<span class="tag" style="background:#E2E8F0;color:#1B3A6B">'
@@ -139,11 +141,11 @@ def display_axe_results(axe_result: dict, axe_label: str):
                                 unsafe_allow_html=True
                             )
                         if len(filtered) > 50:
-                            st.caption(f"50 premières sur {len(filtered)} anomalies.")
+                            st.caption(f"50 premières sur {len(filtered)}.")
 
             if info_anomalies:
                 st.markdown("---")
-                st.markdown("**ℹ️ Champs non vérifiables (référence absente) :**")
+                st.markdown("**ℹ️ Champs non vérifiables :**")
                 for a in info_anomalies:
                     st.markdown(
                         f'<div class="card-info">'
@@ -152,6 +154,16 @@ def display_axe_results(axe_result: dict, axe_label: str):
                         f'</div>',
                         unsafe_allow_html=True
                     )
+
+
+def reset_session():
+    """Réinitialise complètement la session."""
+    for k in ["step", "config", "parse_result", "validation",
+              "axe_a_result", "axe_b_result", "saved_session_id"]:
+        st.session_state[k] = (
+            1 if k == "step" else
+            {} if k == "config" else None
+        )
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -168,11 +180,12 @@ with tab1:
         ("step", 1), ("config", {}),
         ("parse_result", None), ("validation", None),
         ("axe_a_result", None), ("axe_b_result", None),
+        ("saved_session_id", None),
     ]:
         if key not in st.session_state:
             st.session_state[key] = default
 
-    # Barre de progression
+    # ── Barre de progression ──────────────────────────────────────────────────
     steps = ["Informations", "Upload", "Structure", "Analyse A + B"]
     cols  = st.columns(len(steps))
     for i, (col, name) in enumerate(zip(cols, steps), 1):
@@ -186,7 +199,7 @@ with tab1:
     st.markdown("---")
 
     # ══════════════════════════════════════════════════════════════════════════
-    # ÉTAPE 1
+    # ÉTAPE 1 — Informations
     # ══════════════════════════════════════════════════════════════════════════
     if st.session_state.step == 1:
 
@@ -228,7 +241,7 @@ with tab1:
                     st.info("Aucune règle métier pour ce client.")
 
         st.markdown("---")
-        col_btn, _ = st.columns([2, 8])
+        _, col_btn = st.columns([8, 2])
         with col_btn:
             if st.button("Suivant →", type="primary", use_container_width=True):
                 errors = []
@@ -245,12 +258,13 @@ with tab1:
                         "notes":        notes,
                         "active_rules": rules,
                         "nb_rules":     len(rules),
+                        "file_name":    "",
                     }
                     st.session_state.step = 2
                     st.rerun()
 
     # ══════════════════════════════════════════════════════════════════════════
-    # ÉTAPE 2
+    # ÉTAPE 2 — Upload
     # ══════════════════════════════════════════════════════════════════════════
     elif st.session_state.step == 2:
 
@@ -264,6 +278,7 @@ with tab1:
             f"Client : **{cfg['client_name']}** · "
             f"**{cfg['nb_rules']} règle(s)**"
         )
+
         st.info("Format attendu : export **Package de Configuration BC** (.xlsx)")
 
         uploaded = st.file_uploader(
@@ -272,6 +287,9 @@ with tab1:
         )
 
         if uploaded:
+            # Mémoriser le nom de fichier
+            st.session_state.config["file_name"] = uploaded.name
+
             with st.spinner("🔍 Lecture et détection..."):
                 parse_result = parse_uploaded_file(uploaded)
                 st.session_state.parse_result = parse_result
@@ -301,10 +319,7 @@ with tab1:
                 ref_tables = parse_result.get("ref_tables", [])
                 metadata   = parse_result.get("metadata", {})
                 total_rows = parse_result.get("total_rows", {})
-                with st.expander(
-                    f"📋 Tables de référence ({len(ref_tables)}) "
-                    "— utilisées pour la validation Axe B"
-                ):
+                with st.expander(f"📋 Tables de référence ({len(ref_tables)})"):
                     for sheet in ref_tables:
                         meta = metadata.get(sheet, {})
                         st.markdown(
@@ -316,9 +331,9 @@ with tab1:
                         )
 
                 st.markdown("---")
-                col_b, col_v, _ = st.columns([2, 3, 5])
+                col_b, col_v = st.columns([2, 3])
                 with col_b:
-                    if st.button("← Retour", use_container_width=True):
+                    if st.button("← Étape précédente", use_container_width=True):
                         st.session_state.step = 1
                         st.rerun()
                 with col_v:
@@ -333,12 +348,14 @@ with tab1:
                         st.session_state.step = 3
                         st.rerun()
         else:
-            if st.button("← Retour"):
-                st.session_state.step = 1
-                st.rerun()
+            col_b, _ = st.columns([2, 8])
+            with col_b:
+                if st.button("← Étape précédente", use_container_width=True):
+                    st.session_state.step = 1
+                    st.rerun()
 
     # ══════════════════════════════════════════════════════════════════════════
-    # ÉTAPE 3
+    # ÉTAPE 3 — Structure
     # ══════════════════════════════════════════════════════════════════════════
     elif st.session_state.step == 3:
 
@@ -372,23 +389,14 @@ with tab1:
                 )
 
         st.markdown("---")
-        col1, col2, col3, _ = st.columns([2, 2, 4, 2])
-        with col1:
-            if st.button("← Changer fichier", use_container_width=True):
+        col_b, col_v = st.columns([2, 4])
+        with col_b:
+            if st.button("← Étape précédente", use_container_width=True):
                 st.session_state.step = 2
                 st.session_state.parse_result = None
                 st.session_state.validation   = None
                 st.rerun()
-        with col2:
-            if st.button("← Recommencer", use_container_width=True):
-                for k in ["step","config","parse_result","validation",
-                          "axe_a_result","axe_b_result"]:
-                    st.session_state[k] = (
-                        1 if k == "step" else
-                        {} if k == "config" else None
-                    )
-                st.rerun()
-        with col3:
+        with col_v:
             if validation["is_valid"]:
                 if st.button(
                     "🚀 Lancer l'analyse complète (Axe A + B) →",
@@ -401,6 +409,7 @@ with tab1:
                     with st.spinner("⏳ Analyse Axe B — Références BC..."):
                         axe_b = validate_file_axe_b(pr, profile_code=client_code)
                         st.session_state.axe_b_result = axe_b
+                    st.session_state.saved_session_id = None
                     st.session_state.step = 4
                     st.rerun()
             else:
@@ -422,17 +431,21 @@ with tab1:
         )
         st.caption(
             f"Session : **{cfg['session_name']}** · "
-            f"Client : **{cfg['client_name']}**"
+            f"Client : **{cfg['client_name']}** · "
+            f"Fichier : **{cfg.get('file_name','')}**"
         )
 
-        # Métriques globales
+        # Métriques
         a_total = axe_a.get("total_anomalies", 0)
         b_total = axe_b.get("total_anomalies", 0)
         a_major = axe_a.get("major", 0)
         b_major = axe_b.get("major", 0)
+        a_minor = axe_a.get("minor", 0)
+        b_minor = axe_b.get("minor", 0)
         b_info  = axe_b.get("info",  0)
         total   = a_total + b_total
         major   = a_major + b_major
+        minor   = a_minor + b_minor
         lines   = axe_a.get("lines_analyzed", 0)
 
         c1, c2, c3, c4, c5, c6 = st.columns(6)
@@ -456,10 +469,7 @@ with tab1:
         st.markdown("---")
 
         if total == 0 and b_info == 0:
-            st.success(
-                "🎉 **Aucune anomalie !** "
-                "Les données sont conformes aux contraintes et références BC."
-            )
+            st.success("🎉 **Aucune anomalie !** Les données sont conformes.")
         else:
             result_tab1, result_tab2, result_tab3 = st.tabs([
                 "📊 Résumé global",
@@ -485,8 +495,7 @@ with tab1:
                         return [""] * len(row)
                     st.dataframe(
                         df_all.style.apply(color_summary, axis=1),
-                        use_container_width=True,
-                        hide_index=True,
+                        use_container_width=True, hide_index=True,
                         height=min(500, 50 + len(real_anomalies) * 35)
                     )
                 if info_anomalies:
@@ -517,37 +526,138 @@ with tab1:
                         df = parse_result["sheets"].get(sn)
                         if df is not None and not df.empty:
                             meta = metadata.get(sn, {})
-                            st.markdown(
-                                f"**{sn}** — {meta.get('label','')} · {len(df)} lignes"
-                            )
-                            st.dataframe(
-                                df.head(10),
-                                use_container_width=True,
-                                hide_index=True
-                            )
+                            st.markdown(f"**{sn}** — {meta.get('label','')} · {len(df)} lignes")
+                            st.dataframe(df.head(10), use_container_width=True, hide_index=True)
 
         st.markdown("---")
-        col1, col2, col3, _ = st.columns([2, 2, 3, 3])
-        with col1:
-            if st.button("← Recommencer", use_container_width=True):
-                for k in ["step","config","parse_result","validation",
-                          "axe_a_result","axe_b_result"]:
-                    st.session_state[k] = (
-                        1 if k == "step" else
-                        {} if k == "config" else None
-                    )
-                st.rerun()
-        with col2:
-            if st.button("↩ Changer fichier", use_container_width=True):
-                st.session_state.step = 2
-                for k in ["parse_result","validation","axe_a_result","axe_b_result"]:
-                    st.session_state[k] = None
-                st.rerun()
-        with col3:
-            if major == 0:
-                st.success("✅ Prêt pour Axe C (IA) — Sprint 6")
-            else:
-                st.warning(f"⚠️ {major} anomalie(s) majeure(s) à corriger.")
 
+        # ── Barre d'actions ───────────────────────────────────────────────────
+        col_back, col_restart, col_save, col_status = st.columns([2, 2, 3, 3])
+
+        with col_back:
+            if st.button("← Étape précédente", use_container_width=True):
+                st.session_state.step = 3
+                st.session_state.axe_a_result  = None
+                st.session_state.axe_b_result  = None
+                st.session_state.saved_session_id = None
+                st.rerun()
+
+        with col_restart:
+            if st.button("🔄 Recommencer", use_container_width=True):
+                reset_session()
+                st.rerun()
+
+        with col_save:
+            # Désactiver si déjà sauvegardé
+            already_saved = bool(st.session_state.saved_session_id)
+
+            if already_saved:
+                st.markdown(
+                    f'<div class="save-box">'
+                    f'✅ <b>Session sauvegardée</b><br>'
+                    f'<span style="font-size:11px;color:#64748B">'
+                    f'ID : {st.session_state.saved_session_id}</span>'
+                    f'</div>',
+                    unsafe_allow_html=True
+                )
+            else:
+                if st.button(
+                    "💾 Sauvegarder la session",
+                    type="primary",
+                    use_container_width=True,
+                    help="Enregistre la session et ses résultats dans Supabase"
+                ):
+                    session_data = {
+                        "session_name":    cfg["session_name"],
+                        "profile_code":    cfg["client_code"],
+                        "file_name":       cfg.get("file_name", ""),
+                        "notes":           cfg.get("notes", ""),
+                        "status":          (
+                            "Analyse terminée"
+                            if major > 0 else "Terminée"
+                        ),
+                        "total_anomalies": total,
+                        "major_anomalies": major,
+                        "minor_anomalies": minor,
+                        "iteration":       1,
+                    }
+                    ok, result = save_session(session_data)
+                    if ok:
+                        st.session_state.saved_session_id = result
+                        st.success(f"✅ Session sauvegardée !")
+                        st.rerun()
+                    else:
+                        st.error(f"❌ {result}")
+
+        with col_status:
+            if major == 0:
+                st.success("✅ Prêt pour Axe C — Sprint 6")
+            else:
+                st.warning(f"⚠️ {major} anomalie(s) majeure(s)")
+
+# ════════════════════════════════════════════════════════════════════════════
+# TAB 2 — MES SESSIONS
+# ════════════════════════════════════════════════════════════════════════════
 with tab2:
-    st.info("🚧 **Sprint 9** — Historique des sessions.")
+
+    st.markdown("### 📋 Mes sessions de contrôle")
+
+    profiles = get_profiles_for_select()
+
+    # Filtre par client
+    col_f1, col_f2 = st.columns([3, 7])
+    with col_f1:
+        filter_options = ["Tous les clients"] + [p["label"] for p in profiles]
+        filter_choice  = st.selectbox("Filtrer par client", filter_options, key="filter_sessions")
+
+    filter_code = None
+    if filter_choice != "Tous les clients":
+        filter_code = next(
+            (p["code"] for p in profiles if p["label"] == filter_choice), None
+        )
+
+    sessions = get_all_sessions(profile_code=filter_code)
+
+    st.markdown("---")
+
+    if not sessions:
+        st.info(
+            "Aucune session sauvegardée. "
+            "Créez une session et cliquez sur **💾 Sauvegarder la session**."
+        )
+    else:
+        st.markdown(f"**{len(sessions)} session(s)**")
+
+        for s in sessions:
+            status       = s.get("status", "Nouvelle")
+            status_color = STATUS_COLORS.get(status, "#64748B")
+            total_a      = s.get("total_anomalies", 0)
+            major_a      = s.get("major_anomalies", 0)
+            minor_a      = s.get("minor_anomalies", 0)
+            created      = s.get("created_at", "")[:16].replace("T", " ") if s.get("created_at") else ""
+            file_name    = s.get("file_name", "")
+
+            anomaly_info = ""
+            if total_a > 0:
+                anomaly_info = (
+                    f' · <span style="color:#993C1D">🔴 {major_a}</span>'
+                    f' · <span style="color:#854F0B">🟠 {minor_a}</span>'
+                )
+            else:
+                anomaly_info = ' · <span style="color:#0F6E56">✅ Aucune anomalie</span>'
+
+            st.markdown(
+                f'<div class="card-session">'
+                f'<p class="session-name">{s.get("name","")}</p>'
+                f'<p class="session-meta">'
+                f'Client : <b>{s.get("profile_code","")}</b> · '
+                f'<span style="color:{status_color};font-weight:500">{status}</span>'
+                f'{anomaly_info}'
+                f'</p>'
+                f'<p class="session-meta">'
+                f'{"📄 " + file_name + " · " if file_name else ""}'
+                f'🕐 {created}'
+                f'</p>'
+                f'</div>',
+                unsafe_allow_html=True
+            )
