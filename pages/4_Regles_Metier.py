@@ -1,6 +1,6 @@
 """
-Page Règles Métier — Sprint 2.
-Saisie et gestion des règles de validation par profil client.
+Page Règles Métier — Sprint 4 update.
+Champ BC cible = liste déroulante selon la Master Data sélectionnée.
 """
 import streamlit as st
 from app.db.supabase_client import test_connection
@@ -10,7 +10,7 @@ from app.db.rules_db import (
     create_rule, delete_rule, toggle_rule, copy_rules_to_profile,
     RULE_TYPES, RULE_TYPES_HELP, SEVERITIES, AUTO_CORRECT_TYPES
 )
-from app.core.master_data_config import get_master_data_list
+from app.core.validator_axe_a import FIELD_DEFS
 
 st.set_page_config(
     page_title="Règles Métier — BC Quality Control",
@@ -57,10 +57,7 @@ if not connected:
 
 profiles = get_profiles_for_select()
 if not profiles:
-    st.warning(
-        "Aucun profil client. "
-        "Créez d'abord un profil dans **Profils Clients**."
-    )
+    st.warning("Aucun profil client. Créez-en un dans **Profils Clients**.")
     st.stop()
 
 # Pré-sélectionner si on vient de la page Profils Clients
@@ -84,6 +81,28 @@ if not selected_code:
 
 st.markdown("---")
 
+# ── Mapping Master Data label → table_id BC ───────────────────────────────────
+# Permet de charger les champs depuis FIELD_DEFS selon la Master Data choisie
+MASTER_DATA_TABLE_MAP = {
+    "Clients":          "18",
+    "Fournisseurs":     "23",
+    "Articles":         "27",
+    "Plan comptable":   "15",
+    "Général":          None,
+}
+
+
+def get_fields_for_master_data(master_data_name: str) -> list[str]:
+    """
+    Retourne la liste des champs BC pour une Master Data donnée.
+    Source : FIELD_DEFS de validator_axe_a.py
+    """
+    table_id = MASTER_DATA_TABLE_MAP.get(master_data_name)
+    if not table_id or table_id not in FIELD_DEFS:
+        return []
+    return sorted(FIELD_DEFS[table_id].keys())
+
+
 tab1, tab2, tab3 = st.tabs([
     "📋 Règles existantes",
     "➕ Ajouter une règle",
@@ -91,7 +110,7 @@ tab1, tab2, tab3 = st.tabs([
 ])
 
 # ════════════════════════════════════════════════════════════════════════════
-# TAB 1 — LISTE
+# TAB 1 — LISTE DES RÈGLES
 # ════════════════════════════════════════════════════════════════════════════
 with tab1:
 
@@ -106,8 +125,8 @@ with tab1:
             for r in rules if r.get("active", True)
         )
         c1, c2, c3 = st.columns(3)
-        c1.metric("Total règles", total)
-        c2.metric("Règles actives", active)
+        c1.metric("Total règles",     total)
+        c2.metric("Règles actives",   active)
         c3.metric("Règles inactives", total - active)
         st.markdown("---")
 
@@ -151,7 +170,7 @@ with tab1:
                     css = "rule-card" + ("" if is_active else " inactive")
                     st.markdown(
                         f'<div class="{css}">'
-                        f'<span class="rule-label">{rule.get("label", "")}</span>'
+                        f'<span class="rule-label">{rule.get("label","")}</span>'
                         f'<div style="margin:4px 0">'
                         f'<span class="badge badge-type">{rule_type}</span>'
                         f'<span class="badge {sev_class}">{severity}</span>'
@@ -169,81 +188,131 @@ with tab1:
                     )
                     if new_state != is_active:
                         ok, err = toggle_rule(rule_id, new_state)
-                        if ok:
-                            st.rerun()
+                        if ok: st.rerun()
                 with col_d:
                     if st.button("🗑️", key=f"del_{rule_id}"):
                         ok, err = delete_rule(rule_id)
-                        if ok:
-                            st.rerun()
+                        if ok: st.rerun()
 
 # ════════════════════════════════════════════════════════════════════════════
-# TAB 2 — AJOUTER
+# TAB 2 — AJOUTER UNE RÈGLE
 # ════════════════════════════════════════════════════════════════════════════
 with tab2:
 
     st.markdown("### Ajouter une règle métier")
 
-    with st.form("add_rule_form", clear_on_submit=True):
-        col1, col2 = st.columns(2)
+    col1, col2 = st.columns(2)
 
-        with col1:
-            rule_label = st.text_input(
-                "Libellé de la règle *",
-                placeholder="Ex: Pays par défaut = France"
+    with col1:
+        rule_label = st.text_input(
+            "Libellé de la règle *",
+            placeholder="Ex : Pays par défaut = France"
+        )
+
+        # Liste des Master Data disponibles
+        master_data_options = list(MASTER_DATA_TABLE_MAP.keys())
+        rule_md = st.selectbox(
+            "Master Data *",
+            master_data_options,
+            key="rule_md_select"
+        )
+
+        # ── Champ BC cible : liste déroulante selon Master Data ───────────────
+        available_fields = get_fields_for_master_data(rule_md)
+
+        if available_fields:
+            # Option vide au début pour les règles qui s'appliquent à toute la ligne
+            field_options = ["— Sélectionner un champ (optionnel) —"] + available_fields
+            selected_field_label = st.selectbox(
+                "Champ BC cible",
+                field_options,
+                key="rule_field_select",
+                help="Champs BC disponibles pour cette Master Data. "
+                     "Laissez vide si la règle s'applique à la ligne entière."
             )
-            rule_md = st.selectbox("Master Data *", get_master_data_list())
+            rule_field = (
+                selected_field_label
+                if selected_field_label != "— Sélectionner un champ (optionnel) —"
+                else ""
+            )
+
+            # Afficher les contraintes du champ sélectionné
+            if rule_field and rule_field in FIELD_DEFS.get(
+                MASTER_DATA_TABLE_MAP.get(rule_md, ""), {}
+            ):
+                table_id   = MASTER_DATA_TABLE_MAP[rule_md]
+                field_info = FIELD_DEFS[table_id][rule_field]
+                hints      = []
+                if field_info.get("req"):
+                    hints.append("✅ Obligatoire")
+                if field_info.get("max"):
+                    hints.append(f"📏 Max {field_info['max']} caractères")
+                if field_info.get("type") != "Text":
+                    hints.append(f"🏷️ Type : {field_info['type']}")
+                if field_info.get("options"):
+                    opts = [v for v in field_info["options"] if v.strip()]
+                    hints.append(f"📋 Options : {', '.join(opts)}")
+                if hints:
+                    st.caption(" · ".join(hints))
+        else:
+            # Saisie libre pour les Master Data sans définition (Général...)
             rule_field = st.text_input(
                 "Champ BC cible",
-                placeholder="Ex: Country/Region Code"
-            )
-            rule_type = st.selectbox(
-                "Type de règle *",
-                RULE_TYPES,
-                help="\n".join(f"• {k} : {v}" for k, v in RULE_TYPES_HELP.items())
+                placeholder="Ex : Country/Region Code",
+                key="rule_field_text"
             )
 
-        with col2:
-            rule_cond = st.text_input(
-                "Condition (Si...)",
-                placeholder="Ex: Si Pays est vide"
-            )
-            rule_action = st.text_area(
-                "Action (Alors...)",
-                placeholder="Ex: Mettre 'FR'",
-                height=80
-            )
-            rule_sev  = st.selectbox("Sévérité", SEVERITIES)
-            rule_auto = st.checkbox(
-                "⚡ Correction automatique",
-                value=rule_type in AUTO_CORRECT_TYPES if rule_type else False
-            )
+        rule_type = st.selectbox(
+            "Type de règle *",
+            RULE_TYPES,
+            help="\n".join(f"• {k} : {v}" for k, v in RULE_TYPES_HELP.items())
+        )
 
-        if st.form_submit_button(
-            "💾 Enregistrer la règle",
-            type="primary",
-            use_container_width=True
-        ):
-            if not rule_label.strip():
-                st.error("Le libellé est obligatoire.")
+    with col2:
+        rule_cond = st.text_input(
+            "Condition (Si...)",
+            placeholder="Ex : Si Pays est vide",
+            help="Laissez vide si la règle s'applique toujours."
+        )
+        rule_action = st.text_area(
+            "Action (Alors...)",
+            placeholder="Ex : Mettre 'FR'",
+            height=100
+        )
+        rule_sev  = st.selectbox("Sévérité", SEVERITIES)
+        rule_auto = st.checkbox(
+            "⚡ Correction automatique",
+            value=rule_type in AUTO_CORRECT_TYPES if rule_type else False,
+            help="Si coché, la correction est appliquée sans validation manuelle."
+        )
+
+    st.markdown("---")
+    if st.button(
+        "💾 Enregistrer la règle",
+        type="primary",
+        use_container_width=True,
+        key="save_rule"
+    ):
+        if not rule_label.strip():
+            st.error("Le libellé de la règle est obligatoire.")
+        else:
+            ok, err = create_rule({
+                "profile_code": selected_code,
+                "label":        rule_label.strip(),
+                "master_data":  rule_md,
+                "field_name":   rule_field,
+                "rule_type":    rule_type,
+                "condition":    rule_cond.strip(),
+                "action":       rule_action.strip(),
+                "severity":     rule_sev,
+                "auto_correct": rule_auto,
+                "active":       True,
+            })
+            if ok:
+                st.success(f"✅ Règle **{rule_label}** enregistrée !")
+                st.rerun()
             else:
-                ok, err = create_rule({
-                    "profile_code": selected_code,
-                    "label":        rule_label.strip(),
-                    "master_data":  rule_md,
-                    "field_name":   rule_field.strip(),
-                    "rule_type":    rule_type,
-                    "condition":    rule_cond.strip(),
-                    "action":       rule_action.strip(),
-                    "severity":     rule_sev,
-                    "auto_correct": rule_auto,
-                    "active":       True,
-                })
-                if ok:
-                    st.success(f"✅ Règle **{rule_label}** enregistrée !")
-                    st.rerun()
-                else:
-                    st.error(f"❌ {err}")
+                st.error(f"❌ {err}")
 
     with st.expander("💡 Guide des types de règles"):
         for rt, help_text in RULE_TYPES_HELP.items():
@@ -260,10 +329,10 @@ with tab3:
 
     others = [p for p in profiles if p["code"] != selected_code]
     if not others:
-        st.info("Aucun autre profil disponible pour la copie.")
+        st.info("Aucun autre profil disponible.")
     else:
         source_label = st.selectbox(
-            "Copier les règles depuis",
+            "Copier depuis",
             [p["label"] for p in others]
         )
         source_code = next(
