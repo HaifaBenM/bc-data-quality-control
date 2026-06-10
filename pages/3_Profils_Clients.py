@@ -108,7 +108,7 @@ with tab1:
                 s_badge = f'<span class="badge badge-sector">{profile.get("sector","")}</span>' if profile.get("sector") else ""
                 r_badge = f'<span class="badge badge-rules">{stats["active_rules"]} règle(s)</span>' if stats["total_rules"]>0 else '<span class="badge badge-no-rules">Aucune règle</span>'
                 b_badge = '<span class="badge badge-bc-ok">🔌 BC configuré</span>' if has_bc else '<span class="badge badge-bc-none">⚙️ BC non configuré</span>'
-                m_badge = f'<span class="badge badge-meta-ok">📋 {cache["total"]} entités</span>' if cache["total"]>0 else ""
+                m_badge = ""  # Badge entités supprimé
                 company_name = profile.get("bc_company_name","")
                 bc_info = f'<span style="font-size:11px;color:#94A3B8">{profile.get("bc_url","")}{" · "+profile.get("bc_environment","") if profile.get("bc_environment") else ""}{" · 🏢 "+company_name if company_name else ""}</span>' if profile.get("bc_url") else ""
                 st.markdown(f'<div class="profile-card"><p class="profile-name">{profile.get("name","")}</p><p class="profile-code">Code : {code}</p><div style="margin-top:8px">{s_badge}{r_badge}{b_badge}{m_badge}</div>{"<div style=margin-top:4px>"+bc_info+"</div>" if bc_info else ""}</div>', unsafe_allow_html=True)
