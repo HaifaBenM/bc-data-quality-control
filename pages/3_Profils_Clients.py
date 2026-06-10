@@ -221,13 +221,16 @@ with tab1:
                         if st.button("📋 Charger metadata BC", key=f"meta_{code}", use_container_width=True, disabled=not can_load, help="Lit les champs et tables de référence depuis BC"):
                             charger_metadata(code, str(e_tenant).strip(), str(e_client_id).strip(), str(e_secret).strip(), str(e_env or "").strip(), sel_company_id)
 
-                    # Résumé cache
+                    # Statut cache (discret)
                     cache_now = get_cache_summary(code)
                     if cache_now["total"] > 0:
-                        st.markdown(f'<div class="meta-box">📋 <b>Metadata en cache</b> — {cache_now["data"]} entités · {cache_now["reference"]} références · Mis à jour : {cache_now["last_update"]}</div>', unsafe_allow_html=True)
-                        if st.button("🗑️ Vider le cache", key=f"clear_meta_{code}"):
-                            ok, _ = delete_cache(code)
-                            if ok: st.rerun()
+                        col_cs, col_cb, _ = st.columns([3, 2, 5])
+                        with col_cs:
+                            st.success(f"✅ Metadata BC chargée — {cache_now['last_update']}")
+                        with col_cb:
+                            if st.button("🗑️ Vider le cache", key=f"clear_meta_{code}"):
+                                ok, _ = delete_cache(code)
+                                if ok: st.rerun()
 
             if st.session_state.confirm_delete == code:
                 st.warning(f"⚠️ Supprimer **{profile.get('name','')}** ?")

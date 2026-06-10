@@ -18,6 +18,24 @@ from app.db.sessions_db import (
     get_all_sessions, SESSION_STATUSES, STATUS_COLORS, STATUS_ICONS
 )
 
+
+# ── Erreurs détectées par BC Config Package (pour badging dans les résultats) ──
+BC_DETECTED = {
+    "Longueur maximale dépassée",
+    "Valeur Option non autorisée",
+    "Type incorrect (entier attendu)",
+    "Type incorrect (décimal attendu)",
+    "Type incorrect (booléen attendu)",
+    "Format de date incorrect",
+}
+# Tout le reste = valeur ajoutée de notre outil uniquement
+
+def bc_badge(error_type: str) -> str:
+    """Retourne le badge HTML : BC si détecté par BC, ⭐ si valeur ajoutée."""
+    if error_type in BC_DETECTED:
+        return '<span class="tag tag-bc" title="Détecté aussi par BC Config Package">🔴 BC</span>'
+    return '<span class="tag tag-plus" title="Détecté uniquement par notre outil">⭐ Plus</span>'
+
 st.set_page_config(page_title="Sessions — BC Quality Control", page_icon="📁", layout="wide")
 
 st.markdown("""
@@ -43,6 +61,8 @@ st.markdown("""
     .tag-info  { background:#2E6FBF;color:white; } .tag-data  { background:#0F6E56;color:white; }
     .tag-ref   { background:#2E6FBF;color:white; } .tag-ai    { background:#7C3AED;color:white; }
     .tag-auto  { background:#0F6E56;color:white; }
+    .tag-bc   { background:#1B3A6B;color:white;font-size:9px; }
+    .tag-plus { background:#854F0B;color:white;font-size:9px; }
     #MainMenu { visibility:hidden; } footer { visibility:hidden; }
 </style>
 """, unsafe_allow_html=True)
