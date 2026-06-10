@@ -60,11 +60,7 @@ with col_status:
             f'<span class="status-badge status-error">❌ BDD : {message}</span>',
             unsafe_allow_html=True
         )
-with col_version:
-    st.markdown(
-        '<span class="status-badge status-warning"></span>',
-        unsafe_allow_html=True
-    )
+
 
 st.markdown("---")
 

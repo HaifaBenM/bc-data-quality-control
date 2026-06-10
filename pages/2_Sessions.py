@@ -146,7 +146,8 @@ def display_axe_results(axe_result: dict, axe_label: str, uid: str = "x"):
                             st.markdown(
                                 f'<div class="{css}"><b>Ligne {a["Ligne"]}</b> · <b>{a["Champ"]}</b> · '
                                 f'<span class="tag tag-{"major" if a["Sévérité"]=="Majeure" else "minor"}">{a["Sévérité"]}</span>'
-                                f'<span class="tag" style="background:#E2E8F0;color:#1B3A6B">{a["Type d\'anomalie"]}</span>{rule_tag}'
+                                f'<span class="tag" style="background:#E2E8F0;color:#1B3A6B">{a["Type d\'anomalie"]}</span>'
+                                f'{bc_badge(a["Type d\'anomalie"])}{rule_tag}'
                                 f'<br>{a["Message"]}{fix}</div>',
                                 unsafe_allow_html=True
                             )
@@ -184,7 +185,12 @@ GEMINI_API_KEY = "AIzaSy..."
     low   = axe_c.get("low_confidence", 0)
 
     if total == 0:
-        st.success("✅ Aucune suggestion IA — pas de correction évidente.")
+        st.success("✅ Aucune suggestion IA retournée par Gemini.")
+        st.caption(
+            "Gemini n'a pas trouvé de corrections évidentes, ou les anomalies "
+            "détectées n'ont pas de valeur source analysable. "
+            "L'IA n'analyse que les cellules avec une valeur non vide."
+        )
         return
 
     c1, c2, c3, c4 = st.columns(4)
@@ -374,7 +380,7 @@ with tab1:
                         with st.spinner("⚙️ Axe D (règles)..."):
                             axe_d=validate_file_axe_d(pr,active_rules); st.session_state.axe_d_result=axe_d
                     else:
-                        st.session_state.axe_d_result={"total_anomalies":0,"major":0,"minor":0,"info":0,"lines_analyzed":0,"by_sheet":{},"all_anomalies":[]}
+                        st.session_state.axe_d_result={"total_anomalies":0,"major":0,"minor":0,"info":0,"lines_analyzed":0,"by_sheet":{},"all_anomalies":[],"no_rules":True}
                     st.session_state.saved_session_id=None; st.session_state.step=4; st.rerun()
             else:
                 st.error("❌ Corrigez les erreurs structurelles.")
@@ -444,7 +450,21 @@ with tab1:
             with rt2: display_axe_results(axe_a, "Axe A", uid="a")
             with rt3: display_axe_results(axe_b, "Axe B", uid="b")
             with rt4: display_axe_c_results(axe_c)
-            with rt5: display_axe_results(axe_d, "Axe D", uid="d")
+            with rt5:
+                if axe_d.get("no_rules"):
+                    st.warning(
+                        "⚠️ **Aucune règle métier configurée** pour ce client. "
+                        "Allez dans **Règles Métier** pour ajouter des règles."
+                    )
+                    st.info(
+                        "**Règles à créer pour déclencher l'Axe D sur le fichier de test :**\n\n"
+                        "**Règle 1** — Valeur par défaut\n"
+                        "- Champ : `Code pays/région` · Condition : `Si vide` · Action : `FR`\n\n"
+                        "**Règle 2** — Transformation\n"
+                        "- Champ : `Nom` · Condition : `'woodgrove bank'` · Action : `'Woodgrove Bank'`"
+                    )
+                else:
+                    display_axe_results(axe_d, "Axe D", uid="d")
 
         if pr:
             with st.expander("👀 Données source"):
