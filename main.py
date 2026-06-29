@@ -20,7 +20,6 @@ pages = st.navigation([
     st.Page("pages/1_Dashboard.py",        title="Dashboard",       icon="📊"),
     st.Page("pages/2_Sessions.py",         title="Sessions",        icon="📁"),
     st.Page("pages/3_Profils_Clients.py",  title="Profils Clients", icon="👥"),
-    st.Page("pages/4_Regles_Metier.py",    title="Règles Métier",   icon="⚙️"),
-])
+    ])
 
 pages.run()
