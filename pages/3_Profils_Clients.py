@@ -8,7 +8,6 @@ from app.db.profiles_db import (
     get_all_profiles, create_profile, update_profile,
     delete_profile, get_profile_stats, get_profiles_for_select
 )
-from app.db.rules_db import copy_rules_to_profile
 from app.db.metadata_db import get_cache_summary, delete_cache, save_metadata, save_reference_data
 from app.core.bc_connector import test_bc_connection, get_bc_companies
 from app.core.bc_metadata import read_bc_metadata, load_all_reference_data
@@ -116,10 +115,7 @@ with tab1:
             with col_actions:
                 st.markdown("<div style='padding-top:14px'>", unsafe_allow_html=True)
                 c1,c2,c3 = st.columns(3)
-                with c1:
-                    if st.button("⚙️ Règles", key=f"rules_{code}", use_container_width=True):
-                        st.session_state["selected_profile_for_rules"] = code
-                        st.switch_page("pages/4_Regles_Metier.py")
+         
                 with c2:
                     if st.button("✏️ Éditer", key=f"edit_{code}", use_container_width=True):
                         st.session_state.edit_profile = code

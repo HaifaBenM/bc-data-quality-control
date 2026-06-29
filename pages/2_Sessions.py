@@ -10,9 +10,7 @@ from app.core.structure_validator import validate_file_structure
 from app.core.validator_axe_a import validate_file_axe_a, get_anomalies_dataframe
 from app.core.validator_axe_b import validate_file_axe_b
 from app.core.validator_axe_c import validate_file_axe_c, get_gemini_api_key, is_gemini_available
-from app.core.validator_axe_d import validate_file_axe_d
 from app.db.profiles_db import get_profiles_for_select
-from app.db.rules_db import get_active_rules_for_profile
 from app.db.sessions_db import (
     save_session, update_session, delete_session,
     get_all_sessions, SESSION_STATUSES, STATUS_COLORS, STATUS_ICONS
@@ -20,37 +18,6 @@ from app.db.sessions_db import (
 
 st.set_page_config(page_title="Sessions — BC Quality Control", page_icon="📁", layout="wide")
 
-st.markdown("""
-<style>
-    .step-header { background:linear-gradient(135deg,#1B3A6B,#2E6FBF);color:white;padding:.75rem 1.25rem;border-radius:8px;margin-bottom:1rem;font-weight:600; }
-    .card-data  { background:#E1F5EE;border-left:4px solid #0F6E56;border-radius:8px;padding:12px 16px;margin-bottom:8px; }
-    .card-ref   { background:#EFF6FF;border-left:4px solid #2E6FBF;border-radius:8px;padding:10px 14px;margin-bottom:6px; }
-    .card-rule  { background:#EEEDFE;border-left:3px solid #534AB7;border-radius:6px;padding:8px 12px;margin-bottom:6px;font-size:12px; }
-    .card-major { background:#FAECE7;border-left:4px solid #993C1D;border-radius:8px;padding:10px 14px;margin-bottom:6px;font-size:12px; }
-    .card-minor { background:#FAEEDA;border-left:4px solid #854F0B;border-radius:8px;padding:10px 14px;margin-bottom:6px;font-size:12px; }
-    .card-info  { background:#EFF6FF;border-left:4px solid #2E6FBF;border-radius:8px;padding:10px 14px;margin-bottom:6px;font-size:12px; }
-    .card-ai    { background:#F5F3FF;border-left:4px solid #7C3AED;border-radius:8px;padding:10px 14px;margin-bottom:6px;font-size:12px; }
-    .card-session { background:white;border:1px solid #E2E8F0;border-radius:10px;padding:14px 18px;margin-bottom:4px; }
-    .session-name { font-size:14px;font-weight:600;color:#1B3A6B;margin:0; }
-    .session-meta { font-size:12px;color:#64748B;margin:4px 0 0; }
-    .stat-box { background:white;border:1px solid #E2E8F0;border-radius:8px;padding:12px;text-align:center; }
-    .stat-num { font-size:1.8rem;font-weight:700;margin:0; }
-    .stat-lbl { font-size:10px;color:#64748B;margin:0; }
-    .save-box { background:#E1F5EE;border:1px solid #0F6E56;border-radius:8px;padding:10px 14px;margin:4px 0; }
-    .conf-bar { height:5px;border-radius:3px;background:#E2E8F0;margin:3px 0; }
-    .tag { display:inline-block;font-size:10px;font-weight:600;padding:2px 7px;border-radius:4px;margin-right:4px; }
-    .tag-major { background:#993C1D;color:white; }
-    .tag-minor { background:#854F0B;color:white; }
-    .tag-info  { background:#2E6FBF;color:white; }
-    .tag-data  { background:#0F6E56;color:white; }
-    .tag-ref   { background:#2E6FBF;color:white; }
-    .tag-ai    { background:#7C3AED;color:white; }
-    .tag-auto  { background:#0F6E56;color:white; }
-    .tag-bc    { background:#1B3A6B;color:white;font-size:9px; }
-    .tag-plus  { background:#854F0B;color:white;font-size:9px; }
-    #MainMenu { visibility:hidden; } footer { visibility:hidden; }
-</style>
-""", unsafe_allow_html=True)
 
 # ── Erreurs détectées aussi par BC Config Package ─────────────────────────────
 BC_DETECTED = {
@@ -301,14 +268,7 @@ with tab_main:
                 st.warning("Aucun profil. Créez-en un dans **Profils Clients**."); selected=None
         with col2:
             notes = st.text_area("Notes", height=60)
-            if selected:
-                rules = get_active_rules_for_profile(selected["code"])
-                if rules:
-                    st.markdown(f"**⚙️ {len(rules)} règle(s) métier chargée(s) :**")
-                    for r in rules[:3]:
-                        st.markdown(f'<div class="card-rule"><b>{r.get("label","")}</b> — {r.get("rule_type","")}</div>', unsafe_allow_html=True)
-                    if len(rules)>3: st.caption(f"+{len(rules)-3} autre(s)")
-                else: st.info("Aucune règle métier.")
+            
             gemini_ok = is_gemini_available()
             st.markdown("🤖 **Suggestions IA :** " + ("✅ Activées" if gemini_ok else "⚠️ Non configurées"))
         st.markdown("---")
@@ -405,11 +365,7 @@ with tab_main:
                         with st.spinner("🤖 Suggestions IA en cours..."):
                             axe_c = validate_file_axe_c(axe_a, axe_b, pr, api_key=api_key)
 
-                    axe_d = {"by_sheet":{}, "all_anomalies":[]}
-                    if active_rules:
-                        with st.spinner("⚙️ Règles métier..."):
-                            axe_d = validate_file_axe_d(pr, active_rules)
-
+                   
                     # Fusionner tous les résultats
                     merged = merge_results(axe_a, axe_b, axe_d, axe_c)
                     st.session_state.merged_result = merged
