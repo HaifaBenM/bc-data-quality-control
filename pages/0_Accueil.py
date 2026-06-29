@@ -42,12 +42,12 @@ st.markdown("""
 st.markdown("""
 <div class="main-header">
     <h1>🔍 BC Data Quality Control</h1>
-    <p>Outil de contrôle qualité des données Master Data — Microsoft Dynamics 365 Business Central</p>
+    <p>Outil de contrôle qualité des données — Microsoft Dynamics 365 Business Central</p>
 </div>
 """, unsafe_allow_html=True)
 
 # ── Statut connexion ──────────────────────────────────────────────────────────
-col_status, col_version, _ = st.columns([2, 2, 6])
+col_status, _ = st.columns([3, 7])
 with col_status:
     connected, message = test_connection()
     if connected:
@@ -61,28 +61,23 @@ with col_status:
             unsafe_allow_html=True
         )
 
-
 st.markdown("---")
 
 # ── Cartes de navigation ──────────────────────────────────────────────────────
 st.markdown("### Navigation")
 
-col1, col2, col3, col4 = st.columns(4)
+col1, col2, col3 = st.columns(3)
 with col1:
-    st.markdown("""<div class="nav-card"><div class="icon">📊</div>
-    <h3>Dashboard</h3><p>Vue globale des sessions</p></div>""",
+    st.markdown("""<div class="nav-card"><div class="icon">👥</div>
+    <h3>Profils Clients</h3><p>Configurer les credentials BC</p></div>""",
     unsafe_allow_html=True)
 with col2:
     st.markdown("""<div class="nav-card"><div class="icon">📁</div>
     <h3>Sessions</h3><p>Contrôle qualité des fichiers</p></div>""",
     unsafe_allow_html=True)
 with col3:
-    st.markdown("""<div class="nav-card"><div class="icon">👥</div>
-    <h3>Profils Clients</h3><p>Gérer les profils clients</p></div>""",
-    unsafe_allow_html=True)
-with col4:
-    st.markdown("""<div class="nav-card"><div class="icon">⚙️</div>
-    <h3>Règles Métier</h3><p>Règles de validation par client</p></div>""",
+    st.markdown("""<div class="nav-card"><div class="icon">📊</div>
+    <h3>Dashboard</h3><p>Vue globale de la progression</p></div>""",
     unsafe_allow_html=True)
 
 st.markdown("---")
@@ -92,23 +87,24 @@ col_l, col_r = st.columns(2)
 with col_l:
     st.markdown("""
 **Objectif** : Garantir que les fichiers clients s'importent dans BC sans erreur.
-- ✅ Validation standard BC (type, longueur, format...)
-- ✅ Vérification des références croisées BC
-- ✅ Suggestions de correction par IA
-- ✅ Règles métier par client
+- ✅ Validation des contraintes BC (type, longueur, format)
+- ✅ Vérification des codes de référence
+- ✅ Suggestions de correction par IA (Gemini)
+- ✅ Niveaux d'intégration séquentiels (N0 → N4)
 """)
 with col_r:
     st.markdown("""
-**Nouveautés Sprint 2** :
-- 👥 Profils clients sauvegardés dans Supabase
-- ⚙️ Règles métier par client (8 types)
-- 📋 Chargement automatique des règles en session
-- 📤 Copie de règles entre clients
+**Niveaux d'intégration** :
+- 📊 N0 — Plan Comptable
+- ⚙️ N1 — Operational Setup
+- 📚 N2 — Reference Data
+- 🏢 N3 — Master Data (par module)
+- 📄 N4 — Transactional Data
 """)
 
 st.markdown("---")
 st.markdown(
     "<p style='text-align:center;color:#94A3B8;font-size:.8rem;'>"
-    "BC Data Quality Control v0.3 — Sprint 2</p>",
+    "BC Data Quality Control — Talan</p>",
     unsafe_allow_html=True
 )
