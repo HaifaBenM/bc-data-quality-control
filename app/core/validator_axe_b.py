@@ -422,7 +422,23 @@ def validate_file_axe_b(
     profile_code:  str = "",
 ) -> dict:
     """
-    Lance la validation Axe B sur toutes les tables de données du fichier.
+    Lance la validation Axe B sur TOUTES les tables analysables du fichier
+    (data_tables + ref_tables).
+
+    Avant : seules les tables classées "data" étaient à la fois (a) contrôlées
+    elles-mêmes ET (b) candidates comme cible de la boucle externe — bien que
+    `all_sheets` (passé à validate_axe_b) ait toujours contenu TOUTES les
+    feuilles du fichier pour la résolution des lookups. Le problème n'était
+    donc pas la résolution des références, mais le fait qu'une feuille comme
+    "Conditions de paiement" n'était jamais elle-même la cible d'un contrôle
+    Axe B (utile dès qu'une table de référence référence elle-même un autre
+    code, ex: futures tables avec FK imbriquées).
+
+    Maintenant : toute table non-système (data + ref) est contrôlée comme
+    cible, tout en restant disponible comme source de lookup pour les autres
+    — exactement le comportement de BC standard observé via
+    ValidateFieldRelationAgainstCompanyDataAndPackage (vérifie une donnée à
+    la fois contre la société ET contre le reste du package).
 
     Retourne :
     {
@@ -443,10 +459,14 @@ def validate_file_axe_b(
     }
 
     data_tables = parse_result.get("data_tables", [])
-    all_sheets  = parse_result.get("sheets", {})
-    metadata    = parse_result.get("metadata", {})
+    ref_tables  = parse_result.get("ref_tables", [])
+    # Toutes les tables non-système sont désormais contrôlées par Axe B.
+    tables_to_validate = data_tables + ref_tables
 
-    for sheet_name in data_tables:
+    all_sheets = parse_result.get("sheets", {})
+    metadata   = parse_result.get("metadata", {})
+
+    for sheet_name in tables_to_validate:
         df = all_sheets.get(sheet_name)
         if df is None or df.empty:
             continue

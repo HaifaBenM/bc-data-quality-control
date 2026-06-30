@@ -134,12 +134,35 @@ FIELD_DEFS = {
         "N° report de débit":          {"type": "Text",    "max": 20,   "req": False},
         "N° report de crédit":         {"type": "Text",    "max": 20,   "req": False},
     },
+
+    # ── Table 3 — Conditions de paiement ──────────────────────────────────────
+    "3": {
+        "Code":                        {"type": "Text",    "max": 10,   "req": True},
+        "Description":                 {"type": "Text",    "max": 100,  "req": False},
+        "Calcul date échéance":        {"type": "Text",    "max": 32,   "req": False},
+        "Calcul date d'escompte":      {"type": "Text",    "max": 32,   "req": False},
+        "% remise":                    {"type": "Decimal", "max": None, "req": False},
+    },
+
+    # ── Table 4 — Devises ─────────────────────────────────────────────────────
+    "4": {
+        "Code":                        {"type": "Text",    "max": 10,   "req": True},
+        "Description":                 {"type": "Text",    "max": 100,  "req": False},
+        "Symbole devise":              {"type": "Text",    "max": 10,   "req": False},
+    },
+
+    # ── Table 9 — Pays/Régions ────────────────────────────────────────────────
+    "9": {
+        "Code":                        {"type": "Text",    "max": 10,   "req": True},
+        "Nom":                         {"type": "Text",    "max": 50,   "req": False},
+    },
 }
 
 # Champ clé (identifiant) par table
 KEY_FIELD = {
-    "18": "N°", "23": "N°", "27": "N°",
-    "15": "N°", "5050": "N°", "default": "N°",
+    "18": "N°", "23": "N°", "27": "N°", "15": "N°", "5050": "N°",
+    "3": "Code", "4": "Code", "9": "Code",
+    "default": "N°",
 }
 
 # Formats de date acceptés
@@ -404,7 +427,19 @@ def _anomaly(
 
 def validate_file_axe_a(parse_result: dict) -> dict:
     """
-    Lance la validation Axe A sur toutes les tables de données du fichier.
+    Lance la validation Axe A sur TOUTES les tables analysables du fichier
+    (data_tables + ref_tables).
+
+    Avant : seules les tables classées "data" par categorize_table() étaient
+    contrôlées. Une table comme Payment Terms ou G/L Account, classée "ref"
+    car elle sert aussi de source de lookup pour Axe B, n'était donc jamais
+    elle-même contrôlée — même quand elle dispose déjà de contraintes dans
+    FIELD_DEFS (ex: Table 15).
+
+    Maintenant : toute table non-système (data + ref) est contrôlée.
+    Les tables sans entrée dans FIELD_DEFS ne génèrent simplement aucune
+    anomalie (comportement inchangé pour elles), donc ce changement est
+    rétrocompatible — il ajoute de la couverture, n'en retire jamais.
 
     Args:
         parse_result : résultat du parsing (depuis file_parser.py)
@@ -427,10 +462,14 @@ def validate_file_axe_a(parse_result: dict) -> dict:
     }
 
     data_tables = parse_result.get("data_tables", [])
-    metadata    = parse_result.get("metadata", {})
-    sheets      = parse_result.get("sheets", {})
+    ref_tables  = parse_result.get("ref_tables", [])
+    # Toutes les tables non-système sont désormais contrôlées par Axe A.
+    tables_to_validate = data_tables + ref_tables
 
-    for sheet_name in data_tables:
+    metadata = parse_result.get("metadata", {})
+    sheets   = parse_result.get("sheets", {})
+
+    for sheet_name in tables_to_validate:
         df = sheets.get(sheet_name)
         if df is None or df.empty:
             continue
