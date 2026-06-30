@@ -7,7 +7,7 @@ import streamlit as st
 import pandas as pd
 from app.core.file_parser import parse_uploaded_file, get_file_summary
 from app.core.structure_validator import validate_file_structure
-from app.core.validator_axe_a import validate_file_axe_a, get_anomalies_dataframe
+from app.core.validator_axe_a import validate_file_axe_a
 from app.core.validator_axe_b import validate_file_axe_b
 from app.core.validator_axe_c import validate_file_axe_c, get_gemini_api_key, is_gemini_available
 from app.db.profiles_db import get_profiles_for_select
@@ -35,7 +35,7 @@ def bc_badge(error_type: str) -> str:
     return '<span class="tag tag-plus" title="Détecté uniquement par notre outil">⭐ Plus</span>'
 
 
-def merge_results(axe_a: dict, axe_b: dict, axe_d: dict, axe_c: dict) -> dict:
+def merge_results(axe_a: dict, axe_b: dict, axe_c: dict) -> dict:
     """
     Fusionne les résultats de tous les validateurs en un résultat unique par onglet.
     Enrichit les anomalies avec les suggestions IA si disponibles.
@@ -44,7 +44,7 @@ def merge_results(axe_a: dict, axe_b: dict, axe_d: dict, axe_c: dict) -> dict:
 
     # Récupérer toutes les sheets de données
     all_sheets = set()
-    for result in [axe_a, axe_b, axe_d]:
+    for result in [axe_a, axe_b]:
         all_sheets.update(result.get("by_sheet", {}).keys())
 
     # Map des suggestions IA par (sheet, ligne, champ)
@@ -64,8 +64,8 @@ def merge_results(axe_a: dict, axe_b: dict, axe_d: dict, axe_c: dict) -> dict:
     for sn in all_sheets:
         sheet_anomalies = []
 
-        # Combiner A + B + D pour cet onglet
-        for result in [axe_a, axe_b, axe_d]:
+        # Combiner A + B pour cet onglet
+        for result in [axe_a, axe_b]:
             for a in result.get("by_sheet",{}).get(sn, []):
                 # Nettoyer la colonne Axe (ne pas l'afficher)
                 clean = {k: v for k, v in a.items() if k != "Axe"}
@@ -178,7 +178,6 @@ def display_unified_results(merged: dict, axe_c: dict):
                         for a in filtered[:50]:
                             css  = "card-major" if a.get("Sévérité")=="Majeure" else "card-minor"
                             fix  = f" → <b>{a['Correction suggérée']}</b>" if a.get("Correction suggérée") else ""
-                            rule = f'<span class="tag" style="background:#EEEDFE;color:#534AB7">⚙️ {a["Règle"]}</span>' if a.get("Règle") else ""
                             err_t= a.get("Type d'anomalie","")
                             # Bloc IA si suggestion disponible
                             ia_block = ""
@@ -201,7 +200,7 @@ def display_unified_results(merged: dict, axe_c: dict):
                                 f'<b>Ligne {a.get("Ligne","")}</b> · <b>{a.get("Champ","")}</b> · '
                                 f'<span class="tag tag-{"major" if a.get("Sévérité")=="Majeure" else "minor"}">{a.get("Sévérité","")}</span>'
                                 f'<span class="tag" style="background:#E2E8F0;color:#1B3A6B">{err_t}</span>'
-                                f'{bc_badge(err_t)}{rule}'
+                                f'{bc_badge(err_t)}'
                                 f'<br>{a.get("Message","")}{fix}'
                                 f'{ia_block}</div>',
                                 unsafe_allow_html=True
@@ -268,7 +267,7 @@ with tab_main:
                 st.warning("Aucun profil. Créez-en un dans **Profils Clients**."); selected=None
         with col2:
             notes = st.text_area("Notes", height=60)
-            
+
             gemini_ok = is_gemini_available()
             st.markdown("🤖 **Suggestions IA :** " + ("✅ Activées" if gemini_ok else "⚠️ Non configurées"))
         st.markdown("---")
@@ -281,14 +280,11 @@ with tab_main:
                 if errors:
                     for e in errors: st.error(e)
                 else:
-                    rules = get_active_rules_for_profile(selected["code"])
                     st.session_state.config = {
                         "session_name": session_name.strip(),
                         "client_code":  selected["code"],
                         "client_name":  selected["name"],
                         "notes":        notes,
-                        "active_rules": rules,
-                        "nb_rules":     len(rules),
                         "file_name":    "",
                     }
                     st.session_state.step=2; st.rerun()
@@ -351,9 +347,8 @@ with tab_main:
         with cv:
             if val["is_valid"]:
                 if st.button("🚀 Lancer l'analyse qualité →", type="primary", use_container_width=True):
-                    api_key      = get_gemini_api_key()
-                    active_rules = cfg.get("active_rules",[])
-                    client_code  = cfg.get("client_code","")
+                    api_key     = get_gemini_api_key()
+                    client_code = cfg.get("client_code","")
 
                     with st.spinner("⏳ Analyse des contraintes..."):
                         axe_a = validate_file_axe_a(pr)
@@ -365,9 +360,8 @@ with tab_main:
                         with st.spinner("🤖 Suggestions IA en cours..."):
                             axe_c = validate_file_axe_c(axe_a, axe_b, pr, api_key=api_key)
 
-                   
                     # Fusionner tous les résultats
-                    merged = merge_results(axe_a, axe_b, axe_d, axe_c)
+                    merged = merge_results(axe_a, axe_b, axe_c)
                     st.session_state.merged_result = merged
                     st.session_state.axe_c_result  = axe_c
 
