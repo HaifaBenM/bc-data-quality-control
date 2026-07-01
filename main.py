@@ -1,15 +1,4 @@
 import os
-"""
-Point d'entrée principal — BC Data Quality Control.
-
-Architecture navigation :
-    st.navigation() génère des sections dynamiques par client chargé depuis Supabase.
-    Chaque client obtient ses 3 sous-pages (Packages / Sessions / Dashboard)
-    avec un url_path unique : pkg_CODE, ses_CODE, dash_CODE.
-
-    Avant pg.run(), on extrait le client actif depuis pg.url_path et on l'injecte
-    dans session_state — toutes les pages y ont accès sans render_sidebar().
-"""
 import streamlit as st
 from app.db.profiles_db import get_all_profiles
 

@@ -1,8 +1,3 @@
-"""
-Page d'accueil — BC Data Quality Control.
-Affichée quand aucun client n'est encore sélectionné,
-ou comme landing page par défaut.
-"""
 import streamlit as st
 from app.db.profiles_db import get_all_profiles
 
