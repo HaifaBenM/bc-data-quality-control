@@ -121,7 +121,7 @@ with st.spinner("⏳ Chargement des packages..."):
 
 if not packages:
     with col_import:
-        st.button("📥 Exporter en Excel", disabled=True, use_container_width=True, type="primary")
+        st.button("📤 Exporter en Excel", disabled=True, use_container_width=True, type="primary")
     st.info(f"Aucun package dans la société **{selected_company_name}**.")
     st.stop()
 
@@ -179,7 +179,7 @@ else:
 
 with col_import:
     if st.button(
-        "📥 Importer en Excel",
+        "📤 Exporter en Excel",
         disabled=not has_selection,
         use_container_width=True,
         type="primary",
