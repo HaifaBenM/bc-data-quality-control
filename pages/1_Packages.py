@@ -75,22 +75,24 @@ if missing:
 
 # ── Chargement packages BC (avec cache 5 min) ─────────────────────────────────
 @st.cache_data(ttl=300, show_spinner=False)
-def _load_packages(client_code: str, env: str, company_id: str) -> list:
-    """Cache par (client, env, company) — TTL 5 min."""
+def _load_packages(client_code: str, env: str) -> tuple:
+    """
+    Cache par (client_code, env) — TTL 5 min.
+    company_id est résolu automatiquement si non renseigné.
+    """
     return get_config_packages(profile)
 
 col_title, col_refresh = st.columns([8, 2])
 with col_refresh:
     if st.button("🔄 Rafraîchir", use_container_width=True):
-        st.cache_data.clear()
+        _load_packages.clear()
         st.rerun()
 
 with st.spinner("⏳ Chargement des packages depuis BC..."):
     try:
-        packages = _load_packages(
+        packages, company_display = _load_packages(
             active_client,
             profile.get("bc_environment", ""),
-            profile.get("bc_company_id", ""),
         )
     except Exception as e:
         st.error(f"❌ Impossible de charger les packages BC\n\n{e}")
@@ -108,7 +110,7 @@ if not packages:
 st.markdown(f"**{len(packages)} package(s) de configuration**")
 st.caption(
     f"Environnement : `{profile.get('bc_environment')}` · "
-    f"Société : `{profile.get('bc_company_name', profile.get('bc_company_id', ''))}`"
+    f"Société : `{company_display}`"
 )
 st.markdown("---")
 
