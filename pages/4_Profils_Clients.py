@@ -13,6 +13,7 @@ from app.core.bc_connector import test_bc_connection, get_bc_companies
 from app.core.bc_metadata import read_bc_metadata, load_all_reference_data
 
 st.set_page_config(page_title="Profils Clients — BC Quality Control", page_icon="👥", layout="wide")
+st.session_state.setdefault("active_page", "profiles")
 
 st.markdown("""
 <style>
