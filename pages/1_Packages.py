@@ -1,10 +1,13 @@
 """
-Page Packages — Liste des Configuration Packages lus directement depuis BC.
-Aucune saisie manuelle : la liste vient de l'environnement BC du client.
+Page Packages — Liste des Configuration Packages BC.
+- Dropdown sociétés BC (chargées depuis l'API)
+- Liste packages filtrée par société sélectionnée
+- Sélection d'une ligne → bouton unique "Importer en Excel"
 """
 import streamlit as st
+import pandas as pd
 from app.db.profiles_db import get_profile_by_code
-from app.core.bc_api import get_config_packages
+from app.core.bc_api import get_access_token, get_companies, get_config_packages_for_company
 
 st.set_page_config(
     page_title="Packages — BC Quality Control",
@@ -23,163 +26,168 @@ if not active_client:
 # ── CSS ───────────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-.pkg-header {
-    display:grid;
-    grid-template-columns: 100px 1fr 100px 140px 100px 120px;
-    gap:.5rem; padding:.5rem .75rem;
-    background:#F8FAFC; border-bottom:2px solid #E2E8F0;
-    font-size:.8rem; font-weight:600; color:#64748B;
+.toolbar {
+    display: flex; align-items: center; gap: .75rem;
+    margin-bottom: 1.25rem;
 }
-.pkg-row {
-    display:grid;
-    grid-template-columns: 100px 1fr 100px 140px 100px 120px;
-    gap:.5rem; padding:.55rem .75rem;
-    border-bottom:1px solid #F1F5F9;
-    align-items:center; font-size:.88rem;
-}
-.pkg-row:hover { background:#F8FAFC; }
 .badge-code {
-    background:#EEF4FD; color:#1B3A6B; font-weight:700;
-    padding:.2rem .5rem; border-radius:4px;
-    font-family:monospace; font-size:.82rem;
+    background: #EEF4FD; color: #1B3A6B; font-weight: 700;
+    padding: .15rem .5rem; border-radius: 4px;
+    font-family: monospace; font-size: .82rem;
 }
-.badge-error { color:#993C1D; font-weight:600; }
-.badge-ok    { color:#64748B; }
-.num         { text-align:center; }
 </style>
 """, unsafe_allow_html=True)
 
 # ── En-tête ───────────────────────────────────────────────────────────────────
 st.markdown(f"# 📦 Packages — {active_client_name}")
-st.caption(f"Client : **{active_client_name}** ({active_client}) — Source : environnement BC")
 st.markdown("---")
 
-# ── Chargement profil BC ──────────────────────────────────────────────────────
+# ── Chargement profil ─────────────────────────────────────────────────────────
 profile = get_profile_by_code(active_client)
-
 if not profile:
-    st.error("Profil client introuvable. Vérifiez dans Profils Clients.")
+    st.error("Profil client introuvable.")
     st.stop()
 
-missing = [
-    f for f in ["bc_tenant_id", "bc_client_id", "bc_client_secret",
-                "bc_environment", "bc_company_id"]
-    if not profile.get(f, "").strip()
-]
-if missing:
-    st.error(
-        f"Credentials BC manquants dans le profil : **{', '.join(missing)}**\n\n"
-        "Allez dans **Profils Clients** pour compléter la configuration BC."
+tenant_id     = profile.get("bc_tenant_id", "").strip()
+client_id     = profile.get("bc_client_id", "").strip()
+client_secret = profile.get("bc_client_secret", "").strip()
+environment   = profile.get("bc_environment", "Production").strip()
+
+if not all([tenant_id, client_id, client_secret, environment]):
+    st.error("Credentials BC incomplets. Vérifiez le profil client.")
+    st.stop()
+
+# ── Token (cache 55 min — expire avant les 60 min Azure AD) ──────────────────
+@st.cache_data(ttl=3300, show_spinner=False)
+def _get_token(tid: str, cid: str, cs: str) -> str:
+    return get_access_token(tid, cid, cs)
+
+try:
+    token = _get_token(tenant_id, client_id, client_secret)
+except Exception as e:
+    st.error(f"❌ Authentification BC échouée\n\n{e}")
+    st.stop()
+
+# ── Sociétés (cache 10 min) ───────────────────────────────────────────────────
+@st.cache_data(ttl=600, show_spinner=False)
+def _get_companies(tid: str, env: str, _token: str) -> list:
+    return get_companies(tid, env, _token)
+
+try:
+    companies = _get_companies(tenant_id, environment, token)
+except Exception as e:
+    st.error(f"❌ Impossible de charger les sociétés BC\n\n{e}")
+    st.stop()
+
+if not companies:
+    st.warning("Aucune société BC trouvée dans cet environnement.")
+    st.stop()
+
+# ── Toolbar : société + boutons ───────────────────────────────────────────────
+company_options = {
+    c.get("displayName") or c.get("name", c["id"]): c["id"]
+    for c in companies
+}
+
+col_select, col_refresh, col_import = st.columns([4, 1.2, 1.8])
+
+with col_select:
+    selected_company_name = st.selectbox(
+        "Société",
+        options=list(company_options.keys()),
+        label_visibility="collapsed",
     )
-    st.stop()
+    selected_company_id = company_options[selected_company_name]
 
-# ── Chargement packages BC (avec cache 5 min) ─────────────────────────────────
-@st.cache_data(ttl=300, show_spinner=False)
-def _load_packages(client_code: str, env: str) -> tuple:
-    """
-    Cache par (client_code, env) — TTL 5 min.
-    company_id est résolu automatiquement si non renseigné.
-    """
-    return get_config_packages(profile)
-
-col_title, col_refresh = st.columns([8, 2])
 with col_refresh:
     if st.button("🔄 Rafraîchir", use_container_width=True):
-        _load_packages.clear()
+        st.cache_data.clear()
         st.rerun()
 
-with st.spinner("⏳ Chargement des packages depuis BC..."):
+# ── Packages (cache 5 min par société) ───────────────────────────────────────
+@st.cache_data(ttl=300, show_spinner=False)
+def _get_packages(tid: str, env: str, company_id: str, _token: str) -> list:
+    return get_config_packages_for_company(tid, env, company_id, _token)
+
+with st.spinner("⏳ Chargement des packages..."):
     try:
-        packages, company_display = _load_packages(
-            active_client,
-            profile.get("bc_environment", ""),
-        )
+        packages = _get_packages(tenant_id, environment, selected_company_id, token)
     except Exception as e:
-        st.error(f"❌ Impossible de charger les packages BC\n\n{e}")
+        st.error(f"❌ {e}")
         st.stop()
 
-# ── Affichage liste ───────────────────────────────────────────────────────────
+# ── Bouton Importer (dans col_import, disabled si rien sélectionné) ───────────
+# On le rend ici mais on active/désactive selon la sélection plus bas
+
 if not packages:
-    st.info(
-        f"Aucun package de configuration trouvé dans "
-        f"**{profile.get('bc_environment')}** / "
-        f"**{profile.get('bc_company_name', active_client)}**."
-    )
+    with col_import:
+        st.button("📥 Importer en Excel", disabled=True, use_container_width=True, type="primary")
+    st.info(f"Aucun package dans la société **{selected_company_name}**.")
     st.stop()
 
-st.markdown(f"**{len(packages)} package(s) de configuration**")
+# ── Tableau avec sélection ────────────────────────────────────────────────────
 st.caption(
-    f"Environnement : `{profile.get('bc_environment')}` · "
-    f"Société : `{company_display}`"
+    f"**{len(packages)} package(s)** · "
+    f"Environnement : `{environment}` · Société : `{selected_company_name}`"
 )
-st.markdown("---")
 
-# En-tête colonnes
-st.markdown("""
-<div class="pkg-header">
-    <div>Code</div>
-    <div>Nom package</div>
-    <div class="num">Ordre</div>
-    <div class="num">Nb tables</div>
-    <div class="num">Nb erreurs</div>
-    <div></div>
-</div>
-""", unsafe_allow_html=True)
+df = pd.DataFrame([
+    {
+        "Code":        p.get("code", ""),
+        "Nom package": p.get("packageName", ""),
+        "Ordre":       p.get("processingOrder", 0),
+        "Nb tables":   p.get("numberOfTables", 0),
+        "Nb erreurs":  p.get("numberOfErrors", 0),
+    }
+    for p in packages
+])
 
-for pkg in packages:
-    code      = pkg.get("code", "")
-    name      = pkg.get("packageName", "")
-    order     = pkg.get("processingOrder", 0)
-    nb_tables = pkg.get("numberOfTables", 0)
-    nb_errors = pkg.get("numberOfErrors", 0)
-    err_cls   = "badge-error" if nb_errors > 0 else "badge-ok"
+event = st.dataframe(
+    df,
+    use_container_width=True,
+    hide_index=True,
+    on_select="rerun",
+    selection_mode="single-row",
+    column_config={
+        "Code":        st.column_config.TextColumn("Code",        width="small"),
+        "Nom package": st.column_config.TextColumn("Nom package", width="large"),
+        "Ordre":       st.column_config.NumberColumn("Ordre",     width="small"),
+        "Nb tables":   st.column_config.NumberColumn("Nb tables", width="small"),
+        "Nb erreurs":  st.column_config.NumberColumn("Nb erreurs",width="small"),
+    },
+)
 
-    col_code, col_name, col_ord, col_tbl, col_err, col_act = st.columns(
-        [1.2, 3.5, 1, 1.5, 1, 1.5]
-    )
+# ── Sélection + bouton Importer ───────────────────────────────────────────────
+selected_rows = event.selection.rows if event and event.selection else []
+has_selection = len(selected_rows) > 0
 
-    with col_code:
-        st.markdown(
-            f'<span class="badge-code">{code}</span>',
-            unsafe_allow_html=True,
-        )
-    with col_name:
-        st.markdown(
-            f'<span style="font-weight:500;color:#1E293B">{name}</span>',
-            unsafe_allow_html=True,
-        )
-    with col_ord:
-        st.markdown(
-            f'<div class="num" style="color:#94A3B8">{order}</div>',
-            unsafe_allow_html=True,
-        )
-    with col_tbl:
-        st.markdown(
-            f'<div class="num">{nb_tables}</div>',
-            unsafe_allow_html=True,
-        )
-    with col_err:
-        st.markdown(
-            f'<div class="num {err_cls}">{nb_errors}</div>',
-            unsafe_allow_html=True,
-        )
-    with col_act:
-        if st.button(
-            "📥 Importer",
-            key=f"imp_{code}",
-            use_container_width=True,
-            type="primary",
-        ):
-            # Pré-charger le contexte package pour la session
-            st.session_state["active_package_code"] = code
-            st.session_state["active_package_name"] = name
-            # Réinitialiser le wizard Sessions
-            for k in ["step", "config", "parse_result", "validation",
-                      "merged_result", "axe_c_result", "saved_session_id"]:
-                st.session_state[k] = 1 if k == "step" else ({} if k == "config" else None)
-            st.switch_page(f"ses_{active_client}")
+if has_selection:
+    idx = selected_rows[0]
+    sel_pkg = packages[idx]
+    sel_code = sel_pkg.get("code", "")
+    sel_name = sel_pkg.get("packageName", "")
 
     st.markdown(
-        "<hr style='border:none;border-top:1px solid #F1F5F9;margin:.05rem 0'>",
+        f'<div style="background:#EEF4FD;border:1px solid #BFDBFE;border-radius:6px;'
+        f'padding:.5rem 1rem;font-size:.88rem;color:#1B3A6B;margin:.5rem 0">'
+        f'✅ Sélectionné : <span class="badge-code">{sel_code}</span> — <b>{sel_name}</b>'
+        f'</div>',
         unsafe_allow_html=True,
     )
+else:
+    st.caption("👆 Cliquez sur une ligne pour sélectionner un package.")
+
+with col_import:
+    if st.button(
+        "📥 Importer en Excel",
+        disabled=not has_selection,
+        use_container_width=True,
+        type="primary",
+        key="btn_import",
+    ):
+        st.session_state["active_package_code"] = sel_code
+        st.session_state["active_package_name"] = sel_name
+        for k in ["step", "config", "parse_result", "validation",
+                  "merged_result", "axe_c_result", "saved_session_id"]:
+            st.session_state[k] = 1 if k == "step" else ({} if k == "config" else None)
+        st.switch_page(f"ses_{active_client}")

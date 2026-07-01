@@ -192,3 +192,32 @@ def get_config_packages(profile: dict) -> tuple[list[dict], str]:
         raise Exception(f"Erreur BC API {status} : {e.response.text[:300]}") from e
 
     return resp.json().get("value", []), company_display
+
+
+def get_config_packages_for_company(
+    tenant_id: str,
+    environment: str,
+    company_id: str,
+    token: str,
+) -> list[dict]:
+    """
+    Charge les packages de configuration pour une société BC donnée.
+    Utilisé quand le company_id est déjà connu (sélection depuis la liste des sociétés).
+    """
+    url = (
+        f"https://api.businesscentral.dynamics.com"
+        f"/v2.0/{tenant_id}/{environment}"
+        f"/api/microsoft/automation/v2.0"
+        f"/companies({company_id})/configurationPackages"
+    )
+    try:
+        resp = requests.get(url, headers=_headers(token), timeout=30)
+        resp.raise_for_status()
+    except requests.HTTPError as e:
+        status = e.response.status_code
+        if status == 401:
+            raise Exception("Non autorisé (401) — permission Automation.ReadWrite.All requise.")
+        if status == 403:
+            raise Exception("Accès refusé (403) — rôle D365 AUTOMATION requis sur l'utilisateur BC.")
+        raise Exception(f"Erreur BC API {status} : {e.response.text[:300]}")
+    return resp.json().get("value", [])
