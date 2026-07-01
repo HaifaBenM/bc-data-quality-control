@@ -1,7 +1,6 @@
 """
-Page Sessions — Sprint 6 final.
-Résultats unifiés : toutes les anomalies en un seul onglet par table.
-Pas de notion d'Axe visible pour l'utilisateur.
+Page Sessions Intégration — contrôle qualité par client.
+Le client actif est lu depuis st.session_state["active_client"] (défini par la sidebar).
 """
 import streamlit as st
 import pandas as pd
@@ -10,13 +9,95 @@ from app.core.structure_validator import validate_file_structure
 from app.core.validator_axe_a import validate_file_axe_a
 from app.core.validator_axe_b import validate_file_axe_b
 from app.core.validator_axe_c import validate_file_axe_c, get_gemini_api_key, is_gemini_available
-from app.db.profiles_db import get_profiles_for_select
 from app.db.sessions_db import (
     save_session, update_session, delete_session,
     get_all_sessions, SESSION_STATUSES, STATUS_COLORS, STATUS_ICONS
 )
 
-st.set_page_config(page_title="Sessions — BC Quality Control", page_icon="📁", layout="wide")
+st.set_page_config(page_title="Sessions Intégration — BC Quality Control", page_icon="📁", layout="wide")
+
+st.markdown("""
+<style>
+/* ── Step header ─────────────────────────────────────────────────────────── */
+.step-header {
+    background: #EEF4FD; border-left: 4px solid #2E6FBF;
+    padding: .5rem 1rem; border-radius: 4px;
+    font-weight: 600; color: #1B3A6B; margin-bottom: 1rem;
+}
+/* ── Anomaly cards ───────────────────────────────────────────────────────── */
+.card-major {
+    background: #FAECE7; border-left: 4px solid #993C1D;
+    padding: .6rem 1rem; border-radius: 6px;
+    margin: .35rem 0; font-size: .88rem; line-height: 1.5;
+}
+.card-minor {
+    background: #FAEEDA; border-left: 4px solid #854F0B;
+    padding: .6rem 1rem; border-radius: 6px;
+    margin: .35rem 0; font-size: .88rem; line-height: 1.5;
+}
+.card-info {
+    background: #EFF6FF; border-left: 4px solid #3B82F6;
+    padding: .6rem 1rem; border-radius: 6px;
+    margin: .25rem 0; font-size: .85rem; line-height: 1.5;
+}
+/* ── File summary cards ──────────────────────────────────────────────────── */
+.card-data {
+    background: #EEF4FD; border-left: 4px solid #2E6FBF;
+    padding: .5rem 1rem; border-radius: 6px; margin: .3rem 0;
+}
+.card-ref {
+    background: #F0FBF5; border-left: 4px solid #0F6E56;
+    padding: .5rem 1rem; border-radius: 6px; margin: .3rem 0;
+}
+/* ── Session list cards ──────────────────────────────────────────────────── */
+.card-session {
+    background: white; border: 1px solid #E2E8F0;
+    border-radius: 8px; padding: 1rem 1.2rem; margin: .4rem 0;
+}
+.session-name { font-size: 1rem; font-weight: 600; color: #1B3A6B; margin: 0 0 .2rem 0; }
+.session-meta { font-size: .8rem; color: #64748B; margin: .1rem 0; }
+/* ── Stat boxes ──────────────────────────────────────────────────────────── */
+.stat-box {
+    text-align: center; padding: 1rem .5rem;
+    background: white; border: 1px solid #E2E8F0; border-radius: 8px;
+}
+.stat-num { font-size: 2rem; font-weight: 700; margin: 0; }
+.stat-lbl { font-size: .75rem; color: #64748B; margin: .2rem 0 0; }
+/* ── Save box ────────────────────────────────────────────────────────────── */
+.save-box {
+    background: #E1F5EE; border: 1px solid #0F6E56; border-radius: 6px;
+    padding: .5rem 1rem; font-size: .85rem; color: #0F6E56;
+}
+/* ── Tags ────────────────────────────────────────────────────────────────── */
+.tag {
+    display: inline-block; padding: .15rem .5rem;
+    border-radius: 4px; font-size: .72rem; font-weight: 600;
+    margin-right: .25rem; vertical-align: middle;
+}
+.tag-bc    { background: #FAECE7; color: #993C1D; }
+.tag-plus  { background: #FFF8E1; color: #854F0B; }
+.tag-data  { background: #EEF4FD; color: #1B3A6B; }
+.tag-ref   { background: #F0FBF5; color: #0F6E56; }
+.tag-info  { background: #EFF6FF; color: #1D4ED8; }
+.tag-major { background: #FAECE7; color: #993C1D; }
+.tag-minor { background: #FAEEDA; color: #854F0B; }
+.tag-ai    { background: #F3E8FF; color: #7C3AED; }
+.tag-auto  { background: #E1F5EE; color: #0F6E56; }
+/* ── IA confidence bar ───────────────────────────────────────────────────── */
+.conf-bar { background: #E2E8F0; border-radius: 3px; height: 5px; margin: 4px 0; }
+</style>
+""", unsafe_allow_html=True)
+
+
+# ── Guard : client actif requis ───────────────────────────────────────────────
+active_client      = st.session_state.get("active_client", "")
+active_client_name = st.session_state.get("active_client_name", "")
+active_pkg_code    = st.session_state.get("active_package_code", "")
+active_pkg_name    = st.session_state.get("active_package_name", "")
+
+if not active_client:
+    st.warning("⚠️ Sélectionnez un client depuis le menu latéral.")
+    st.stop()
 
 
 # ── Erreurs détectées aussi par BC Config Package ─────────────────────────────
@@ -228,7 +309,7 @@ def reset_session():
 # ════════════════════════════════════════════════════════════════════════════
 # PAGE
 # ════════════════════════════════════════════════════════════════════════════
-st.markdown("# 📁 Sessions de contrôle")
+st.markdown(f"# 📁 Sessions Intégration — {active_client_name}")
 st.markdown("---")
 
 tab_main, tab_ses = st.tabs(["➕ Nouvelle session", "📋 Mes sessions"])
@@ -257,33 +338,39 @@ with tab_main:
         st.markdown('<div class="step-header">Étape 1 — Informations</div>', unsafe_allow_html=True)
         col1,col2 = st.columns(2)
         with col1:
-            session_name = st.text_input("Nom de la session *", placeholder="ABC - Clients - Juin 2026")
-            profiles = get_profiles_for_select()
-            if profiles:
-                opts = ["— Sélectionner un client —"]+[p["label"] for p in profiles]
-                choice = st.selectbox("Client *", opts)
-                selected = next((p for p in profiles if p["label"]==choice), None)
-            else:
-                st.warning("Aucun profil. Créez-en un dans **Profils Clients**."); selected=None
+            # Nom pré-rempli si import depuis Packages
+            default_name = f"{active_pkg_code} — " if active_pkg_code else ""
+            session_name = st.text_input(
+                "Nom de la session *",
+                value=default_name,
+                placeholder="MDD Vente — Juin 2026",
+            )
+            # Client affiché depuis le contexte (pas de selectbox)
+            st.markdown(
+                f'<div style="background:#EEF4FD;border:1px solid #BFDBFE;border-radius:6px;'
+                f'padding:.5rem .75rem;font-size:.88rem;color:#1B3A6B;">'
+                f'👤 <b>{active_client_name}</b> ({active_client})'
+                f'{"<br>📦 <b>" + active_pkg_name + "</b>" if active_pkg_name else ""}'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
         with col2:
             notes = st.text_area("Notes", height=60)
-
             gemini_ok = is_gemini_available()
             st.markdown("🤖 **Suggestions IA :** " + ("✅ Activées" if gemini_ok else "⚠️ Non configurées"))
         st.markdown("---")
         _,col_btn = st.columns([8,2])
         with col_btn:
             if st.button("Suivant →", type="primary", use_container_width=True):
-                errors = []
-                if not session_name.strip(): errors.append("Nom obligatoire.")
-                if not selected:             errors.append("Sélectionnez un client.")
-                if errors:
-                    for e in errors: st.error(e)
+                if not session_name.strip():
+                    st.error("Nom de session obligatoire.")
                 else:
                     st.session_state.config = {
                         "session_name": session_name.strip(),
-                        "client_code":  selected["code"],
-                        "client_name":  selected["name"],
+                        "client_code":  active_client,
+                        "client_name":  active_client_name,
+                        "pkg_code":     active_pkg_code,
+                        "pkg_name":     active_pkg_name,
                         "notes":        notes,
                         "file_name":    "",
                     }
@@ -468,13 +555,8 @@ with tab_ses:
     for key,default in [("edit_session_id",None),("confirm_delete_ses",None)]:
         if key not in st.session_state: st.session_state[key]=default
 
-    profiles = get_profiles_for_select()
-    cf1,_ = st.columns([3,7])
-    with cf1:
-        fopts=["Tous les clients"]+[p["label"] for p in profiles]
-        fch=st.selectbox("Filtrer par client",fopts,key="filter_ses")
-    fcode = next((p["code"] for p in profiles if p["label"]==fch),None) if fch!="Tous les clients" else None
-    sessions = get_all_sessions(profile_code=fcode)
+    # Sessions filtrées par le client actif (défini via la sidebar)
+    sessions = get_all_sessions(profile_code=active_client)
     st.markdown("---")
 
     if not sessions:
