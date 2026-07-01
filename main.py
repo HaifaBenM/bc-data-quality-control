@@ -67,7 +67,7 @@ for p in profiles:
 # Profils Clients — hors section client (consultant uniquement, séparation future)
 sections["⚙️ Configuration"] = [
     st.Page(
-        "pages/4_Profils_Clients.py",
+        "pages/3_Profils_Clients.py",
         title="Profils Clients",
         icon="👥",
         url_path="profils",
