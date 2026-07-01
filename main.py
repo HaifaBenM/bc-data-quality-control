@@ -37,7 +37,19 @@ profiles = _load_profiles()
 # st.switch_page(url_path) fonctionne en Streamlit 1.36+ :
 #   st.switch_page("ses_AQUA")  →  navigue vers la page Sessions d'Aquachiara.
 
-sections: dict = {}
+sections: dict = {
+    # Page d'accueil — visible uniquement si aucun client n'est sélectionné
+    # ou comme landing page par défaut (default=True)
+    "": [
+        st.Page(
+            "pages/0_Home.py",
+            title="Accueil",
+            icon="🏠",
+            url_path="home",
+            default=True,
+        )
+    ],
+}
 
 for p in profiles:
     code = p.get("code", "")
@@ -78,23 +90,30 @@ sections["⚙️ Configuration"] = [
 pg = st.navigation(sections)
 
 # ── Injection du client actif dans session_state ──────────────────────────────
-# pg.url_path contient la page courante (ex: "pkg_AQUA", "ses_CLIENT2").
-# On parse le suffixe pour identifier le client et on l'injecte AVANT pg.run()
-# afin que toutes les pages y aient accès via st.session_state["active_client"].
-#
-# Si aucun profil ne correspond (ex: page "profils"), on ne modifie pas le
-# client déjà en session — permet de revenir sur la dernière page cliente.
+# Lookup dict url_path → (code, name) pour correspondance exacte.
+# Fallback : si l'URL ne correspond à aucun client (ex: page "profils" ou
+# premier chargement), on garde le client déjà en session ou on prend le
+# premier profil disponible.
 
-current_url = getattr(pg, "url_path", "") or ""
-
+_url_to_client: dict = {}
 for p in profiles:
     code = p.get("code", "")
-    # Le code suit le premier "_" dans l'url_path : pkg_AQUA → AQUA
-    if current_url.endswith(f"_{code}") or current_url == f"pkg_{code}" \
-            or current_url == f"ses_{code}" or current_url == f"dash_{code}":
-        st.session_state["active_client"]      = code
-        st.session_state["active_client_name"] = p.get("name", code)
-        break
+    name = p.get("name", code)
+    _url_to_client[f"pkg_{code}"]  = (code, name)
+    _url_to_client[f"ses_{code}"]  = (code, name)
+    _url_to_client[f"dash_{code}"] = (code, name)
+
+current_url = str(getattr(pg, "url_path", "") or "")
+
+if current_url in _url_to_client:
+    _code, _name = _url_to_client[current_url]
+    st.session_state["active_client"]      = _code
+    st.session_state["active_client_name"] = _name
+elif not st.session_state.get("active_client") and profiles:
+    # Premier chargement sans URL cliente → auto-sélectionner le 1er profil
+    _first = profiles[0]
+    st.session_state["active_client"]      = _first.get("code", "")
+    st.session_state["active_client_name"] = _first.get("name", "")
 
 # ── Lancement de la page sélectionnée ─────────────────────────────────────────
 pg.run()
