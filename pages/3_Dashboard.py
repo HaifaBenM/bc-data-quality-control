@@ -2,7 +2,6 @@
 Page Dashboard — Vue globale des sessions pour le client actif.
 """
 import streamlit as st
-from app.components.sidebar import render_sidebar
 from app.db.sessions_db import get_all_sessions, STATUS_COLORS, STATUS_ICONS
 
 st.set_page_config(
@@ -10,8 +9,6 @@ st.set_page_config(
     page_icon="📊",
     layout="wide",
 )
-
-render_sidebar()
 
 # ── Guard ─────────────────────────────────────────────────────────────────────
 active_client      = st.session_state.get("active_client", "")

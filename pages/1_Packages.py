@@ -3,7 +3,6 @@ Page Packages — Liste des packages de configuration BC pour le client actif.
 Reproduit la vue BC : Code · Nom · Nb tables · Nb enregistrements · Nb erreurs.
 """
 import streamlit as st
-from app.components.sidebar import render_sidebar
 from app.db.packages_db import get_packages, create_package, delete_package
 
 st.set_page_config(
@@ -11,8 +10,6 @@ st.set_page_config(
     page_icon="📦",
     layout="wide",
 )
-
-render_sidebar()
 
 # ── Guard : client actif requis ───────────────────────────────────────────────
 active_client      = st.session_state.get("active_client", "")
@@ -165,7 +162,7 @@ else:
                     for k in ["step", "config", "parse_result", "validation",
                               "merged_result", "axe_c_result", "saved_session_id"]:
                         st.session_state[k] = 1 if k == "step" else ({} if k == "config" else None)
-                    st.switch_page("pages/2_Sessions_Integration.py")
+                    st.switch_page(f"ses_{active_client}")
             with a2:
                 if st.button("🗑️", key=f"del_{pkg_id}", use_container_width=True):
                     st.session_state["confirm_delete_pkg"] = pkg_id
