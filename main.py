@@ -1,3 +1,4 @@
+import os
 """
 Point d'entrée principal — BC Data Quality Control.
 
@@ -42,7 +43,8 @@ sections: dict = {
     # ou comme landing page par défaut (default=True)
     "": [
         st.Page(
-            "pages/0_Home.py",
+            "pages/0_Home.py" if os.path.exists("pages/0_Home.py")
+            else "pages/1_Packages.py",
             title="Accueil",
             icon="🏠",
             url_path="home",
@@ -79,7 +81,8 @@ for p in profiles:
 # Profils Clients — hors section client (consultant uniquement, séparation future)
 sections["⚙️ Configuration"] = [
     st.Page(
-        "pages/3_Profils_Clients.py",
+        "pages/4_Profils_Clients.py" if os.path.exists("pages/4_Profils_Clients.py")
+        else "pages/3_Profils_Clients.py",
         title="Profils Clients",
         icon="👥",
         url_path="profils",

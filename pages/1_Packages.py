@@ -2,7 +2,7 @@
 Page Packages — Liste des Configuration Packages BC.
 - Dropdown sociétés BC (chargées depuis l'API)
 - Liste packages filtrée par société sélectionnée
-- Sélection d'une ligne → bouton unique "Exporter en Excel"
+- Sélection d'une ligne → bouton unique "Importer en Excel"
 """
 import streamlit as st
 import pandas as pd
@@ -116,7 +116,7 @@ with st.spinner("⏳ Chargement des packages..."):
         st.error(f"❌ {e}")
         st.stop()
 
-# ── Bouton Exporter (dans col_import, disabled si rien sélectionné) ───────────
+# ── Bouton Importer (dans col_import, disabled si rien sélectionné) ───────────
 # On le rend ici mais on active/désactive selon la sélection plus bas
 
 if not packages:
@@ -157,7 +157,7 @@ event = st.dataframe(
     },
 )
 
-# ── Sélection + bouton Exporter ───────────────────────────────────────────────
+# ── Sélection + bouton Importer ───────────────────────────────────────────────
 selected_rows = event.selection.rows if event and event.selection else []
 has_selection = len(selected_rows) > 0
 
@@ -179,7 +179,7 @@ else:
 
 with col_import:
     if st.button(
-        "📥 Exporter en Excel",
+        "📥 Importer en Excel",
         disabled=not has_selection,
         use_container_width=True,
         type="primary",
