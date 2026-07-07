@@ -1,7 +1,3 @@
-"""
-Page Sessions Intégration — contrôle qualité par client.
-Le client actif est lu depuis st.session_state["active_client"] (défini par la sidebar).
-"""
 import streamlit as st
 import pandas as pd
 from app.core.file_parser import parse_uploaded_file, get_file_summary
@@ -9,12 +5,15 @@ from app.core.structure_validator import validate_file_structure
 from app.core.validator_axe_a import validate_file_axe_a
 from app.core.validator_axe_b import validate_file_axe_b
 from app.core.validator_axe_c import validate_file_axe_c, get_gemini_api_key, is_gemini_available
+from app.core.auth import require_role
 from app.db.sessions_db import (
     save_session, update_session, delete_session,
     get_all_sessions, SESSION_STATUSES, STATUS_COLORS, STATUS_ICONS
 )
 
 st.set_page_config(page_title="Sessions Intégration — BC Quality Control", page_icon="📁", layout="wide")
+
+require_role()
 
 st.markdown("""
 <style>

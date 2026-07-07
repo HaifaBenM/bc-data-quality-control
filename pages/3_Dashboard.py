@@ -2,6 +2,7 @@
 Page Dashboard — Vue globale des sessions pour le client actif.
 """
 import streamlit as st
+from app.core.auth import require_role
 from app.db.sessions_db import get_all_sessions, STATUS_COLORS, STATUS_ICONS
 
 st.set_page_config(
@@ -10,13 +11,12 @@ st.set_page_config(
     layout="wide",
 )
 
+require_role()
+
 # ── Guard ─────────────────────────────────────────────────────────────────────
 active_client      = st.session_state.get("active_client", "")
 active_client_name = st.session_state.get("active_client_name", "")
 
-if not active_client:
-    st.warning("⚠️ Sélectionnez un client depuis le menu latéral.")
-    st.stop()
 
 # ── Page ──────────────────────────────────────────────────────────────────────
 st.markdown(f"# 📊 Dashboard — {active_client_name}")

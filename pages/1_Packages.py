@@ -10,6 +10,7 @@ from app.core.bc_api import (
     get_config_packages_for_company, build_tables_data_for_export,
 )
 from app.core.excel_exporter import generate_package_template
+from app.core.auth import require_role, is_consultant
 
 st.set_page_config(
     page_title="Packages — BC Quality Control",
@@ -17,13 +18,12 @@ st.set_page_config(
     layout="wide",
 )
 
+require_role()
+
 # ── Guard ─────────────────────────────────────────────────────────────────────
 active_client      = st.session_state.get("active_client", "")
 active_client_name = st.session_state.get("active_client_name", "")
 
-if not active_client:
-    st.warning("Sélectionnez un client depuis le menu latéral.")
-    st.stop()
 
 # ── CSS ───────────────────────────────────────────────────────────────────────
 st.markdown("""
@@ -286,43 +286,44 @@ with tab_list:
         st.markdown("</div>", unsafe_allow_html=True)
 
 # ════════════════════════════════════════════════════════════════════════════
-# ONGLET 2 — VISIBILITÉ CLIENT
+# ONGLET 2 — VISIBILITÉ CLIENT (consultant uniquement)
 # ════════════════════════════════════════════════════════════════════════════
-with tab_visiblity:
-    st.caption(
-        "Configurez quels packages sont visibles pour ce client. "
-        "Les packages masqués n'apparaissent pas dans la vue client."
-    )
+if is_consultant():
+    with tab_visiblity:
+        st.caption(
+            "Configurez quels packages sont visibles pour ce client. "
+            "Les packages masqués n'apparaissent pas dans la vue client."
+        )
 
-    vis_map = get_visibility_map(active_client)
+        vis_map = get_visibility_map(active_client)
+        changed = False
 
-    changed = False
-    for pkg in all_packages:
-        code = pkg.get("code", "")
-        name = pkg.get("packageName", "")
-        is_visible = vis_map.get(code, True)
+        for pkg in all_packages:
+            code       = pkg.get("code", "")
+            name       = pkg.get("packageName", "")
+            is_visible = vis_map.get(code, True)
 
-        col_info, col_toggle = st.columns([5, 1])
-        with col_info:
-            opacity = "" if is_visible else " vis-hidden"
-            st.markdown(
-                f'<div class="vis-row{opacity}">'
-                f'<span><span class="vis-code">{code}</span> '
-                f'<span class="vis-name">{name}</span></span>'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
-        with col_toggle:
-            new_val = st.toggle(
-                "Visible",
-                value=is_visible,
-                key=f"vis_{code}",
-                label_visibility="collapsed",
-            )
-            if new_val != is_visible:
-                set_visibility(active_client, code, new_val)
-                changed = True
+            col_info, col_toggle = st.columns([5, 1])
+            with col_info:
+                opacity = "" if is_visible else " vis-hidden"
+                st.markdown(
+                    f'<div class="vis-row{opacity}">'
+                    f'<span><span class="vis-code">{code}</span> '
+                    f'<span class="vis-name">{name}</span></span>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+            with col_toggle:
+                new_val = st.toggle(
+                    "Visible",
+                    value=is_visible,
+                    key=f"vis_{code}",
+                    label_visibility="collapsed",
+                )
+                if new_val != is_visible:
+                    set_visibility(active_client, code, new_val)
+                    changed = True
 
-    if changed:
-        st.success("Visibilité mise à jour.")
-        st.rerun()
+        if changed:
+            st.success("Visibilité mise à jour.")
+            st.rerun()
