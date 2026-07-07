@@ -1,5 +1,6 @@
 import streamlit as st
 from app.db.profiles_db import get_all_profiles
+from app.core.auth import check_password, set_role, get_role, is_consultant
 
 st.set_page_config(
     page_title="BC Data Quality Control — Talan",
@@ -17,101 +18,143 @@ st.markdown("""
 .hero h1 { color: white; font-size: 2rem; margin: 0 0 .5rem; }
 .hero p  { color: #A8C4E8; font-size: 1rem; margin: 0; }
 
-.client-card {
-    background: white; border: 1px solid #E2E8F0;
-    border-radius: 10px; padding: 1.25rem 1.5rem;
-    cursor: pointer; transition: all .15s;
-    display: flex; align-items: center; gap: 1rem;
-    margin-bottom: .75rem;
+.role-card {
+    border-radius: 10px; padding: 1.5rem;
+    height: 100%; border: 1px solid #E2E8F0;
 }
-.client-card:hover { border-color: #2E6FBF; box-shadow: 0 4px 12px rgba(46,111,191,.12); }
-.client-icon {
-    width: 44px; height: 44px; border-radius: 10px;
-    background: #EEF4FD; display: flex; align-items: center;
-    justify-content: center; font-size: 1.4rem; flex-shrink: 0;
-}
-.client-name { font-weight: 600; color: #1B3A6B; font-size: 1rem; margin: 0; }
-.client-code { color: #94A3B8; font-size: .8rem; font-family: monospace; }
+.role-card.consultant { background: #EEF4FD; border-color: #BFDBFE; }
+.role-card.client     { background: #F0FBF5; border-color: #BBF7D0; }
+.role-card h3 { margin: 0 0 .75rem; }
 
-.feature-box {
-    background: #F8FAFC; border: 1px solid #E2E8F0;
-    border-radius: 8px; padding: 1rem 1.25rem;
-    height: 100%;
+.client-row {
+    display: flex; align-items: center; justify-content: space-between;
+    background: white; border: 1px solid #E2E8F0; border-radius: 8px;
+    padding: .6rem 1rem; margin: .4rem 0;
 }
-.feature-box h4 { color: #1B3A6B; margin: 0 0 .4rem; font-size: .95rem; }
-.feature-box p  { color: #64748B; font-size: .82rem; margin: 0; line-height: 1.5; }
+.client-name { font-weight: 600; color: #1B3A6B; font-size: .95rem; }
+.client-env  { font-size: .78rem; color: #94A3B8; font-family: monospace; }
+
+.session-banner {
+    background: #E1F5EE; border: 1px solid #0F6E56; border-radius: 8px;
+    padding: .75rem 1.25rem; margin-bottom: 1.5rem;
+    display: flex; align-items: center; justify-content: space-between;
+}
 </style>
 """, unsafe_allow_html=True)
+
+# ── Query param : lien client direct (?client=CODE) ───────────────────────────
+params = st.query_params
+if "client" in params and not get_role():
+    code = params["client"]
+    profiles = get_all_profiles()
+    match = next((p for p in profiles if p["code"] == code), None)
+    if match:
+        set_role("client", match["code"], match["name"])
+        st.query_params.clear()
+        st.switch_page(f"pkg_{code}")
+
+# ── Déjà connecté → bannière + continuer ─────────────────────────────────────
+role = get_role()
+if role:
+    label = (
+        "👔 Connecté en tant que **Consultant**"
+        if role == "consultant"
+        else f"🏢 Connecté en tant que client — **{st.session_state.get('active_client_name', '')}**"
+    )
+    col_msg, col_btn = st.columns([5, 2])
+    with col_msg:
+        st.markdown(
+            f'<div class="session-banner">{label}</div>',
+            unsafe_allow_html=True,
+        )
+    with col_btn:
+        if st.button("🚪 Changer de session", use_container_width=True):
+            from app.core.auth import logout
+            logout()
+            st.rerun()
+    st.stop()
 
 # ── Hero ──────────────────────────────────────────────────────────────────────
 st.markdown("""
 <div class="hero">
     <h1>🔍 BC Data Quality Control</h1>
-    <p>Contrôle qualité des données avant import Business Central — Talan</p>
+    <p>Contrôle qualité des données avant import — Microsoft Dynamics 365 Business Central · Talan</p>
 </div>
 """, unsafe_allow_html=True)
 
-# ── Clients ───────────────────────────────────────────────────────────────────
-profiles = get_all_profiles()
+col_consultant, col_client = st.columns(2, gap="large")
 
-col_clients, col_features = st.columns([5, 4], gap="large")
+# ════════════════════════════════════════════════════════════════════════════
+# COLONNE GAUCHE — Accès Consultant
+# ════════════════════════════════════════════════════════════════════════════
+with col_consultant:
+    st.markdown("""
+<div class="role-card consultant">
+    <h3>👔 Accès Consultant</h3>
+</div>
+""", unsafe_allow_html=True)
 
-with col_clients:
-    st.markdown("### Sélectionnez un client")
+    st.markdown("")
+    password = st.text_input(
+        "Mot de passe",
+        type="password",
+        placeholder="••••••••",
+        key="consultant_pwd",
+        label_visibility="collapsed",
+    )
+
+    if st.button("Se connecter", type="primary", use_container_width=True):
+        if not password:
+            st.error("Saisissez le mot de passe.")
+        elif check_password(password):
+            set_role("consultant")
+            st.rerun()
+        else:
+            st.error("Mot de passe incorrect.")
+
+    st.caption("Accès réservé aux consultants Talan.")
+
+# ════════════════════════════════════════════════════════════════════════════
+# COLONNE DROITE — Accès Client
+# ════════════════════════════════════════════════════════════════════════════
+with col_client:
+    st.markdown("""
+<div class="role-card client">
+    <h3>🏢 Accès Client</h3>
+</div>
+""", unsafe_allow_html=True)
+
+    st.markdown("")
+    profiles = get_all_profiles()
 
     if not profiles:
-        st.info("Aucun profil client configuré. Allez dans **Profils Clients** pour commencer.")
+        st.info("Aucun client configuré. Contactez votre consultant Talan.")
     else:
         for p in profiles:
             code = p.get("code", "")
             name = p.get("name", "")
             env  = p.get("bc_environment", "")
-            env_label = f" · `{env}`" if env else ""
 
-            col_card, col_btn = st.columns([5, 2])
-            with col_card:
+            col_info, col_btn = st.columns([5, 2])
+            with col_info:
                 st.markdown(
-                    f'<div class="client-card">'
-                    f'<div class="client-icon">🏢</div>'
+                    f'<div class="client-row">'
                     f'<div>'
-                    f'<p class="client-name">{name}</p>'
-                    f'<span class="client-code">{code}{env_label}</span>'
+                    f'<div class="client-name">{name}</div>'
+                    f'<div class="client-env">{env}</div>'
                     f'</div></div>',
                     unsafe_allow_html=True,
                 )
             with col_btn:
-                st.markdown("<div style='padding-top:10px'>", unsafe_allow_html=True)
+                st.markdown("<div style='padding-top:6px'>", unsafe_allow_html=True)
                 if st.button(
                     "Ouvrir →",
                     key=f"open_{code}",
                     use_container_width=True,
-                    type="primary",
                 ):
-                    st.session_state["active_client"]      = code
-                    st.session_state["active_client_name"] = name
+                    set_role("client", code, name)
                     st.switch_page(f"pkg_{code}")
                 st.markdown("</div>", unsafe_allow_html=True)
-
-with col_features:
-    st.markdown("### Ce que fait l'outil")
-    st.markdown("""
-<div class="feature-box" style="margin-bottom:.75rem">
-    <h4>📦 Packages BC</h4>
-    <p>Liste les packages de configuration directement depuis votre environnement BC.</p>
-</div>
-<div class="feature-box" style="margin-bottom:.75rem">
-    <h4>✅ Validation des données</h4>
-    <p>Axe A (format/type/longueur), Axe B (codes de référence), Axe C (IA Gemini).</p>
-</div>
-<div class="feature-box" style="margin-bottom:.75rem">
-    <h4>🔄 Ordre d'intégration BC</h4>
-    <p>Reproduit l'ordre exact BC (Processing Order + Table ID) pour détecter les erreurs FK en cascade.</p>
-</div>
-<div class="feature-box">
-    <h4>📁 Historique par client</h4>
-    <p>Toutes les sessions de validation archivées et accessibles par client.</p>
-</div>
-""", unsafe_allow_html=True)
 
 # ── Footer ────────────────────────────────────────────────────────────────────
 st.markdown("---")
