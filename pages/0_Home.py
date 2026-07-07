@@ -51,10 +51,17 @@ if "client" in params and not get_role():
     if match:
         set_role("client", match["code"], match["name"])
         st.query_params.clear()
-        st.switch_page(f"pkg_{code}")
+        st.session_state["_pending_switch"] = f"pkg_{code}"
+        st.rerun()
 
 # ── Déjà connecté → bannière + continuer ─────────────────────────────────────
 role = get_role()
+
+# Redirect différé : set_role() + rerun() → navigation reconstruite → switch possible
+if role and st.session_state.get("_pending_switch"):
+    target = st.session_state.pop("_pending_switch")
+    st.switch_page(target)
+
 if role:
     label = (
         "👔 Connecté en tant que **Consultant**"
@@ -153,7 +160,11 @@ with col_client:
                     use_container_width=True,
                 ):
                     set_role("client", code, name)
-                    st.switch_page(f"pkg_{code}")
+                    # Ne pas switch_page ici : la navigation n'est pas encore
+                    # reconstruite avec les pages client. On stocke la cible
+                    # et on rerun → main.py reconstruit → 0_Home.py intercepte.
+                    st.session_state["_pending_switch"] = f"pkg_{code}"
+                    st.rerun()
                 st.markdown("</div>", unsafe_allow_html=True)
 
 # ── Footer ────────────────────────────────────────────────────────────────────
