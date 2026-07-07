@@ -221,3 +221,157 @@ def get_config_packages_for_company(
             raise Exception("Accès refusé (403) — rôle D365 AUTOMATION requis sur l'utilisateur BC.")
         raise Exception(f"Erreur BC API {status} : {e.response.text[:300]}")
     return resp.json().get("value", [])
+
+
+def get_package_tables(
+    tenant_id: str,
+    environment: str,
+    company_id: str,
+    package_id: str,
+    token: str,
+) -> list[dict]:
+    """
+    Retourne les tables d'un package de configuration.
+    Champs utiles : tableId, tableName, processingOrder, skipTableTriggers,
+                    deleteBeforeProcessing.
+    """
+    url = (
+        f"https://api.businesscentral.dynamics.com"
+        f"/v2.0/{tenant_id}/{environment}"
+        f"/api/microsoft/automation/v2.0"
+        f"/companies({company_id})/configurationPackages({package_id})"
+        f"/configurationPackageTables"
+    )
+    resp = requests.get(url, headers=_headers(token), timeout=30)
+    resp.raise_for_status()
+    return resp.json().get("value", [])
+
+
+def get_package_fields(
+    tenant_id: str,
+    environment: str,
+    company_id: str,
+    package_id: str,
+    table_no: int,
+    token: str,
+) -> list[dict]:
+    """
+    Retourne les champs inclus dans une table de package.
+    Champs utiles : fieldNo, fieldName, includeField, validateField.
+    """
+    url = (
+        f"https://api.businesscentral.dynamics.com"
+        f"/v2.0/{tenant_id}/{environment}"
+        f"/api/microsoft/automation/v2.0"
+        f"/companies({company_id})/configurationPackages({package_id})"
+        f"/configurationPackageTables({table_no})/configurationPackageFields"
+    )
+    resp = requests.get(url, headers=_headers(token), timeout=30)
+    resp.raise_for_status()
+    return [f for f in resp.json().get("value", []) if f.get("includeField", True)]
+
+
+def get_field_definitions(
+    tenant_id: str,
+    environment: str,
+    company_id: str,
+    table_no: int,
+    token: str,
+) -> list[dict]:
+    """
+    Tente de récupérer les définitions de champs (type, libellé, obligatoire).
+    Endpoint : /tableDefinitions/{tableNo}/fieldDefinitions (pas garanti en v2.0).
+    Retourne [] si l'endpoint n'existe pas — l'appelant doit gérer le fallback.
+    """
+    url = (
+        f"https://api.businesscentral.dynamics.com"
+        f"/v2.0/{tenant_id}/{environment}/api/v2.0"
+        f"/companies({company_id})/tableDefinitions({table_no})/fieldDefinitions"
+    )
+    try:
+        resp = requests.get(url, headers=_headers(token), timeout=15)
+        if resp.status_code == 404:
+            return []
+        resp.raise_for_status()
+        return resp.json().get("value", [])
+    except Exception:
+        return []
+
+
+def build_tables_data_for_export(
+    tenant_id: str,
+    environment: str,
+    company_id: str,
+    package: dict,
+    token: str,
+) -> list[dict]:
+    """
+    Construit la structure complète pour la génération Excel :
+    [{table_id, table_name, fields: [{field_no, field_name, field_caption,
+      data_type, required, is_custom, validate_field, example}]}]
+
+    Stratégie :
+      1. Charger les tables du package
+      2. Pour chaque table : charger les champs inclus
+      3. Tenter de récupérer les définitions (type, caption) via fieldDefinitions
+      4. Fallback sur field_name si fieldDefinitions non disponible
+    """
+    package_id = package.get("id", "")
+    if not package_id:
+        raise ValueError("Package ID manquant.")
+
+    pkg_tables = get_package_tables(tenant_id, environment, company_id, package_id, token)
+    result = []
+
+    for pt in pkg_tables:
+        table_no   = pt.get("tableId") or pt.get("tableNo", 0)
+        table_name = pt.get("tableName", str(table_no))
+
+        # Champs inclus dans le package
+        try:
+            pkg_fields = get_package_fields(
+                tenant_id, environment, company_id, package_id, table_no, token
+            )
+        except Exception:
+            pkg_fields = []
+
+        if not pkg_fields:
+            continue
+
+        # Définitions de champs (type, caption) — best effort
+        field_defs = get_field_definitions(
+            tenant_id, environment, company_id, table_no, token
+        )
+        def_map = {
+            d.get("fieldNo") or d.get("number", 0): d
+            for d in field_defs
+        }
+
+        fields = []
+        for pf in pkg_fields:
+            field_no = pf.get("fieldNo") or pf.get("number", 0)
+            fd = def_map.get(field_no, {})
+
+            caption  = fd.get("caption") or fd.get("name") or pf.get("fieldName", "")
+            dtype    = fd.get("type", "")
+            required = fd.get("notBlank", False) or (field_no < 10)  # heuristique PK
+
+            fields.append({
+                "field_no":      field_no,
+                "field_name":    pf.get("fieldName", ""),
+                "field_caption": caption,
+                "data_type":     dtype,
+                "required":      required,
+                "is_custom":     field_no >= 50000,
+                "validate_field": pf.get("validateField", False),
+                "example":       "",
+                "description":   fd.get("description", ""),
+            })
+
+        result.append({
+            "table_id":   table_no,
+            "table_name": table_name,
+            "fields":     fields,
+        })
+
+    return result
