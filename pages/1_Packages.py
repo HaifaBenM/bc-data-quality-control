@@ -7,7 +7,11 @@ from app.db.package_visibility_db import (
 )
 from app.core.bc_api import (
     get_access_token, get_companies,
-    get_config_packages_for_company, build_tables_data_for_export,
+    get_config_packages_for_company,
+)
+from app.db.package_templates_db import (
+    save_template, get_template, has_template,
+    delete_template, get_configured_packages,
 )
 from app.core.excel_exporter import generate_package_template
 from app.core.auth import require_role, is_consultant
@@ -219,71 +223,148 @@ with tab_list:
             st.rerun()
 
         st.markdown('<div class="export-panel">', unsafe_allow_html=True)
-        st.markdown(f"### Options d'export — `{sel_code}`")
+        st.markdown(f"### Options d\'export — `{sel_code}`")
 
-        first_time = is_first_export(active_client, sel_code)
+        # ── Vérifier si un template est configuré ─────────────────────────────
+        template_ok = has_template(active_client, sel_code)
 
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            inc_desc = st.checkbox(
-                "Inclure les descriptions", value=True, key="exp_desc"
+        if not template_ok:
+            st.warning(
+                "Aucun template configuré pour ce package. "
+                "Uploadez d\'abord le fichier Excel exporté depuis BC "
+                "(action **Exporter package** dans BC) pour configurer la structure."
             )
-        with c2:
-            inc_ex = st.checkbox(
-                "Inclure les exemples",
-                value=first_time,
-                key="exp_ex",
-                help="Coché automatiquement pour le premier export.",
+            uploaded_tpl = st.file_uploader(
+                "Fichier Excel BC — package " + sel_code,
+                type=["xlsx", "xls"],
+                key="tpl_uploader",
             )
-        with c3:
-            inc_custom = st.checkbox(
-                "Champs personnalisés", value=True, key="exp_custom",
-                help="Champs ajoutés par extensions (No. ≥ 50000).",
+            if uploaded_tpl:
+                from app.core.file_parser import parse_uploaded_file
+                parsed = parse_uploaded_file(uploaded_tpl)
+                if parsed.get("success"):
+                    tables_to_save = []
+                    for i, sheet in enumerate(
+                        parsed.get("data_tables", []) + parsed.get("ref_tables", [])
+                    ):
+                        meta   = parsed["metadata"].get(sheet, {})
+                        df     = parsed["sheets"].get(sheet)
+                        fields = []
+                        if df is not None:
+                            for col in df.columns:
+                                fields.append({
+                                    "field_name":    str(col),
+                                    "field_caption": str(col),
+                                    "data_type":     "Text",
+                                    "required":      False,
+                                    "is_custom":     False,
+                                })
+                        tables_to_save.append({
+                            "table_id":   int(meta.get("table_id", 0) or 0),
+                            "table_name": meta.get("table_name") or meta.get("label", sheet),
+                            "fields":     fields,
+                            "sort_order": i,
+                        })
+
+                    ok, err = save_template(active_client, sel_code, tables_to_save)
+                    if ok:
+                        st.success(
+                            f"Template configuré — {len(tables_to_save)} table(s) enregistrées."
+                        )
+                        st.rerun()
+                    else:
+                        st.error(f"Erreur sauvegarde : {err}")
+                else:
+                    for e in parsed.get("errors", []):
+                        st.error(e)
+
+        else:
+            # ── Template configuré → options export ───────────────────────────
+            template_tables = get_template(active_client, sel_code)
+            st.success(
+                f"Template configuré — {len(template_tables)} table(s). "
+                "Vous pouvez générer le fichier."
             )
 
-        role = st.radio(
-            "Vue",
-            ["Consultant", "Client"],
-            horizontal=True,
-            key="exp_role",
-            help=(
-                "Client : champs obligatoires + références uniquement.\n"
-                "Consultant : tous les champs inclus dans le package."
-            ),
-        )
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                inc_desc   = st.checkbox("Descriptions", value=True, key="exp_desc")
+            with c2:
+                first_time = is_first_export(active_client, sel_code)
+                inc_ex     = st.checkbox(
+                    "Exemples", value=first_time, key="exp_ex",
+                    help="Coché automatiquement au premier export.",
+                )
+            with c3:
+                inc_custom = st.checkbox(
+                    "Champs personnalisés", value=True, key="exp_custom",
+                    help="Champs No ≥ 50000.",
+                )
 
-        if st.button("⚙ Générer le fichier", type="primary", key="btn_gen"):
-            with st.spinner("Interrogation BC + génération Excel..."):
-                try:
-                    tables_data = build_tables_data_for_export(
-                        tenant_id, environment, sel_company_id, ep, token
-                    )
-                    options = {
-                        "include_descriptions":  inc_desc,
-                        "include_examples":      inc_ex,
-                        "include_custom_fields": inc_custom,
-                        "role":                  role.lower(),
-                    }
-                    excel_bytes = generate_package_template(ep, tables_data, options)
-                    st.session_state["excel_ready"]      = excel_bytes
-                    st.session_state["excel_pkg_code"]   = sel_code
-                    st.session_state["excel_role"]       = role.lower()
-                    mark_exported(active_client, sel_code)
-                except Exception as err:
-                    st.error(f"Erreur lors de la génération : {err}")
+            if is_consultant():
+                exp_role_sel = st.radio(
+                    "Vue", ["Consultant", "Client"], horizontal=True, key="exp_role",
+                )
+            else:
+                exp_role_sel = "Client"
+                st.caption("Vue Client")
 
-        if st.session_state.get("excel_ready") and \
-                st.session_state.get("excel_pkg_code") == sel_code:
-            role_suffix = "_client" if st.session_state.get("excel_role") == "client" else ""
-            st.download_button(
-                label="📥 Télécharger le template",
-                data=st.session_state["excel_ready"],
-                file_name=f"{sel_code}{role_suffix}_template.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True,
-            )
+            col_gen, col_reset = st.columns([3, 1])
+            with col_gen:
+                if st.button("Générer le fichier", type="primary",
+                             use_container_width=True, key="btn_gen"):
+                    with st.spinner("Génération..."):
+                        options = {
+                            "include_descriptions":  inc_desc,
+                            "include_examples":      inc_ex,
+                            "include_custom_fields": inc_custom,
+                            "role":                  exp_role_sel.lower(),
+                        }
+                        # Convertir template Supabase → format excel_exporter
+                        tables_data = []
+                        for t in template_tables:
+                            fields = []
+                            for f in t.get("fields", []):
+                                fields.append({
+                                    "field_no":      f.get("field_no", 0),
+                                    "field_name":    f.get("field_name", ""),
+                                    "field_caption": f.get("field_caption") or f.get("field_name", ""),
+                                    "data_type":     f.get("data_type", "Text"),
+                                    "required":      f.get("required", False),
+                                    "is_custom":     f.get("is_custom", False),
+                                    "validate_field": f.get("validate_field", False),
+                                    "example":       f.get("example", ""),
+                                    "description":   f.get("description", ""),
+                                })
+                            tables_data.append({
+                                "table_id":   t["table_id"],
+                                "table_name": t["table_name"],
+                                "fields":     fields,
+                            })
+                        excel_bytes = generate_package_template(ep, tables_data, options)
+                        st.session_state["excel_ready"]    = excel_bytes
+                        st.session_state["excel_pkg_code"] = sel_code
+                        st.session_state["excel_role"]     = exp_role_sel.lower()
+                        mark_exported(active_client, sel_code)
+
+            with col_reset:
+                if st.button("Reconfigurer", use_container_width=True, key="btn_reset"):
+                    delete_template(active_client, sel_code)
+                    st.session_state.pop("excel_ready", None)
+                    st.rerun()
+
+            if st.session_state.get("excel_ready") and                     st.session_state.get("excel_pkg_code") == sel_code:
+                role_sfx = "_client" if st.session_state.get("excel_role") == "client" else ""
+                st.download_button(
+                    label="📥 Télécharger le template",
+                    data=st.session_state["excel_ready"],
+                    file_name=f"{sel_code}{role_sfx}_template.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True,
+                )
 
         st.markdown("</div>", unsafe_allow_html=True)
+
 
 # ════════════════════════════════════════════════════════════════════════════
 # ONGLET 2 — VISIBILITÉ CLIENT (consultant uniquement)
