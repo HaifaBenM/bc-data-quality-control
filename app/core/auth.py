@@ -1,48 +1,30 @@
-import hashlib
 import streamlit as st
+from app.db.users_db import check_login
 
 
-# ── Vérification mot de passe ─────────────────────────────────────────────────
-
-def check_password(password: str) -> bool:
+def login(username: str, password: str) -> tuple[bool, str]:
     """
-    Compare le hash SHA-256 du mot de passe saisi avec le secret Streamlit.
-
-    Configuration requise dans Streamlit Cloud → Settings → Secrets :
-        CONSULTANT_PASSWORD_HASH = "sha256_hexdigest_ici"
-
-    Pour générer le hash localement :
-        import hashlib; print(hashlib.sha256("ton_mdp".encode()).hexdigest())
-
-    Retourne False si le secret n'est pas configuré (accès refusé par défaut).
+    Authentifie un utilisateur.
+    Retourne (True, "") ou (False, message_erreur).
+    Positionne session_state si succès.
     """
-    try:
-        expected = st.secrets["CONSULTANT_PASSWORD_HASH"]
-    except (KeyError, AttributeError, FileNotFoundError):
-        return False
-    return hashlib.sha256(password.encode()).hexdigest() == expected
+    user = check_login(username, password)
+    if not user:
+        return False, "Identifiant ou mot de passe incorrect."
 
-
-# ── Gestion du rôle en session ────────────────────────────────────────────────
-
-def set_role(
-    role: str,
-    client_code: str = "",
-    client_name: str = "",
-) -> None:
-    """
-    Positionne le rôle en session_state.
-    role : "consultant" | "client"
-    À appeler depuis 0_Home.py uniquement — pas depuis les pages métier.
-    """
-    st.session_state["role"]               = role
-    st.session_state["active_client"]      = client_code
-    st.session_state["active_client_name"] = client_name
+    st.session_state["role"]               = user["role"]
+    st.session_state["display_name"]       = user["display_name"]
+    st.session_state["active_client"]      = user.get("profile_code") or ""
+    st.session_state["active_client_name"] = user.get("display_name", "")
+    return True, ""
 
 
 def get_role() -> str:
-    """Retourne le rôle courant : "consultant" | "client" | ""."""
     return st.session_state.get("role", "")
+
+
+def get_display_name() -> str:
+    return st.session_state.get("display_name", "")
 
 
 def is_consultant() -> bool:
@@ -54,30 +36,20 @@ def is_client() -> bool:
 
 
 def logout() -> None:
-    """Réinitialise complètement la session."""
     st.session_state.clear()
 
 
-# ── Guards ────────────────────────────────────────────────────────────────────
-
 def require_role() -> None:
-    """
-    Stop la page si aucun rôle n'est sélectionné (session expirée ou accès direct).
-    À appeler en début de chaque page métier après set_page_config.
-    """
+    """Bloque la page si non authentifié."""
     if not get_role():
-        st.warning("Session expirée ou accès direct. Retournez à l'accueil.")
+        st.warning("Session expirée. Reconnectez-vous.")
         if st.button("← Retour à l'accueil", type="primary"):
-            st.switch_page("home")
+            st.switch_page("pages/0_Home.py")
         st.stop()
 
 
 def require_consultant() -> None:
-    """
-    Stop la page si l'utilisateur n'est pas consultant.
-    À appeler en début des pages réservées (Profils Clients).
-    """
     require_role()
     if not is_consultant():
-        st.error("Accès réservé aux consultants Talan.")
+        st.error("Accès réservé aux consultants.")
         st.stop()

@@ -97,12 +97,8 @@ if role:
             "<hr style='border:none;border-top:1px solid #E2E8F0;margin:.5rem 0'>",
             unsafe_allow_html=True,
         )
-        role_label = (
-            "👔 Consultant"
-            if role == "consultant"
-            else f"🏢 {st.session_state.get('active_client_name', '')}"
-        )
-        st.caption(role_label)
+        display_name = st.session_state.get("display_name", "")
+        st.caption(f"👤 {display_name}" if display_name else "")
         if st.button("🚪 Déconnexion", use_container_width=True, key="sidebar_logout"):
             st.session_state.clear()
             _load_profiles.clear()
