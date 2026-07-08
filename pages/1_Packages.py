@@ -118,29 +118,23 @@ def _pkgs_qc(tid, env, cid, _tok, visible_only):
 
 with st.spinner("Chargement des packages..."):
     try:
-        if is_consultant():
-            # Automation API → données complètes (nb tables, nb erreurs)
-            all_packages = _pkgs_automation(
-                tenant_id, environment, sel_company_id, token
-            )
-            # Extension Talan QC → flags de visibilité
-            qc_packages = _pkgs_qc(
-                tenant_id, environment, sel_company_id, token, False
-            )
-            vis_map = {p["code"]: p.get("qcVisibleClient", False) for p in qc_packages}
-            for pkg in all_packages:
-                pkg["qcVisibleClient"] = vis_map.get(pkg.get("code", ""), False)
-            displayed_packages = all_packages
+        # Tous les packages depuis Automation API (données complètes)
+        all_packages = _pkgs_automation(
+            tenant_id, environment, sel_company_id, token
+        )
+        # Flags de visibilité depuis extension Talan QC
+        qc_packages = _pkgs_qc(
+            tenant_id, environment, sel_company_id, token, False
+        )
+        vis_map = {p["code"]: p.get("qcVisibleClient", False) for p in qc_packages}
+        for pkg in all_packages:
+            pkg["qcVisibleClient"] = vis_map.get(pkg.get("code", ""), False)
 
-        else:
-            # Client : tentative filtre côté BC, fallback filtre Python
-            all_qc = _pkgs_qc(
-                tenant_id, environment, sel_company_id, token, False
-            )
-            # Filtre Python garanti (même si le $filter OData ne fonctionne pas)
-            displayed_packages = [
-                p for p in all_qc if p.get("qcVisibleClient", False)
-            ]
+        # Liste tab : uniquement les packages visibles (consultant ET client)
+        # Le consultant gère la visibilité dans l'onglet dédié
+        displayed_packages = [
+            p for p in all_packages if p.get("qcVisibleClient", False)
+        ]
 
     except Exception as e:
         err = str(e)
