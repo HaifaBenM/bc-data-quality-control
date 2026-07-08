@@ -68,6 +68,14 @@ def parse_uploaded_file(uploaded_file) -> dict:
             except Exception:
                 package_code = table_name = table_id = ""
 
+            # Skiper les onglets sans table_id numérique valide
+            # (ex: onglet GUIDE généré par l'outil, onglets de documentation)
+            try:
+                int(table_id)
+            except (ValueError, TypeError):
+                result["sys_tables"].append(sheet_name)
+                continue
+
             category = categorize_table(table_id)
             label    = get_table_label(table_id, table_name)
 

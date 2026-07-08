@@ -133,10 +133,14 @@ with st.spinner("Chargement des packages..."):
             displayed_packages = all_packages
 
         else:
-            # Client : extension Talan QC filtrée côté BC (visible_only=True)
-            displayed_packages = _pkgs_qc(
-                tenant_id, environment, sel_company_id, token, True
+            # Client : tentative filtre côté BC, fallback filtre Python
+            all_qc = _pkgs_qc(
+                tenant_id, environment, sel_company_id, token, False
             )
+            # Filtre Python garanti (même si le $filter OData ne fonctionne pas)
+            displayed_packages = [
+                p for p in all_qc if p.get("qcVisibleClient", False)
+            ]
 
     except Exception as e:
         err = str(e)
