@@ -3,8 +3,7 @@ import pandas as pd
 from app.db.profiles_db import get_profile_by_code
 from app.core.bc_api import (
     get_access_token, get_companies,
-    get_config_packages_for_company,
-    get_packages_qc, set_package_visibility_bc,
+    get_packages_qc,
     build_tables_data_for_export,
 )
 from app.core.excel_exporter import generate_package_template
@@ -107,33 +106,21 @@ with col_refresh:
 
 # ── Chargement packages ───────────────────────────────────────────────────────
 @st.cache_data(ttl=300, show_spinner=False)
-def _pkgs_automation(tid, env, cid, _tok):
-    """Tous les packages depuis Automation API (consultant)."""
-    return get_config_packages_for_company(tid, env, cid, _tok)
-
-@st.cache_data(ttl=300, show_spinner=False)
 def _pkgs_qc(tid, env, cid, _tok, visible_only):
     """Packages depuis extension Talan QC (avec flag visibilité)."""
     return get_packages_qc(tid, env, cid, _tok, visible_only=visible_only)
 
 with st.spinner("Chargement des packages..."):
     try:
-        # Tous les packages depuis Automation API (données complètes)
-        all_packages = _pkgs_automation(
-            tenant_id, environment, sel_company_id, token
-        )
-        # Flags de visibilité depuis extension Talan QC
-        qc_packages = _pkgs_qc(
+        # Extension Talan QC → source unique pour tous les packages
+        # (code, packageName, qcVisibleClient) — pas d'Automation API
+        all_packages_qc = _pkgs_qc(
             tenant_id, environment, sel_company_id, token, False
         )
-        vis_map = {p["code"]: p.get("qcVisibleClient", False) for p in qc_packages}
-        for pkg in all_packages:
-            pkg["qcVisibleClient"] = vis_map.get(pkg.get("code", ""), False)
 
-        # Liste tab : uniquement les packages visibles (consultant ET client)
-        # Le consultant gère la visibilité dans l'onglet dédié
+        # Onglet Liste : uniquement les packages cochés (consultant ET client)
         displayed_packages = [
-            p for p in all_packages if p.get("qcVisibleClient", False)
+            p for p in all_packages_qc if p.get("qcVisibleClient", False)
         ]
 
     except Exception as e:
@@ -152,10 +139,7 @@ if not displayed_packages:
     st.stop()
 
 # ── Onglets (consultant : Liste + Visibilité / client : Liste seule) ──────────
-if is_consultant():
-    tab_list, tab_vis = st.tabs(["📋 Liste", "👁 Visibilité client"])
-else:
-    tab_list = st.container()
+tab_list = st.container()
 
 # ════════════════════════════════════════════════════════════════════════════
 # ONGLET 1 — LISTE DES PACKAGES
@@ -320,46 +304,3 @@ with tab_list:
             )
 
         st.markdown("</div>", unsafe_allow_html=True)
-
-# ════════════════════════════════════════════════════════════════════════════
-# ONGLET 2 — VISIBILITÉ CLIENT (consultant uniquement)
-# ════════════════════════════════════════════════════════════════════════════
-if is_consultant():
-    with tab_vis:
-        st.caption(
-            "Le flag est enregistré directement dans BC sur chaque package. "
-            "Le client ne voit que les packages cochés ✅."
-        )
-
-        for pkg in all_packages:
-            code       = pkg.get("code", "")
-            name       = pkg.get("packageName", "")
-            is_visible = pkg.get("qcVisibleClient", False)
-
-            col_info, col_toggle = st.columns([5, 1])
-            with col_info:
-                cls = "" if is_visible else " vis-hidden"
-                st.markdown(
-                    f'<div class="vis-row{cls}">'
-                    f'<span class="vis-code">{code}</span>{name}'
-                    f'</div>',
-                    unsafe_allow_html=True,
-                )
-            with col_toggle:
-                new_val = st.toggle(
-                    "Visible",
-                    value=is_visible,
-                    key=f"vis_{code}",
-                    label_visibility="collapsed",
-                )
-                if new_val != is_visible:
-                    try:
-                        set_package_visibility_bc(
-                            tenant_id, environment, sel_company_id,
-                            code, new_val, token,
-                        )
-                        _pkgs_qc.clear()
-                        _pkgs_automation.clear()
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Erreur mise à jour visibilité : {e}")
