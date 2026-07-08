@@ -298,39 +298,150 @@ def get_field_definitions(
         return []
 
 
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# EXTENSION TALAN QC TOOLS — endpoints custom
+# Publisher: talan · Group: qctools · Version: v1.0
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _qc_base(tenant_id: str, environment: str, company_id: str) -> str:
+    return (
+        f"https://api.businesscentral.dynamics.com"
+        f"/v2.0/{tenant_id}/{environment}"
+        f"/api/talan/qctools/v1.0"
+        f"/companies({company_id})"
+    )
+
+
+def get_packages_qc(
+    tenant_id: str,
+    environment: str,
+    company_id: str,
+    token: str,
+    visible_only: bool = False,
+) -> list[dict]:
+    """
+    Retourne les packages depuis l'extension Talan QC Tools.
+    visible_only=True → $filter=qcVisibleClient eq true (vue client).
+    Champs : code, packageName, qcVisibleClient.
+    """
+    url = f"{_qc_base(tenant_id, environment, company_id)}/packages"
+    if visible_only:
+        url += "?$filter=qcVisibleClient eq true"
+    resp = requests.get(url, headers=_headers(token), timeout=30)
+    resp.raise_for_status()
+    return resp.json().get("value", [])
+
+
+def set_package_visibility_bc(
+    tenant_id: str,
+    environment: str,
+    company_id: str,
+    package_code: str,
+    visible: bool,
+    token: str,
+) -> None:
+    """
+    Met à jour le flag qcVisibleClient sur le package BC via PATCH.
+    If-Match: * évite de gérer l'ETag manuellement.
+    """
+    url = f"{_qc_base(tenant_id, environment, company_id)}/packages('{package_code}')"
+    resp = requests.patch(
+        url,
+        headers={
+            "Authorization":  f"Bearer {token}",
+            "Content-Type":   "application/json",
+            "If-Match":       "*",
+        },
+        json={"qcVisibleClient": visible},
+        timeout=15,
+    )
+    resp.raise_for_status()
+
+
+def get_package_tables_qc(
+    tenant_id: str,
+    environment: str,
+    company_id: str,
+    package_code: str,
+    token: str,
+) -> list[dict]:
+    """
+    Retourne les tables d'un package triées par processingOrder.
+    Champs : packageCode, tableId, tableName, processingOrder,
+             skipTableTriggers, deleteBeforeProcessing.
+    """
+    url = (
+        f"{_qc_base(tenant_id, environment, company_id)}/packageTables"
+        f"?$filter=packageCode eq '{package_code}'"
+        f"&$orderby=processingOrder asc"
+    )
+    resp = requests.get(url, headers=_headers(token), timeout=30)
+    resp.raise_for_status()
+    return resp.json().get("value", [])
+
+
+def get_package_fields_qc(
+    tenant_id: str,
+    environment: str,
+    company_id: str,
+    package_code: str,
+    table_id: int,
+    token: str,
+) -> list[dict]:
+    """
+    Retourne les champs inclus (includeField=true) d'une table de package.
+    Champs : packageCode, tableId, fieldId, fieldName,
+             includeField, validateField.
+    """
+    url = (
+        f"{_qc_base(tenant_id, environment, company_id)}/packageFields"
+        f"?$filter=packageCode eq '{package_code}'"
+        f" and tableId eq {table_id}"
+        f" and includeField eq true"
+    )
+    resp = requests.get(url, headers=_headers(token), timeout=30)
+    resp.raise_for_status()
+    return resp.json().get("value", [])
+
+
 def build_tables_data_for_export(
     tenant_id: str,
     environment: str,
     company_id: str,
-    package: dict,
+    package_code: str,
     token: str,
 ) -> list[dict]:
     """
-    Construit la structure complète pour la génération Excel :
-    [{table_id, table_name, fields: [{field_no, field_name, field_caption,
-      data_type, required, is_custom, validate_field, example}]}]
+    Construit la structure complète pour generate_package_template()
+    en lisant tables + champs depuis l'extension Talan QC Tools.
 
-    Stratégie :
-      1. Charger les tables du package
-      2. Pour chaque table : charger les champs inclus
-      3. Tenter de récupérer les définitions (type, caption) via fieldDefinitions
-      4. Fallback sur field_name si fieldDefinitions non disponible
+    Enrichit avec FIELD_DEFS (type, obligatoire, description)
+    pour les tables BC standard connues.
+
+    Returns:
+        [{table_id, table_name, fields: [{field_no, field_name,
+          field_caption, data_type, required, is_custom,
+          validate_field, example, description}]}]
     """
-    package_id = package.get("id", "")
-    if not package_id:
-        raise ValueError("Package ID manquant.")
+    pkg_tables = get_package_tables_qc(
+        tenant_id, environment, company_id, package_code, token
+    )
 
-    pkg_tables = get_package_tables(tenant_id, environment, company_id, package_id, token)
+    try:
+        from app.core.validator_axe_a import FIELD_DEFS
+    except ImportError:
+        FIELD_DEFS = {}
+
     result = []
-
     for pt in pkg_tables:
-        table_no   = pt.get("tableId") or pt.get("tableNo", 0)
-        table_name = pt.get("tableName", str(table_no))
+        table_id   = pt.get("tableId", 0)
+        table_name = pt.get("tableName", str(table_id))
 
-        # Champs inclus dans le package
         try:
-            pkg_fields = get_package_fields(
-                tenant_id, environment, company_id, package_id, table_no, token
+            pkg_fields = get_package_fields_qc(
+                tenant_id, environment, company_id, package_code, table_id, token
             )
         except Exception:
             pkg_fields = []
@@ -338,38 +449,35 @@ def build_tables_data_for_export(
         if not pkg_fields:
             continue
 
-        # Définitions de champs (type, caption) — best effort
-        field_defs = get_field_definitions(
-            tenant_id, environment, company_id, table_no, token
-        )
-        def_map = {
-            d.get("fieldNo") or d.get("number", 0): d
-            for d in field_defs
-        }
+        # Enrichissement depuis FIELD_DEFS (type, requis, description)
+        fd_table = FIELD_DEFS.get(str(table_id), {})
 
         fields = []
         for pf in pkg_fields:
-            field_no = pf.get("fieldNo") or pf.get("number", 0)
-            fd = def_map.get(field_no, {})
-
-            caption  = fd.get("caption") or fd.get("name") or pf.get("fieldName", "")
-            dtype    = fd.get("type", "")
-            required = fd.get("notBlank", False) or (field_no < 10)  # heuristique PK
+            fname    = pf.get("fieldName", "")
+            field_id = pf.get("fieldId", 0)
+            fd       = fd_table.get(fname, {})
+            dtype    = fd.get("type", "Text")
+            req      = fd.get("req", False)
 
             fields.append({
-                "field_no":      field_no,
-                "field_name":    pf.get("fieldName", ""),
-                "field_caption": caption,
-                "data_type":     dtype,
-                "required":      required,
-                "is_custom":     field_no >= 50000,
+                "field_no":       field_id,
+                "field_name":     fname,
+                "field_caption":  fname,
+                "data_type":      dtype,
+                "required":       req,
+                "is_custom":      field_id >= 50000,
                 "validate_field": pf.get("validateField", False),
-                "example":       "",
-                "description":   fd.get("description", ""),
+                "example":        "",
+                "description": (
+                    f"Type : {dtype}"
+                    + (f" · Max : {fd['max']} car." if fd.get("max") else "")
+                    + (" · OBLIGATOIRE" if req else "")
+                ) if fd else "",
             })
 
         result.append({
-            "table_id":   table_no,
+            "table_id":   table_id,
             "table_name": table_name,
             "fields":     fields,
         })
