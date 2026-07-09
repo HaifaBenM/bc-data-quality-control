@@ -8,86 +8,58 @@ from app.core.bc_api import (
 )
 from app.core.auth import require_role, is_consultant
 from app.core.bc_api import build_tables_data_for_export
-import io
-import openpyxl
-from openpyxl.styles import PatternFill, Font as XLFont
+from app.core.bc_xml_generator import generate_bc_excel
 
 
 # ── Générateur Excel template ─────────────────────────────────────────────────
+def _reinject_bc_xml(excel_bytes: bytes, xml_files: dict) -> bytes:
+    """Ré-injecte les fichiers XML BC dans un Excel généré par openpyxl."""
+    import re as _re
+    _BC_FILES_SET = {"xl/xmlMaps.xml", "xl/connections.xml"}
+    _BC_RELS_TYPES = {"xmlMaps", "connections"}
+
+    extra_rels, extra_ct = [], []
+    orig_rels = xml_files.get("xl/_rels/workbook.xml.rels", b"").decode("utf-8", errors="replace")
+    orig_ct   = xml_files.get("[Content_Types].xml", b"").decode("utf-8", errors="replace")
+
+    for tag in _re.findall(r'<Relationship[^/]*/>', orig_rels):
+        if any(t in tag for t in _BC_RELS_TYPES):
+            extra_rels.append(tag)
+    for tag in _re.findall(r'<Override[^/]*/>', orig_ct):
+        if "xmlMaps" in tag or "connections" in tag.lower():
+            extra_ct.append(tag)
+
+    in_buf, out_buf = io.BytesIO(excel_bytes), io.BytesIO()
+    with zipfile.ZipFile(in_buf) as zin:
+        existing = set(zin.namelist())
+        with zipfile.ZipFile(out_buf, "w", zipfile.ZIP_DEFLATED) as zout:
+            for item in zin.infolist():
+                data = zin.read(item.filename)
+                if item.filename == "xl/_rels/workbook.xml.rels" and extra_rels:
+                    s = data.decode("utf-8", errors="replace")
+                    inserts = [r for r in extra_rels if r.split('Type="')[1].split('"')[0].split("/")[-1] not in s]
+                    if inserts:
+                        s = s.replace("</Relationships>", "\n".join(inserts) + "\n</Relationships>")
+                    data = s.encode("utf-8")
+                elif item.filename == "[Content_Types].xml" and extra_ct:
+                    s = data.decode("utf-8", errors="replace")
+                    inserts = [o for o in extra_ct if o.split('PartName="')[1].split('"')[0] not in s]
+                    if inserts:
+                        s = s.replace("</Types>", "\n".join(inserts) + "\n</Types>")
+                    data = s.encode("utf-8")
+                zout.writestr(item, data)
+            for fname, fdata in xml_files.items():
+                if fname.startswith("xl/xml") or fname.startswith("xl/conn"):
+                    if fname not in existing:
+                        zout.writestr(fname, fdata)
+    return out_buf.getvalue()
+
 _EXAMPLES = {
     18: {"N°": ["CLI-001","CLI-002"], "Nom": ["Société Test","Client Exemple"]},
     23: {"N°": ["FRN-001","FRN-002"], "Nom": ["Fournisseur Test","Autre Fournisseur"]},
     27: {"N°": ["ART-001","ART-002"], "Description": ["Article Test 1","Article Test 2"]},
 }
 _TYPE_EX = {"Code":"EX-001","Text":"Exemple","Decimal":"0.00","Integer":"0","Date":"01/01/2025","Boolean":"Non"}
-
-def _generate_excel(package: dict, tables_data: list, options: dict) -> bytes:
-    wb = openpyxl.Workbook()
-    wb.remove(wb.active)
-    fill_blue  = PatternFill("solid", fgColor="FF2E6FBF")
-    fill_dark  = PatternFill("solid", fgColor="FF1B3A6B")
-    fill_desc  = PatternFill("solid", fgColor="FFFFF3CD")
-    fill_ex    = PatternFill("solid", fgColor="FFF0FBF5")
-    fill_meta  = PatternFill("solid", fgColor="FFEEEEEE")
-    font_w     = XLFont(bold=True, color="FFFFFFFF", size=10)
-    font_desc  = XLFont(italic=True, color="FF856404", size=9)
-    font_ex    = XLFont(italic=True, color="FF0F6E56", size=9)
-
-    try:
-        from app.core.validator_axe_a import FIELD_DEFS
-    except ImportError:
-        FIELD_DEFS = {}
-
-    pkg_code = package.get("code", "")
-    for table in tables_data:
-        tid    = table.get("table_id", 0)
-        tname  = table.get("table_name", str(tid))
-        fields = table.get("fields", [])
-        if not options.get("include_custom_fields", True):
-            fields = [f for f in fields if not f.get("is_custom", False)]
-        if not fields:
-            continue
-        ws = wb.create_sheet(str(tname)[:31])
-        fd_tbl = FIELD_DEFS.get(str(tid), {})
-        tbl_ex = _EXAMPLES.get(tid, {})
-        # Row 1 : métadonnées BC
-        ws.cell(1,1,pkg_code); ws.cell(1,2,tname); ws.cell(1,3,tid)
-        for c in range(1, len(fields)+1):
-            ws.cell(1,c).fill = fill_meta
-        # Row 2 : vide
-        # Row 3 : headers
-        for i, f in enumerate(fields, 1):
-            fname = f.get("field_name","")
-            fd    = fd_tbl.get(fname, {})
-            req   = fd.get("req", False) or f.get("required", False)
-            cell  = ws.cell(3, i, fname + (" *" if req and options.get("include_mandatory") else ""))
-            cell.fill = fill_dark if (req and options.get("include_mandatory")) else fill_blue
-            cell.font = font_w
-        # Row 4 : descriptions
-        if options.get("include_descriptions"):
-            for i, f in enumerate(fields, 1):
-                fname = f.get("field_name","")
-                fd    = fd_tbl.get(fname, {})
-                dtype = fd.get("type","") or f.get("data_type","")
-                desc  = f"Type: {dtype}" if dtype else ""
-                if fd.get("max"): desc += f" | Max: {fd['max']}"
-                if fd.get("req") or f.get("required"): desc += " | OBLIGATOIRE"
-                cell = ws.cell(4, i, desc)
-                cell.fill = fill_desc; cell.font = font_desc
-        # Rows exemples
-        if options.get("include_examples"):
-            base_row = 5 if options.get("include_descriptions") else 4
-            for ex_idx in range(2):
-                for i, f in enumerate(fields, 1):
-                    fname = f.get("field_name","")
-                    fd    = fd_tbl.get(fname, {})
-                    exs   = tbl_ex.get(fname, [])
-                    val   = exs[ex_idx] if ex_idx < len(exs) else _TYPE_EX.get(fd.get("type",""),"")
-                    cell  = ws.cell(base_row+ex_idx, i, val)
-                    cell.fill = fill_ex; cell.font = font_ex
-    buf = io.BytesIO()
-    wb.save(buf)
-    return buf.getvalue()
 
 
 st.set_page_config(
@@ -334,6 +306,7 @@ with tab_list:
             opt_ex        = st.checkbox("Inclure les exemples",             value=True,  key="opt_ex")
             opt_custom    = st.checkbox("Inclure les champs personnalisés", value=True,  key="opt_custom")
 
+        # ── Configuration xmlMaps (consultant uniquement) ───────────────────
         if st.button("⚙ Générer le fichier", type="primary", key="btn_gen"):
             with st.spinner("Lecture structure BC + génération Excel..."):
                 try:
@@ -343,7 +316,7 @@ with tab_list:
                     if not tables_data:
                         st.warning("Aucune table trouvée. Vérifiez la configuration du package dans BC.")
                     else:
-                        excel_bytes = _generate_excel(ep, tables_data, {
+                        excel_bytes = generate_bc_excel(ep, tables_data, {
                             "include_mandatory":     opt_mandatory,
                             "include_descriptions":  opt_desc,
                             "include_examples":      opt_ex,
