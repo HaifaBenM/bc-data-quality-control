@@ -3,10 +3,9 @@ import pandas as pd
 from app.db.profiles_db import get_profile_by_code
 from app.core.bc_api import (
     get_access_token, get_companies,
+    get_config_packages_for_company,
     get_packages_qc,
-    build_tables_data_for_export,
 )
-from app.core.excel_exporter import generate_package_template
 from app.core.auth import require_role, is_consultant
 
 st.set_page_config(
