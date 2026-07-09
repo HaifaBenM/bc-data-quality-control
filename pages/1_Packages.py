@@ -112,16 +112,25 @@ def _pkgs_qc(tid, env, cid, _tok, visible_only):
 
 with st.spinner("Chargement des packages..."):
     try:
-        # Extension Talan QC → source unique pour tous les packages
-        # (code, packageName, qcVisibleClient) — pas d'Automation API
-        all_packages_qc = _pkgs_qc(
+        # Automation API → données complètes (nb tables, nb erreurs)
+        all_pkgs_full = _pkgs_automation(
+            tenant_id, environment, sel_company_id, token
+        )
+        # Custom Talan QC → flags de visibilité
+        qc_pkgs = _pkgs_qc(
             tenant_id, environment, sel_company_id, token, False
         )
+        vis_map = {p["code"]: p.get("qcVisibleClient", False) for p in qc_pkgs}
+        # Merge : injecter qcVisibleClient dans les données complètes
+        for pkg in all_pkgs_full:
+            pkg["qcVisibleClient"] = vis_map.get(pkg.get("code", ""), False)
 
-        # Onglet Liste : uniquement les packages cochés (consultant ET client)
+        # Consultant ET client : uniquement les packages visibles
         displayed_packages = [
-            p for p in all_packages_qc if p.get("qcVisibleClient", False)
+            p for p in all_pkgs_full if p.get("qcVisibleClient", False)
         ]
+        # all_packages_qc pour l'onglet visibilité (tous les packages)
+        all_packages_qc = all_pkgs_full
 
     except Exception as e:
         err = str(e)
@@ -151,30 +160,19 @@ with tab_list:
     )
 
     # Colonnes selon le rôle
-    if is_consultant():
-        df = pd.DataFrame([{
-            "Code":           p.get("code", ""),
-            "Nom package":    p.get("packageName", ""),
-            "Nb tables":      p.get("numberOfTables", 0),
-            "Nb erreurs":     p.get("numberOfErrors", 0),
-            "Visible client": "✅" if p.get("qcVisibleClient") else "—",
-        } for p in displayed_packages])
-        col_cfg = {
-            "Code":           st.column_config.TextColumn(width="small"),
-            "Nom package":    st.column_config.TextColumn(width="large"),
-            "Nb tables":      st.column_config.NumberColumn(width="small"),
-            "Nb erreurs":     st.column_config.NumberColumn(width="small"),
-            "Visible client": st.column_config.TextColumn(width="small"),
-        }
-    else:
-        df = pd.DataFrame([{
-            "Code":        p.get("code", ""),
-            "Nom package": p.get("packageName", ""),
-        } for p in displayed_packages])
-        col_cfg = {
-            "Code":        st.column_config.TextColumn(width="small"),
-            "Nom package": st.column_config.TextColumn(width="large"),
-        }
+    # Même colonnes pour consultant et client (nb tables + nb erreurs)
+    df = pd.DataFrame([{
+        "Code":        p.get("code", ""),
+        "Nom package": p.get("packageName", ""),
+        "Nb tables":   p.get("numberOfTables", 0),
+        "Nb erreurs":  p.get("numberOfErrors", 0),
+    } for p in displayed_packages])
+    col_cfg = {
+        "Code":        st.column_config.TextColumn(width="small"),
+        "Nom package": st.column_config.TextColumn(width="large"),
+        "Nb tables":   st.column_config.NumberColumn(width="small"),
+        "Nb erreurs":  st.column_config.NumberColumn(width="small"),
+    }
 
     event = st.dataframe(
         df,
@@ -240,67 +238,68 @@ with tab_list:
             st.rerun()
 
         st.markdown('<div class="export-panel">', unsafe_allow_html=True)
-        st.markdown(f"### Options d'export — `{sel_code}`")
+        st.markdown(f"### `{sel_code}` — {sel_name}")
 
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            inc_desc = st.checkbox("Descriptions", value=True, key="exp_desc")
-        with c2:
-            inc_ex = st.checkbox("Exemples", value=True, key="exp_ex")
-        with c3:
-            inc_custom = st.checkbox(
-                "Champs personnalisés", value=True, key="exp_custom",
-                help="Champs N° ≥ 50000.",
+        template_ok = has_excel_template(active_client, sel_code)
+
+        if not template_ok:
+            # ── Pas encore configuré → upload du fichier BC ───────────────────
+            st.warning(
+                "Template non configuré. Exportez ce package depuis BC "
+                "(**Exporter vers Excel** sur la fiche package) "
+                "puis uploadez le fichier ici."
             )
-
-        if is_consultant():
-            exp_role_sel = st.radio(
-                "Vue", ["Consultant", "Client"],
-                horizontal=True, key="exp_role",
+            uploaded = st.file_uploader(
+                "Fichier Excel BC — " + sel_code,
+                type=["xlsx"],
+                key="bc_tpl_upload",
             )
-        else:
-            exp_role_sel = "Client"
-
-        if st.button("⚙ Générer le fichier", type="primary", key="btn_gen"):
-            with st.spinner("Lecture structure BC + génération Excel..."):
-                try:
-                    tables_data = build_tables_data_for_export(
-                        tenant_id, environment, sel_company_id,
-                        sel_code, token,
-                    )
-                    if not tables_data:
-                        st.warning(
-                            "Aucune table trouvée dans ce package. "
-                            "Vérifiez la configuration dans BC."
+            if uploaded:
+                raw = uploaded.read()
+                ok_val, err_val = validate_bc_excel(raw)
+                if not ok_val:
+                    st.error(f"❌ {err_val}")
+                else:
+                    with st.spinner("Traitement du fichier BC..."):
+                        tpl_bytes, sheet_names = clear_bc_excel_data(raw)
+                        ok_save, err_save = save_excel_template(
+                            active_client, sel_code, tpl_bytes, sheet_names
                         )
+                    if ok_save:
+                        st.success(
+                            f"✅ Template configuré — "
+                            f"{len(sheet_names)} onglet(s) : "
+                            f"{', '.join(sheet_names)}"
+                        )
+                        st.rerun()
                     else:
-                        options = {
-                            "include_descriptions":  inc_desc,
-                            "include_examples":      inc_ex,
-                            "include_custom_fields": inc_custom,
-                            "role":                  exp_role_sel.lower(),
-                        }
-                        excel_bytes = generate_package_template(
-                            sel_pkg, tables_data, options
-                        )
-                        st.session_state["excel_ready"]    = excel_bytes
-                        st.session_state["excel_pkg_code"] = sel_code
-                        st.session_state["excel_role"]     = exp_role_sel.lower()
-                except Exception as err:
-                    st.error(f"Erreur lors de la génération : {err}")
+                        st.error(f"Erreur sauvegarde : {err_save}")
 
-        if st.session_state.get("excel_ready") and \
-                st.session_state.get("excel_pkg_code") == sel_code:
-            role_sfx = "_client" if st.session_state.get("excel_role") == "client" else ""
-            st.download_button(
-                label="📥 Télécharger",
-                data=st.session_state["excel_ready"],
-                file_name=f"{sel_code}{role_sfx}_template.xlsx",
-                mime=(
-                    "application/vnd.openxmlformats-"
-                    "officedocument.spreadsheetml.sheet"
-                ),
-                use_container_width=True,
-            )
+        else:
+            # ── Template configuré → téléchargement direct ────────────────────
+            tpl_bytes = get_excel_template(active_client, sel_code)
+            if tpl_bytes:
+                st.success("Template configuré et prêt.")
+                col_dl, col_reset = st.columns([3, 1])
+                with col_dl:
+                    st.download_button(
+                        label="📥 Télécharger le template",
+                        data=tpl_bytes,
+                        file_name=f"{sel_code}_template.xlsx",
+                        mime=(
+                            "application/vnd.openxmlformats-"
+                            "officedocument.spreadsheetml.sheet"
+                        ),
+                        use_container_width=True,
+                        type="primary",
+                    )
+                with col_reset:
+                    if st.button("🔄 Reconfigurer", use_container_width=True):
+                        delete_excel_template(active_client, sel_code)
+                        st.session_state.pop("excel_ready", None)
+                        st.rerun()
+            else:
+                st.error("Erreur lors de la récupération du template.")
 
         st.markdown("</div>", unsafe_allow_html=True)
+
