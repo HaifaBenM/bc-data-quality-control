@@ -1,9 +1,7 @@
-"""
-Page Profils Clients — Sprint 3.
-Sélection société BC + chargement metadata.
-"""
 import streamlit as st
 from app.db.supabase_client import test_connection
+from app.core.auth import require_consultant
+from app.db.users_db import create_user, get_all_users
 from app.db.profiles_db import (
     get_all_profiles, create_profile, update_profile,
     delete_profile, get_profiles_for_select
@@ -13,6 +11,7 @@ from app.core.bc_connector import test_bc_connection, get_bc_companies
 from app.core.bc_metadata import read_bc_metadata, load_all_reference_data
 
 st.set_page_config(page_title="Profils Clients — BC Quality Control", page_icon="👥", layout="wide")
+require_consultant()
 st.session_state.setdefault("active_page", "profiles")
 
 st.markdown("""
@@ -45,7 +44,7 @@ for key, default in [("confirm_delete",None),("edit_profile",None),("bc_test_res
     if key not in st.session_state:
         st.session_state[key] = default
 
-tab1, tab2 = st.tabs(["👥 Mes profils", "➕ Nouveau profil"])
+tab1, tab2, tab3 = st.tabs(["👥 Mes profils", "➕ Nouveau profil", "👤 Utilisateurs"])
 
 # ════════════════════════════════════════════════════════════════════════════
 # FONCTION METADATA
@@ -315,6 +314,80 @@ with tab2:
                 st.success(f"✅ Profil **{new_name}** créé !")
                 st.session_state.bc_test_result = {}
                 st.balloons()
+                st.rerun()
+            else:
+                st.error(f"❌ {err}")
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# TAB 3 — UTILISATEURS
+# ════════════════════════════════════════════════════════════════════════════
+with tab3:
+    st.markdown("### 👤 Gestion des accès utilisateurs")
+    st.caption("Créez les identifiants de connexion pour vos clients. Communiquez-leur username + mot de passe.")
+    st.markdown("---")
+
+    # ── Liste des utilisateurs existants ──────────────────────────────────────
+    all_users = get_all_users()
+    if all_users:
+        st.markdown(f"**{len(all_users)} utilisateur(s)**")
+        df_users = [
+            {
+                "Username":      u.get("username", ""),
+                "Nom affiché":   u.get("display_name", ""),
+                "Rôle":          u.get("role", ""),
+                "Profil client": u.get("profile_code", "") or "—",
+                "Actif":         "✅" if u.get("active", True) else "❌",
+                "Créé le":       (u.get("created_at", "")[:10] if u.get("created_at") else ""),
+            }
+            for u in all_users
+        ]
+        import pandas as pd
+        st.dataframe(pd.DataFrame(df_users), use_container_width=True, hide_index=True)
+        st.markdown("---")
+    else:
+        st.info("Aucun utilisateur créé.")
+
+    # ── Formulaire création ───────────────────────────────────────────────────
+    st.markdown("#### Créer un accès")
+    profiles_list = get_all_profiles()
+
+    u1, u2 = st.columns(2)
+    with u1:
+        new_username  = st.text_input("Username *", placeholder="aquachiara", key="u_username")
+        new_pwd       = st.text_input("Mot de passe *", type="password", key="u_pwd")
+        new_pwd_conf  = st.text_input("Confirmer le mot de passe *", type="password", key="u_pwd2")
+    with u2:
+        new_display   = st.text_input("Nom affiché *", placeholder="Aquachiara", key="u_display")
+        new_role      = st.radio("Rôle", ["client", "consultant"], horizontal=True, key="u_role")
+        if new_role == "client":
+            profile_opts   = {f"{p['name']} ({p['code']})": p["code"] for p in profiles_list}
+            profile_choice = st.selectbox("Profil client associé *", list(profile_opts.keys()), key="u_profile")
+            profile_code   = profile_opts.get(profile_choice, "")
+        else:
+            profile_code = ""
+            st.caption("Le consultant a accès à tous les clients.")
+
+    if st.button("💾 Créer l'utilisateur", type="primary", key="btn_create_user"):
+        errs = []
+        if not new_username.strip():  errs.append("Username obligatoire.")
+        if not new_pwd:               errs.append("Mot de passe obligatoire.")
+        if new_pwd != new_pwd_conf:   errs.append("Les mots de passe ne correspondent pas.")
+        if not new_display.strip():   errs.append("Nom affiché obligatoire.")
+        if new_role == "client" and not profile_code:
+            errs.append("Sélectionnez un profil client.")
+        for e in errs:
+            st.error(e)
+        if not errs:
+            ok, err = create_user(
+                username=new_username.strip().lower(),
+                password=new_pwd,
+                role=new_role,
+                display_name=new_display.strip(),
+                profile_code=profile_code,
+            )
+            if ok:
+                st.success(f"✅ Utilisateur **{new_username}** créé. Communiquez-lui ses identifiants.")
                 st.rerun()
             else:
                 st.error(f"❌ {err}")

@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+from datetime import date
 from app.core.file_parser import parse_uploaded_file, get_file_summary
 from app.core.structure_validator import validate_file_structure
 from app.core.validator_axe_a import validate_file_axe_a
@@ -344,6 +345,11 @@ with tab_main:
                 value=default_name,
                 placeholder="MDD Vente — Juin 2026",
             )
+            date_controle = st.date_input(
+                "Date de contrôle *",
+                value=date.today(),
+                help="Date à laquelle le contrôle qualité est effectué.",
+            )
             # Client affiché depuis le contexte (pas de selectbox)
             st.markdown(
                 f'<div style="background:#EEF4FD;border:1px solid #BFDBFE;border-radius:6px;'
@@ -365,13 +371,14 @@ with tab_main:
                     st.error("Nom de session obligatoire.")
                 else:
                     st.session_state.config = {
-                        "session_name": session_name.strip(),
-                        "client_code":  active_client,
-                        "client_name":  active_client_name,
-                        "pkg_code":     active_pkg_code,
-                        "pkg_name":     active_pkg_name,
-                        "notes":        notes,
-                        "file_name":    "",
+                        "session_name":  session_name.strip(),
+                        "date_controle": str(date_controle),
+                        "client_code":   active_client,
+                        "client_name":   active_client_name,
+                        "pkg_code":      active_pkg_code,
+                        "pkg_name":      active_pkg_name,
+                        "notes":         notes,
+                        "file_name":     "",
                     }
                     st.session_state.step=2; st.rerun()
 
@@ -532,6 +539,7 @@ with tab_main:
                 if st.button("💾 Sauvegarder la session", type="primary", use_container_width=True):
                     ok,res = save_session({
                         "session_name":    cfg["session_name"],
+                        "date_controle":   cfg.get("date_controle",""),
                         "profile_code":    cfg["client_code"],
                         "file_name":       cfg.get("file_name",""),
                         "notes":           cfg.get("notes",""),
@@ -568,7 +576,7 @@ with tab_ses:
             tot_a=s.get("total_anomalies",0); maj_a=s.get("major_anomalies",0); min_a=s.get("minor_anomalies",0)
             crd=s.get("created_at","")[:16].replace("T"," ") if s.get("created_at") else ""
             upd=s.get("updated_at","")[:16].replace("T"," ") if s.get("updated_at") else ""
-            fn=s.get("file_name","")
+            fn=s.get("file_name",""); dc=s.get("date_controle","")
             an_s=(f'<span style="color:#993C1D">🔴 {maj_a} majeures</span> · <span style="color:#854F0B">🟠 {min_a} mineures</span>' if tot_a>0 else '<span style="color:#0F6E56">✅ Aucune anomalie</span>')
 
             ci,ca=st.columns([7,3])

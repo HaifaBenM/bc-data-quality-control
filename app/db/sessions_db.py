@@ -54,6 +54,7 @@ def save_session(data: dict) -> tuple[bool, str]:
             "name":            data.get("session_name", ""),
             "profile_code":    data.get("profile_code", ""),
             "file_name":       data.get("file_name", ""),
+            "date_controle": data.get("date_controle", ""),
             "status":          data.get("status", "Analyse terminée"),
             "iteration":       data.get("iteration", 1),
             "total_anomalies": data.get("total_anomalies", 0),
