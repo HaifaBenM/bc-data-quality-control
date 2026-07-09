@@ -106,6 +106,11 @@ with col_refresh:
 
 # ── Chargement packages ───────────────────────────────────────────────────────
 @st.cache_data(ttl=300, show_spinner=False)
+def _pkgs_automation(tid, env, cid, _tok):
+    """Tous les packages depuis Automation API (données complètes)."""
+    return get_config_packages_for_company(tid, env, cid, _tok)
+
+@st.cache_data(ttl=300, show_spinner=False)
 def _pkgs_qc(tid, env, cid, _tok, visible_only):
     """Packages depuis extension Talan QC (avec flag visibilité)."""
     return get_packages_qc(tid, env, cid, _tok, visible_only=visible_only)

@@ -97,8 +97,7 @@ if submitted:
     else:
         ok, msg = login(username, password)
         if ok:
-            st.session_state["_pending_switch"] = "pages/1_Packages.py"
-            st.rerun()
+            st.rerun()  # retour accueil avec session active
         else:
             st.error(msg)
 
