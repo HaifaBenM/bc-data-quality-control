@@ -7,6 +7,7 @@ from app.core.validator_axe_b import validate_file_axe_b
 from app.core.validator_axe_c import validate_file_axe_c, get_gemini_api_key, is_gemini_available
 from app.core.auth import require_role
 from app.db.profiles_db import get_profile_by_code
+from app.core.bc_api import get_access_token, get_companies
 from datetime import date
 from app.db.sessions_db import (
     save_session, update_session, delete_session,
@@ -100,14 +101,36 @@ if not active_client:
     st.warning("⚠️ Sélectionnez un client depuis le menu latéral.")
     st.stop()
 
-# ── Société BC (depuis Packages ou profil par défaut) ─────────────────────────
-active_company_id   = st.session_state.get("active_company_id", "")
-active_company_name = st.session_state.get("active_company_name", "")
-if not active_company_id:
-    _profile = get_profile_by_code(active_client)
-    if _profile:
-        active_company_id   = _profile.get("bc_company_id", "") or ""
-        active_company_name = _profile.get("bc_company_name", "") or ""
+# ── Société BC — chargée depuis BC API, sélectionnable ───────────────────────
+@st.cache_data(ttl=600, show_spinner=False)
+def _load_companies_ses(client_code: str) -> tuple[list, str, str]:
+    """Charge les sociétés BC pour ce client. Retourne (companies, token_err)."""
+    try:
+        p = get_profile_by_code(client_code)
+        if not p:
+            return [], "", ""
+        tid = p.get("bc_tenant_id","").strip()
+        cid = p.get("bc_client_id","").strip()
+        cs  = p.get("bc_client_secret","").strip()
+        env = p.get("bc_environment","").strip()
+        if not all([tid, cid, cs, env]):
+            return [], "", ""
+        tok = get_access_token(tid, cid, cs)
+        companies = get_companies(tid, env, tok)
+        return companies, "", ""
+    except Exception as e:
+        return [], str(e), ""
+
+_ses_companies, _ses_err, _ = _load_companies_ses(active_client)
+
+# company sélectionnée (depuis Packages en priorité, sinon premier de la liste)
+_default_cid  = st.session_state.get("active_company_id", "")
+_default_cname = st.session_state.get("active_company_name", "")
+if not _default_cid and _ses_companies:
+    _p = get_profile_by_code(active_client)
+    if _p:
+        _default_cid   = _p.get("bc_company_id", "") or ""
+        _default_cname = _p.get("bc_company_name", "") or ""
 
 
 # ── Erreurs détectées aussi par BC Config Package ─────────────────────────────
@@ -356,15 +379,40 @@ with tab_main:
                 placeholder="MDD Vente — Juin 2026",
             )
             # Client affiché depuis le contexte (pas de selectbox)
+            # Affichage client + package
             st.markdown(
                 f'<div style="background:#EEF4FD;border:1px solid #BFDBFE;border-radius:6px;'
                 f'padding:.5rem .75rem;font-size:.88rem;color:#1B3A6B;">'
                 f'👤 <b>{active_client_name}</b> ({active_client})'
                 f'{"<br>📦 <b>" + active_pkg_name + "</b>" if active_pkg_name else ""}'
-                f'{"<br>🏢 <b>" + active_company_name + "</b>" if active_company_name else ""}'
                 f'</div>',
                 unsafe_allow_html=True,
             )
+            # Sélection société BC
+            if _ses_err:
+                st.warning(f"Impossible de charger les sociétés BC : {_ses_err}")
+                sel_company_id, sel_company_name = _default_cid, _default_cname
+            elif _ses_companies:
+                _company_opts = {
+                    c.get("displayName") or c.get("name", c["id"]): c["id"]
+                    for c in _ses_companies
+                }
+                _names = list(_company_opts.keys())
+                # Pré-sélectionner la société venue de Packages
+                _def_idx = 0
+                if _default_cname and _default_cname in _names:
+                    _def_idx = _names.index(_default_cname)
+                elif _default_cid:
+                    for _i, _cid in enumerate(_company_opts.values()):
+                        if _cid == _default_cid:
+                            _def_idx = _i; break
+                sel_company_name = st.selectbox(
+                    "🏢 Société BC *", _names, index=_def_idx, key="ses_company_sel"
+                )
+                sel_company_id = _company_opts[sel_company_name]
+            else:
+                st.info("Aucune société BC disponible.")
+                sel_company_id, sel_company_name = _default_cid, _default_cname
         with col2:
             notes = st.text_area("Notes", height=60)
             gemini_ok = is_gemini_available()
