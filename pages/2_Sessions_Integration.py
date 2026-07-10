@@ -512,7 +512,7 @@ with tab_main:
                         )
                         _sim_ctx = SimulationContext()
 
-                        axe_a = validate_file_axe_a(pr, execution_plan=_exec_plan)
+                        axe_a = validate_file_axe_a(pr)
                     with st.spinner("⏳ Vérification des références..."):
                         axe_b = validate_file_axe_b(
                             pr,
