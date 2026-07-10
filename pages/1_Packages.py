@@ -276,8 +276,10 @@ with tab_list:
             disabled=not has_sel,
             use_container_width=True,
         ):
-            st.session_state["active_package_code"] = sel_code
-            st.session_state["active_package_name"] = sel_name
+            st.session_state["active_package_code"]   = sel_code
+            st.session_state["active_package_name"]   = sel_name
+            st.session_state["active_company_id"]     = sel_company_id
+            st.session_state["active_company_name"]   = sel_company_name
             for k in ["step", "config", "parse_result", "validation",
                       "merged_result", "axe_c_result", "saved_session_id"]:
                 st.session_state[k] = 1 if k == "step" else (

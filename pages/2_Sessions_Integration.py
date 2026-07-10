@@ -1,12 +1,13 @@
 import streamlit as st
 import pandas as pd
-from datetime import date
 from app.core.file_parser import parse_uploaded_file, get_file_summary
 from app.core.structure_validator import validate_file_structure
 from app.core.validator_axe_a import validate_file_axe_a
 from app.core.validator_axe_b import validate_file_axe_b
 from app.core.validator_axe_c import validate_file_axe_c, get_gemini_api_key, is_gemini_available
 from app.core.auth import require_role
+from app.db.profiles_db import get_profile_by_code
+from datetime import date
 from app.db.sessions_db import (
     save_session, update_session, delete_session,
     get_all_sessions, SESSION_STATUSES, STATUS_COLORS, STATUS_ICONS
@@ -98,6 +99,15 @@ active_pkg_name    = st.session_state.get("active_package_name", "")
 if not active_client:
     st.warning("⚠️ Sélectionnez un client depuis le menu latéral.")
     st.stop()
+
+# ── Société BC (depuis Packages ou profil par défaut) ─────────────────────────
+active_company_id   = st.session_state.get("active_company_id", "")
+active_company_name = st.session_state.get("active_company_name", "")
+if not active_company_id:
+    _profile = get_profile_by_code(active_client)
+    if _profile:
+        active_company_id   = _profile.get("bc_company_id", "") or ""
+        active_company_name = _profile.get("bc_company_name", "") or ""
 
 
 # ── Erreurs détectées aussi par BC Config Package ─────────────────────────────
@@ -345,17 +355,13 @@ with tab_main:
                 value=default_name,
                 placeholder="MDD Vente — Juin 2026",
             )
-            date_controle = st.date_input(
-                "Date de contrôle *",
-                value=date.today(),
-                help="Date à laquelle le contrôle qualité est effectué.",
-            )
             # Client affiché depuis le contexte (pas de selectbox)
             st.markdown(
                 f'<div style="background:#EEF4FD;border:1px solid #BFDBFE;border-radius:6px;'
                 f'padding:.5rem .75rem;font-size:.88rem;color:#1B3A6B;">'
                 f'👤 <b>{active_client_name}</b> ({active_client})'
                 f'{"<br>📦 <b>" + active_pkg_name + "</b>" if active_pkg_name else ""}'
+                f'{"<br>🏢 <b>" + active_company_name + "</b>" if active_company_name else ""}'
                 f'</div>',
                 unsafe_allow_html=True,
             )
@@ -371,14 +377,13 @@ with tab_main:
                     st.error("Nom de session obligatoire.")
                 else:
                     st.session_state.config = {
-                        "session_name":  session_name.strip(),
-                        "date_controle": str(date_controle),
-                        "client_code":   active_client,
-                        "client_name":   active_client_name,
-                        "pkg_code":      active_pkg_code,
-                        "pkg_name":      active_pkg_name,
-                        "notes":         notes,
-                        "file_name":     "",
+                        "session_name": session_name.strip(),
+                        "client_code":  active_client,
+                        "client_name":  active_client_name,
+                        "pkg_code":     active_pkg_code,
+                        "pkg_name":     active_pkg_name,
+                        "notes":        notes,
+                        "file_name":    "",
                     }
                     st.session_state.step=2; st.rerun()
 
@@ -446,7 +451,7 @@ with tab_main:
                     with st.spinner("⏳ Analyse des contraintes..."):
                         axe_a = validate_file_axe_a(pr)
                     with st.spinner("⏳ Vérification des références..."):
-                        axe_b = validate_file_axe_b(pr, profile_code=client_code)
+                        axe_b = validate_file_axe_b(pr, profile_code=client_code, company_id=cfg.get('company_id',''))
 
                     axe_c = {"available": False, "total_suggestions":0, "auto_corrected":0, "by_sheet":{}}
                     if api_key:
@@ -539,7 +544,6 @@ with tab_main:
                 if st.button("💾 Sauvegarder la session", type="primary", use_container_width=True):
                     ok,res = save_session({
                         "session_name":    cfg["session_name"],
-                        "date_controle":   cfg.get("date_controle",""),
                         "profile_code":    cfg["client_code"],
                         "file_name":       cfg.get("file_name",""),
                         "notes":           cfg.get("notes",""),
@@ -576,7 +580,7 @@ with tab_ses:
             tot_a=s.get("total_anomalies",0); maj_a=s.get("major_anomalies",0); min_a=s.get("minor_anomalies",0)
             crd=s.get("created_at","")[:16].replace("T"," ") if s.get("created_at") else ""
             upd=s.get("updated_at","")[:16].replace("T"," ") if s.get("updated_at") else ""
-            fn=s.get("file_name",""); dc=s.get("date_controle","")
+            fn=s.get("file_name","")
             an_s=(f'<span style="color:#993C1D">🔴 {maj_a} majeures</span> · <span style="color:#854F0B">🟠 {min_a} mineures</span>' if tot_a>0 else '<span style="color:#0F6E56">✅ Aucune anomalie</span>')
 
             ci,ca=st.columns([7,3])
