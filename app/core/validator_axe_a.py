@@ -6,6 +6,7 @@ Source des contraintes : BC standard + terrain (indépendant de la connexion API
 import re
 import pandas as pd
 from datetime import datetime
+from app.core.bc_order import sort_sheets_by_bc_order, get_bc_order_summary
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -425,7 +426,7 @@ def _anomaly(
 # VALIDATION COMPLÈTE D'UN FICHIER PARSÉ
 # ══════════════════════════════════════════════════════════════════════════════
 
-def validate_file_axe_a(parse_result: dict) -> dict:
+def validate_file_axe_a(parse_result: dict, execution_plan=None) -> dict:
     """
     Lance la validation Axe A sur TOUTES les tables analysables du fichier
     (data_tables + ref_tables).
@@ -463,11 +464,18 @@ def validate_file_axe_a(parse_result: dict) -> dict:
 
     data_tables = parse_result.get("data_tables", [])
     ref_tables  = parse_result.get("ref_tables", [])
-    # Toutes les tables non-système sont désormais contrôlées par Axe A.
-    tables_to_validate = data_tables + ref_tables
+    metadata    = parse_result.get("metadata", {})
+    sheets      = parse_result.get("sheets", {})
 
-    metadata = parse_result.get("metadata", {})
-    sheets   = parse_result.get("sheets", {})
+    # Tri dans l'ordre d'intégration BC : Processing Order ASC, Table ID ASC.
+    # Reproduit exactement ApplyPackageTables (codeunit 8611).
+    tables_to_validate = sort_sheets_by_bc_order(
+        data_tables + ref_tables, metadata
+    )
+
+    result["bc_order_summary"] = get_bc_order_summary(
+        data_tables + ref_tables, metadata
+    )
 
     for sheet_name in tables_to_validate:
         df = sheets.get(sheet_name)

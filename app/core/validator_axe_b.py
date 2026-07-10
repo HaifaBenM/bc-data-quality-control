@@ -9,6 +9,7 @@ Sources (par ordre de priorité) :
 """
 import pandas as pd
 from app.db.metadata_db import get_reference_values
+from app.core.bc_order import sort_sheets_by_bc_order, get_bc_order_summary
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -285,11 +286,14 @@ def _get_valid_codes(df: pd.DataFrame, key_field: str = "Code") -> set:
 # ══════════════════════════════════════════════════════════════════════════════
 
 def validate_axe_b(
-    df:          pd.DataFrame,
-    table_id:    str,
-    all_sheets:  dict,
-    sheet_name:  str = "",
-    profile_code: str = "",
+    df:             pd.DataFrame,
+    table_id:       str,
+    all_sheets:     dict,
+    sheet_name:     str  = "",
+    profile_code:   str  = "",
+    sim_context     = None,   # SimulationContext — état progressif intra-fichier
+    metadata_loader = None,   # MetadataLoader   — ref_table_id par champ
+    execution_plan  = None,   # ExecutionPlan     — filtre validate_field flag
 ) -> list[dict]:
     """
     Valide les codes de référence d'un DataFrame BC contre les tables de référence.
@@ -304,7 +308,21 @@ def validate_axe_b(
     Retourne liste d'anomalies (même structure qu'Axe A).
     """
     anomalies  = []
-    field_refs = REFERENCE_MAP.get(table_id, {})
+    field_refs = dict(REFERENCE_MAP.get(table_id, {}))
+
+    if not field_refs:
+        return anomalies
+
+    # Filtrer par flag Validate Field (execution_plan fourni depuis l'extension AL)
+    if execution_plan:
+        try:
+            _tid_int = int(table_id)
+            field_refs = {
+                k: v for k, v in field_refs.items()
+                if execution_plan.validate_field_for(_tid_int, k)
+            }
+        except (ValueError, TypeError):
+            pass
 
     if not field_refs:
         return anomalies
@@ -340,6 +358,31 @@ def validate_axe_b(
         # 3. Référence introuvable
         not_found_fields.add(field_name)
         ref_codes_cache[field_name] = (set(), ref_config["label"], False)
+
+    # ── Enrichissement avec simulation_context (intra-fichier, ordre BC) ───────
+    # Reproduit ValidateFieldRelationAgainstCompanyDataAndPackage :
+    #   valeur ∈ BC_cache OU valeur ∈ simulation_context
+    if sim_context and metadata_loader:
+        try:
+            _tid_int = int(table_id)
+        except (ValueError, TypeError):
+            _tid_int = 0
+        if _tid_int:
+            for _fname in list(field_refs.keys()):
+                if _fname not in df.columns:
+                    continue
+                _ref_tid = metadata_loader.get_ref_table_id(_tid_int, _fname)
+                if not _ref_tid:
+                    continue
+                _sim_codes = sim_context.get_values(_ref_tid)
+                if not _sim_codes:
+                    continue
+                if _fname in ref_codes_cache:
+                    _codes, _src, _found = ref_codes_cache[_fname]
+                    ref_codes_cache[_fname] = (_codes | _sim_codes, _src, True)
+                else:
+                    ref_codes_cache[_fname] = (_sim_codes, "fichier (intra-package)", True)
+                not_found_fields.discard(_fname)
 
     # ── Validation ligne par ligne ────────────────────────────────────────────
     for row_idx, row in df.iterrows():
@@ -418,8 +461,12 @@ def validate_axe_b(
 
 
 def validate_file_axe_b(
-    parse_result:  dict,
-    profile_code:  str = "",
+    parse_result:    dict,
+    profile_code:    str  = "",
+    company_id:      str  = "",
+    sim_context      = None,   # SimulationContext partagé entre les tables
+    metadata_loader  = None,   # MetadataLoader
+    execution_plan   = None,   # ExecutionPlan (flags BC)
 ) -> dict:
     """
     Lance la validation Axe B sur TOUTES les tables analysables du fichier
@@ -460,11 +507,16 @@ def validate_file_axe_b(
 
     data_tables = parse_result.get("data_tables", [])
     ref_tables  = parse_result.get("ref_tables", [])
-    # Toutes les tables non-système sont désormais contrôlées par Axe B.
-    tables_to_validate = data_tables + ref_tables
+    all_sheets  = parse_result.get("sheets", {})
+    metadata    = parse_result.get("metadata", {})
 
-    all_sheets = parse_result.get("sheets", {})
-    metadata   = parse_result.get("metadata", {})
+    # Tri dans l'ordre d'intégration BC : Processing Order ASC, Table ID ASC.
+    # Cohérent avec validate_file_axe_a — les deux axes traitent les tables
+    # dans le même ordre, ce qui reproduit le flux BC :
+    # ApplyPackageTables → pour chaque table → ValidateFieldRelation.
+    tables_to_validate = sort_sheets_by_bc_order(
+        data_tables + ref_tables, metadata
+    )
 
     for sheet_name in tables_to_validate:
         df = all_sheets.get(sheet_name)
@@ -482,7 +534,53 @@ def validate_file_axe_b(
             all_sheets=all_sheets,
             sheet_name=sheet_name,
             profile_code=profile_code,
+            sim_context=sim_context,
+            metadata_loader=metadata_loader,
+            execution_plan=execution_plan,
         )
+
+        # Mettre à jour le simulation context avec les PK de cette table
+        if sim_context and table_id:
+            try:
+                from app.core.simulation_context import extract_pk_values
+                _tid_int = int(table_id)
+                if _tid_int:
+                    _pk_vals = extract_pk_values(df, _tid_int, parse_result)
+                    sim_context.add(_tid_int, _pk_vals)
+            except Exception:
+                pass
+
+        # Trigger Simulator — OnInsert (si skip_triggers = False)
+        if execution_plan and not execution_plan.skip_triggers_for(
+            int(table_id) if table_id else 0
+        ):
+            try:
+                from app.core.trigger_simulator import TriggerSimulator
+                from app.db.metadata_db import get_reference_values
+                if metadata_loader:
+                    tsim = TriggerSimulator(sim_context, metadata_loader)
+                    trigger_anom = tsim.simulate_table(
+                        table_id   = int(table_id),
+                        sheet_name = sheet_name,
+                        df         = df,
+                        bc_cache_fn= lambda tid: set(
+                            get_reference_values(profile_code, str(tid)) or []
+                        ),
+                    )
+                    for ta in trigger_anom:
+                        anomalies.append({
+                            "Ligne":              ta.row_number,
+                            "Onglet":             ta.sheet_name,
+                            "Champ":              ta.field_name,
+                            "Valeur":             ta.value,
+                            "Type d'anomalie":   f"Trigger {ta.trigger_type}",
+                            "Sévérité":           ta.severity,
+                            "Message":            ta.message,
+                            "Correction suggérée": "",
+                            "Axe":                "A-Trigger",
+                        })
+            except Exception:
+                pass
 
         result["by_sheet"][sheet_name] = anomalies
         result["all_anomalies"].extend(anomalies)

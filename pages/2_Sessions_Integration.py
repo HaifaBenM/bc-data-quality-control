@@ -6,6 +6,9 @@ from app.core.validator_axe_a import validate_file_axe_a
 from app.core.validator_axe_b import validate_file_axe_b
 from app.core.validator_axe_c import validate_file_axe_c, get_gemini_api_key, is_gemini_available
 from app.core.auth import require_role
+from app.core.execution_planner import get_execution_plan
+from app.core.simulation_context import SimulationContext
+from app.core.metadata_loader import MetadataLoader
 from app.db.profiles_db import get_profile_by_code
 from app.core.bc_api import get_access_token, get_companies
 from datetime import date
@@ -497,9 +500,28 @@ with tab_main:
                     client_code = cfg.get("client_code","")
 
                     with st.spinner("⏳ Analyse des contraintes..."):
-                        axe_a = validate_file_axe_a(pr)
+                        # ── Pipeline complet BC ───────────────────────────────
+                        _exec_plan = get_execution_plan(
+                            profile_code = client_code,
+                            company_id   = cfg.get("company_id", ""),
+                            package_code = cfg.get("pkg_code", ""),
+                        )
+                        _meta_loader = MetadataLoader(
+                            client_code,
+                            cfg.get("company_id", ""),
+                        )
+                        _sim_ctx = SimulationContext()
+
+                        axe_a = validate_file_axe_a(pr, execution_plan=_exec_plan)
                     with st.spinner("⏳ Vérification des références..."):
-                        axe_b = validate_file_axe_b(pr, profile_code=client_code, company_id=cfg.get('company_id',''))
+                        axe_b = validate_file_axe_b(
+                            pr,
+                            profile_code   = client_code,
+                            company_id     = cfg.get('company_id',''),
+                            sim_context    = _sim_ctx,
+                            metadata_loader= _meta_loader,
+                            execution_plan = _exec_plan,
+                        )
 
                     axe_c = {"available": False, "total_suggestions":0, "auto_corrected":0, "by_sheet":{}}
                     if api_key:
