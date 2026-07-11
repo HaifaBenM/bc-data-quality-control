@@ -289,7 +289,7 @@ def display_unified_results(merged: dict, axe_c: dict):
 
                     st.dataframe(
                         df_show.style.apply(color_row, axis=1),
-                        use_container_width=True, hide_index=True,
+                        width='stretch', hide_index=True,
                         height=min(400, 50+len(filtered)*35)
                     )
 
@@ -425,7 +425,7 @@ with tab_main:
         st.markdown("---")
         _,col_btn = st.columns([8,2])
         with col_btn:
-            if st.button("Suivant →", type="primary", use_container_width=True):
+            if st.button("Suivant →", type="primary", width='stretch'):
                 if not session_name.strip():
                     st.error("Nom de session obligatoire.")
                 else:
@@ -469,15 +469,15 @@ with tab_main:
                 st.markdown("---")
                 cb,cv = st.columns([2,3])
                 with cb:
-                    if st.button("← Étape précédente", use_container_width=True): st.session_state.step=1; st.rerun()
+                    if st.button("← Étape précédente", width='stretch'): st.session_state.step=1; st.rerun()
                 with cv:
-                    if st.button("🔍 Vérifier la structure →", type="primary", use_container_width=True, disabled=not s.get("data_tables")):
+                    if st.button("🔍 Vérifier la structure →", type="primary", width='stretch', disabled=not s.get("data_tables")):
                         with st.spinner("..."): val=validate_file_structure(pr); st.session_state.validation=val
                         st.session_state.step=3; st.rerun()
         else:
             cb,_ = st.columns([2,8])
             with cb:
-                if st.button("← Étape précédente", use_container_width=True): st.session_state.step=1; st.rerun()
+                if st.button("← Étape précédente", width='stretch'): st.session_state.step=1; st.rerun()
 
     # ── Étape 3 ──────────────────────────────────────────────────────────────
     elif st.session_state.step == 3:
@@ -493,11 +493,11 @@ with tab_main:
         st.markdown("---")
         cb,cv = st.columns([2,5])
         with cb:
-            if st.button("← Étape précédente", use_container_width=True):
+            if st.button("← Étape précédente", width='stretch'):
                 st.session_state.step=2; st.session_state.parse_result=None; st.session_state.validation=None; st.rerun()
         with cv:
             if val["is_valid"]:
-                if st.button("🚀 Lancer l'analyse qualité →", type="primary", use_container_width=True):
+                if st.button("🚀 Lancer l'analyse qualité →", type="primary", width='stretch'):
                     api_key     = get_gemini_api_key()
                     client_code = cfg.get("client_code","")
 
@@ -598,22 +598,22 @@ with tab_main:
                     if df is not None and not df.empty:
                         meta = pr.get("metadata",{}).get(sn,{})
                         st.markdown(f"**{sn}** — {meta.get('label','')} · {len(df)} lignes")
-                        st.dataframe(df.head(10), use_container_width=True, hide_index=True)
+                        st.dataframe(df.head(10), width='stretch', hide_index=True)
 
         st.markdown("---")
         cb,cr,cs,cst = st.columns([2,2,3,3])
         with cb:
-            if st.button("← Étape précédente", use_container_width=True):
+            if st.button("← Étape précédente", width='stretch'):
                 st.session_state.step=3
                 for k in ["merged_result","axe_c_result","saved_session_id"]: st.session_state[k]=None
                 st.rerun()
         with cr:
-            if st.button("🔄 Recommencer", use_container_width=True): reset_session(); st.rerun()
+            if st.button("🔄 Recommencer", width='stretch'): reset_session(); st.rerun()
         with cs:
             if st.session_state.saved_session_id:
                 st.markdown(f'<div class="save-box">✅ <b>Session sauvegardée</b><br><span style="font-size:11px;color:#64748B">{st.session_state.saved_session_id}</span></div>', unsafe_allow_html=True)
             else:
-                if st.button("💾 Sauvegarder la session", type="primary", use_container_width=True):
+                if st.button("💾 Sauvegarder la session", type="primary", width='stretch'):
                     ok,res = save_session({
                         "session_name":    cfg["session_name"],
                         "profile_code":    cfg["client_code"],
@@ -662,10 +662,10 @@ with tab_ses:
                 st.markdown("<div style='padding-top:14px'>", unsafe_allow_html=True)
                 ce,cd=st.columns(2)
                 with ce:
-                    if st.button("✏️ Éditer",key=f"es_{sid}",use_container_width=True):
+                    if st.button("✏️ Éditer",key=f"es_{sid}",width='stretch'):
                         st.session_state.edit_session_id=sid; st.session_state.confirm_delete_ses=None
                 with cd:
-                    if st.button("🗑️",key=f"ds_{sid}",use_container_width=True):
+                    if st.button("🗑️",key=f"ds_{sid}",width='stretch'):
                         st.session_state.confirm_delete_ses=sid; st.session_state.edit_session_id=None
                 st.markdown("</div>", unsafe_allow_html=True)
 
@@ -680,12 +680,12 @@ with tab_ses:
                     no=st.text_area("Notes",value=s.get("notes",""),height=100,key=f"eno_{sid}")
                 sv1,sv2,_=st.columns([2,2,6])
                 with sv1:
-                    if st.button("💾 Enregistrer",key=f"esv_{sid}",type="primary",use_container_width=True):
+                    if st.button("💾 Enregistrer",key=f"esv_{sid}",type="primary",width='stretch'):
                         ok,err=update_session(sid,{"name":nn.strip(),"status":ns,"notes":no.strip()})
                         if ok: st.success("✅ Mis à jour !"); st.session_state.edit_session_id=None; st.rerun()
                         else:  st.error(f"❌ {err}")
                 with sv2:
-                    if st.button("Annuler",key=f"eca_{sid}",use_container_width=True):
+                    if st.button("Annuler",key=f"eca_{sid}",width='stretch'):
                         st.session_state.edit_session_id=None; st.rerun()
                 st.markdown("---")
 

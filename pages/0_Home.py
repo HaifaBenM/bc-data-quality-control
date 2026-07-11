@@ -52,11 +52,11 @@ if role:
 """, unsafe_allow_html=True)
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("Continuer →", type="primary", use_container_width=True):
+        if st.button("Continuer →", type="primary", width='stretch'):
             st.session_state["_pending_switch"] = "pages/1_Packages.py"
             st.rerun()
     with col2:
-        if st.button("🚪 Déconnexion", use_container_width=True):
+        if st.button("🚪 Déconnexion", width='stretch'):
             logout()
             st.rerun()
     st.stop()
@@ -88,7 +88,7 @@ with st.form("login_form"):
     submitted = st.form_submit_button(
         "Se connecter",
         type="primary",
-        use_container_width=True,
+        width='stretch',
     )
 
 if submitted:

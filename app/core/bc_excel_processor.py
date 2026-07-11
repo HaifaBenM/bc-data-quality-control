@@ -7,9 +7,6 @@ en ré-injectant les fichiers BC-spécifiques après les modifications openpyxl.
 import io
 import re
 import zipfile
-import openpyxl
-from openpyxl.styles import PatternFill, Font, Alignment
-from openpyxl.utils import get_column_letter
 
 # ── Exemples par table/champ ──────────────────────────────────────────────────
 _FIELD_EXAMPLES: dict[int, dict[str, list[str]]] = {
@@ -310,6 +307,7 @@ def write_corrected_data(
     template_bytes: bytes,
     corrected_dfs:  dict,
 ) -> bytes:
+    from openpyxl.utils import get_column_letter  # lazy import
     """
     Injecte les données corrigées dans le template BC original.
 

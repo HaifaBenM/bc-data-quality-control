@@ -157,7 +157,7 @@ with col_soc:
     )
     sel_company_id = company_opts[sel_company_name]
 with col_refresh:
-    if st.button("🔄 Rafraîchir", use_container_width=True):
+    if st.button("🔄 Rafraîchir", width='stretch'):
         st.cache_data.clear()
         st.rerun()
 
@@ -238,7 +238,7 @@ with tab_list:
 
     event = st.dataframe(
         df,
-        use_container_width=True,
+        width='stretch',
         hide_index=True,
         on_select="rerun",
         selection_mode="single-row",
@@ -270,7 +270,7 @@ with tab_list:
         do_export = st.button(
             "📤 Exporter en Excel",
             disabled=not has_sel,
-            use_container_width=True,
+            width='stretch',
             type="primary",
         )
 
@@ -278,7 +278,7 @@ with tab_list:
         if st.button(
             "📁 Importer dans Sessions",
             disabled=not has_sel,
-            use_container_width=True,
+            width='stretch',
         ):
             st.session_state["active_package_code"]   = sel_code
             st.session_state["active_package_name"]   = sel_name
@@ -346,11 +346,11 @@ with tab_list:
                         data=tpl_bytes,
                         file_name=f"{sel_code}_template.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        use_container_width=True,
+                        width='stretch',
                         type="primary",
                     )
                 with col_del:
-                    if st.button("🔄 Reconfigurer", use_container_width=True):
+                    if st.button("🔄 Reconfigurer", width='stretch'):
                         delete_excel_template(active_client, sel_code)
                         st.rerun()
 
