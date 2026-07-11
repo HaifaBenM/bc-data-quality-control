@@ -181,3 +181,164 @@ def get_reference_values(
         ]
     except Exception:
         return []
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# LOOKUP DYNAMIQUE PAR TABLE ID
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Mapping refTableId → cache_key Supabase existant
+# Couvre les tables BC standard les plus courantes.
+# Complété automatiquement quand on découvre une nouvelle table.
+_REF_TABLE_CACHE_KEYS: dict[int, str] = {
+    3:    "paymentTerms",           # Conditions paiement
+    4:    "currencies",             # Devises
+    5:    "currencies",
+    6:    "customerPriceGroups",    # Groupes prix client
+    9:    "countriesRegions",       # Pays/Régions
+    10:   "shipmentMethods",        # Conditions livraison
+    13:   "salespeople",            # Vendeurs/Acheteurs
+    14:   "locations",              # Magasins
+    15:   "glAccounts",             # Comptes généraux
+    18:   "customers",              # Clients
+    23:   "vendors",                # Fournisseurs
+    27:   "items",                  # Articles
+    74:   "vatBusPostingGroups",    # Groupes compta. marché TVA
+    76:   "resourceGroups",         # Groupes ressource
+    91:   "customerPostingGroups",  # Groupes compta. client
+    92:   "vendorPostingGroups",    # Groupes compta. fourn.
+    94:   "inventoryPostingGroups", # Groupes compta. stock
+    156:  "resources",              # Ressources
+    204:  "unitsOfMeasure",         # Unités de mesure
+    251:  "genProdPostingGroups",   # Groupes compta. produit
+    289:  "paymentMethods",         # Modes de paiement
+    308:  "noSeries",               # Souches de n°
+    322:  "taxGroups",              # Groupes taxes
+    325:  "vatProdPostingGroups",   # Groupes compta. produit TVA
+    340:  "itemDiscountGroups",     # Groupes remises article
+    5722: "itemCategories",         # Catégories article
+    6502: "itemTrackingCodes",      # Codes traçabilité
+}
+
+# Mapping refTableId → BC API standard v2.0 (pour fetch à la demande)
+_TABLE_BC_ENTITY: dict[int, tuple[str, str]] = {
+    # (entity_name, code_field)
+    3:    ("paymentTerms", "code"),
+    4:    ("currencies", "code"),
+    9:    ("countriesRegions", "code"),
+    10:   ("shipmentMethods", "code"),
+    13:   ("salespeople", "code"),
+    14:   ("locations", "code"),
+    18:   ("customers", "number"),
+    23:   ("vendors", "number"),
+    27:   ("items", "number"),
+    204:  ("unitsOfMeasure", "code"),
+    289:  ("paymentMethods", "code"),
+    5722: ("itemCategories", "code"),
+}
+
+
+def get_reference_values_by_table_id(
+    profile_code: str,
+    company_id:   str,
+    ref_table_id: int,
+) -> tuple[set[str], bool]:
+    """
+    Retourne (valid_codes, found) pour une table référencée.
+
+    Stratégie :
+      1. Cache Supabase (cache_key connu)
+      2. BC API standard v2.0 (entité connue) → mis en cache
+      3. set() vide + found=False (table inconnue → INFO non vérifiable)
+
+    Args:
+        profile_code : code profil client
+        company_id   : ID société BC
+        ref_table_id : ID table BC référencée (depuis FldRef.Relation())
+
+    Returns:
+        (set[str], bool) — codes valides + indicateur de disponibilité
+    """
+    if not ref_table_id:
+        return set(), False
+
+    # 1. Cache Supabase via cache_key connu
+    cache_key = _REF_TABLE_CACHE_KEYS.get(ref_table_id)
+    if cache_key:
+        try:
+            cached = get_reference_values(profile_code, cache_key)
+            if cached:
+                return set(str(c).strip() for c in cached if c), True
+        except Exception:
+            pass
+
+    # 2. BC API standard v2.0 → fetch + mise en cache
+    entity_info = _TABLE_BC_ENTITY.get(ref_table_id)
+    if entity_info and profile_code:
+        try:
+            codes = _fetch_codes_from_bc_api(
+                profile_code, company_id, ref_table_id, entity_info
+            )
+            if codes:
+                # Stocker en cache pour les prochaines validations
+                if cache_key:
+                    _store_reference_cache(profile_code, cache_key, codes)
+                return codes, True
+        except Exception:
+            pass
+
+    # 3. Table inconnue ou inaccessible
+    return set(), False
+
+
+def _fetch_codes_from_bc_api(
+    profile_code:  str,
+    company_id:    str,
+    ref_table_id:  int,
+    entity_info:   tuple[str, str],
+) -> set[str]:
+    """Fetch les codes valides depuis l'API BC standard v2.0."""
+    try:
+        from app.db.profiles_db import get_profile_by_code
+        from app.core.bc_api import get_access_token
+        import requests as _req
+
+        p = get_profile_by_code(profile_code)
+        if not p:
+            return set()
+
+        tid  = p.get("bc_tenant_id","").strip()
+        cid  = p.get("bc_client_id","").strip()
+        cs   = p.get("bc_client_secret","").strip()
+        env  = p.get("bc_environment","").strip()
+        if not all([tid, cid, cs, env, company_id]):
+            return set()
+
+        token  = get_access_token(tid, cid, cs)
+        entity, code_field = entity_info
+        url = (
+            f"https://api.businesscentral.dynamics.com/v2.0/{tid}/{env}"
+            f"/api/v2.0/companies({company_id})/{entity}"
+            f"?$select={code_field}&$top=5000"
+        )
+        resp = _req.get(url, headers={"Authorization": f"Bearer {token}"}, timeout=20)
+        resp.raise_for_status()
+        values = resp.json().get("value", [])
+        return set(str(v.get(code_field,"")).strip() for v in values if v.get(code_field))
+
+    except Exception:
+        return set()
+
+
+def _store_reference_cache(profile_code: str, cache_key: str, codes: set[str]) -> None:
+    """Stocke les codes en cache Supabase pour réutilisation."""
+    try:
+        from app.db.supabase_client import get_supabase_client
+        import json
+        get_supabase_client().table("bc_metadata_cache").upsert({
+            "profile_code": profile_code,
+            "cache_key":    cache_key,
+            "values":       json.dumps(sorted(codes)),
+        }, on_conflict="profile_code,cache_key").execute()
+    except Exception:
+        pass

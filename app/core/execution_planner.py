@@ -41,6 +41,8 @@ class ExecutionPlan:
     tables:       dict[int, TablePlan]        = field(default_factory=dict)
     # {table_id: {field_name: validate_field}}
     fields:       dict[int, dict[str, bool]]  = field(default_factory=dict)
+    # {table_id: {field_name: ref_table_id}} — 0 si pas de TableRelation
+    fields_ref:   dict[int, dict[str, int]]   = field(default_factory=dict)
     source:       str = "default"   # "bc_api" | "default"
 
     def skip_triggers_for(self, table_id: int) -> bool:
@@ -57,6 +59,14 @@ class ExecutionPlan:
         if tbl_fields is None:
             return True   # fallback : valider tout
         return tbl_fields.get(field_name, True)
+
+    def get_ref_table_id(self, table_id: int, field_name: str) -> int:
+        """
+        Retourne l'ID de la table référencée par un champ.
+        0 = pas de TableRelation connue.
+        Source : refTableId depuis l'extension Talan QC (FldRef.Relation()).
+        """
+        return self.fields_ref.get(table_id, {}).get(field_name, 0)
 
     def get_tables_ordered(self) -> list[TablePlan]:
         """Retourne les tables triées par (processing_order, table_id) — ordre BC réel."""
@@ -125,19 +135,23 @@ def build_plan_from_bc(
         )
         plan.tables[tid] = tp
 
-        # Validate Field par champ
+        # Validate Field + refTableId par champ
         try:
             pkg_fields = get_package_fields_qc(
                 tenant_id, environment, company_id, package_code, tid, token
             )
             plan.fields[tid] = {
                 pf.get("fieldName", ""): bool(pf.get("validateField", True))
-                for pf in pkg_fields
-                if pf.get("fieldName")
+                for pf in pkg_fields if pf.get("fieldName")
+            }
+            # refTableId (FldRef.Relation()) — 0 si pas de TableRelation
+            plan.fields_ref[tid] = {
+                pf.get("fieldName", ""): int(pf.get("refTableId") or 0)
+                for pf in pkg_fields if pf.get("fieldName")
             }
         except Exception:
-            # Fallback pour cette table : valider tous les champs
             plan.fields[tid] = {}
+            plan.fields_ref[tid] = {}
 
     return plan
 

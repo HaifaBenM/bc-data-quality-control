@@ -8,7 +8,7 @@ Sources (par ordre de priorité) :
   3. Si aucune source → champ non vérifiable (Info, pas d'erreur bloquante)
 """
 import pandas as pd
-from app.db.metadata_db import get_reference_values
+from app.db.metadata_db import get_reference_values, get_reference_values_by_table_id
 from app.core.bc_order import sort_sheets_by_bc_order, get_bc_order_summary
 
 
@@ -161,35 +161,105 @@ REFERENCE_MAP = {
 
     # ── Table 27 — Articles ────────────────────────────────────────────────────
     "27": {
-        "Unité de mesure de base": {
-            "patterns":  ["Unité de mesure", "204 Unité"],
+        # ── Unité de mesure ────────────────────────────────────────────────────
+        "Unité de base": {
+            "patterns":  ["Unité de mesure", "204 Unité", "Unités de mesure"],
             "key":       "Code",
             "label":     "Unités de mesure",
             "cache_key": "unitOfMeasures",
         },
+        # ── Groupes comptables ─────────────────────────────────────────────────
         "Groupe compta. stock": {
-            "patterns":  ["Groupe compta. stock", "94 Groupe"],
+            "patterns":  ["Groupe compta. stock", "94 Groupe compta. stock"],
             "key":       "Code",
             "label":     "Groupes compta. stock",
             "cache_key": None,
         },
         "Groupe compta. produit": {
-            "patterns":  ["Groupe compta. produit", "252 Groupe"],
+            "patterns":  ["Groupe compta. produit", "252 Groupe compta. produit"],
             "key":       "Code",
             "label":     "Groupes compta. produit",
             "cache_key": None,
         },
         "Groupe compta. produit TVA": {
-            "patterns":  ["produit TVA", "325 Groupe"],
+            "patterns":  ["produit TVA", "325 Groupe compta. produit TVA"],
             "key":       "Code",
             "label":     "Groupes compta. produit TVA",
             "cache_key": None,
         },
+        "Gpe compta. marché TVA (prix)": {
+            "patterns":  ["marché TVA", "74 Gpe compta", "TVA prix"],
+            "key":       "Code",
+            "label":     "Groupes compta. marché TVA",
+            "cache_key": None,
+        },
+        # ── Références fournisseur ─────────────────────────────────────────────
+        "N° fournisseur": {
+            "patterns":  ["23 Fournisseur", "Fournisseur"],
+            "key":       "N°",
+            "label":     "Fournisseurs",
+            "cache_key": "vendors",
+        },
+        # ── Catégorie et remises ───────────────────────────────────────────────
         "Code catégorie article": {
-            "patterns":  ["Catégorie article"],
+            "patterns":  ["Catégorie article", "5722 Catégorie"],
             "key":       "Code",
             "label":     "Catégories d'articles",
             "cache_key": "itemCategories",
+        },
+        "Groupe rem. article": {
+            "patterns":  ["Groupe remises article", "340 Groupe remises"],
+            "key":       "Code",
+            "label":     "Groupes remises article",
+            "cache_key": None,
+        },
+        # ── Pays/région ────────────────────────────────────────────────────────
+        "Code pays/région achat": {
+            "patterns":  ["Pays", "9 Pays", "Pays/région"],
+            "key":       "Code",
+            "label":     "Pays/Régions",
+            "cache_key": "countriesRegions",
+        },
+        "Code pays/région origine": {
+            "patterns":  ["Pays", "9 Pays", "Pays/région"],
+            "key":       "Code",
+            "label":     "Pays/Régions",
+            "cache_key": "countriesRegions",
+        },
+        # ── No. Series ─────────────────────────────────────────────────────────
+        "Souches de n°": {
+            "patterns":  ["Souches de n", "308 Souches"],
+            "key":       "Code",
+            "label":     "Souches de n°",
+            "cache_key": "noSeries",
+        },
+        # ── Taxes ──────────────────────────────────────────────────────────────
+        "Code groupe taxes": {
+            "patterns":  ["Groupe taxes", "322 Groupe taxes", "USA groupe taxes"],
+            "key":       "Code",
+            "label":     "USA Groupes taxes",
+            "cache_key": None,
+        },
+        # ── Modèle échelonnement ───────────────────────────────────────────────
+        "Code modèle échelonnement par défaut": {
+            "patterns":  ["Modèle éch", "1300 Modèle", "Deferral"],
+            "key":       "Code",
+            "label":     "Modèles d'échelonnement",
+            "cache_key": None,
+        },
+        # ── Traçabilité ────────────────────────────────────────────────────────
+        "Code traçabilité": {
+            "patterns":  ["Traçabilité", "6502 Traça"],
+            "key":       "Code",
+            "label":     "Codes traçabilité",
+            "cache_key": None,
+        },
+        # ── Mode d'achat ───────────────────────────────────────────────────────
+        "Code achat": {
+            "patterns":  ["5730 Code achat", "Code achat"],
+            "key":       "Code",
+            "label":     "Codes achat",
+            "cache_key": None,
         },
     },
 
@@ -291,174 +361,213 @@ def validate_axe_b(
     all_sheets:     dict,
     sheet_name:     str  = "",
     profile_code:   str  = "",
-    sim_context     = None,   # SimulationContext — état progressif intra-fichier
-    metadata_loader = None,   # MetadataLoader   — ref_table_id par champ
-    execution_plan  = None,   # ExecutionPlan     — filtre validate_field flag
+    company_id:     str  = "",
+    sim_context     = None,
+    metadata_loader = None,
+    execution_plan  = None,
 ) -> list[dict]:
     """
-    Valide les codes de référence d'un DataFrame BC contre les tables de référence.
+    Axe B — Validation des références (≈ Valider Package BC).
 
-    Args:
-        df           : DataFrame des données client (ex: 18 Client)
-        table_id     : numéro de table BC (ex: "18")
-        all_sheets   : tous les onglets du fichier {sheet_name: DataFrame}
-        sheet_name   : nom de l'onglet des données (pour les messages)
-        profile_code : code profil pour accéder au cache Supabase
+    Logique :
+      Pour chaque champ où validate_field = TRUE :
+        ref_table_id = execution_plan.get_ref_table_id(table_id, field_name)
+        valid_codes  = BC_cache(ref_table_id) ∪ simulation_context(ref_table_id)
+        Si valeur absente → ANOMALIE MAJEURE
 
-    Retourne liste d'anomalies (même structure qu'Axe A).
+    Fallback REFERENCE_MAP (si execution_plan absent ou refTableId=0) :
+      Utilise l'ancien mécanisme par patterns pour les tables connues.
     """
-    anomalies  = []
+    anomalies = []
+    if df is None or df.empty:
+        return anomalies
+
+    try:
+        table_id_int = int(table_id) if table_id else 0
+    except (ValueError, TypeError):
+        table_id_int = 0
+
+    # ── Chemin 1 : lookup dynamique via execution_plan (refTableId AL) ─────────
+    if execution_plan and table_id_int:
+        for col in df.columns:
+            # Vérifier validate_field flag
+            if not execution_plan.validate_field_for(table_id_int, col):
+                continue
+
+            ref_tid = execution_plan.get_ref_table_id(table_id_int, col)
+            if not ref_tid:
+                continue  # pas de TableRelation → pas de vérification Axe B
+
+            # Codes valides : BC cache + simulation context
+            bc_codes, found = get_reference_values_by_table_id(
+                profile_code, company_id, ref_tid
+            )
+            sim_codes = sim_context.get_values(ref_tid) if sim_context else set()
+            valid_codes = bc_codes | sim_codes
+
+            if not found and not sim_codes:
+                # Table inconnue → INFO
+                anomalies.append({
+                    "Ligne":              0,
+                    "Onglet":             sheet_name,
+                    "Champ":              col,
+                    "Valeur":             "",
+                    "Type d'anomalie":   "Code de référence non vérifiable",
+                    "Sévérité":           "Info",
+                    "Message":            (
+                        f"Impossible de vérifier '{col}' : "
+                        f"la table de référence (ID {ref_tid}) n'est pas "
+                        f"dans le cache BC. Chargez la metadata BC depuis le profil client."
+                    ),
+                    "Correction suggérée": "",
+                    "Axe":               "B",
+                    "Détail":            f"ref_table_id={ref_tid}",
+                })
+                continue
+
+            # Valider chaque ligne
+            for row_idx, row in df.iterrows():
+                value = str(row.get(col, "") or "").strip()
+                if not value or value.lower() in ("nan", "none", ""):
+                    continue
+
+                if value not in valid_codes:
+                    examples = sorted(valid_codes)[:3] if valid_codes else []
+                    tag_bc   = valid_codes and found
+                    anomalies.append({
+                        "Ligne":              int(row_idx) + 4,
+                        "Onglet":             sheet_name,
+                        "Champ":              col,
+                        "Valeur":             value,
+                        "Type d'anomalie":   "Code de référence invalide",
+                        "Sévérité":           "Majeure",
+                        "Message":            (
+                            f"'{col}' = '{value}' n'existe pas dans "
+                            f"la table référencée (ID {ref_tid})."
+                            + (f" Exemples valides : {examples}" if examples else "")
+                        ),
+                        "Correction suggérée": examples[0] if examples else "",
+                        "Axe":               "B",
+                        "BC":                tag_bc,
+                    })
+
+        # Appliquer simulation_context enrichment (même logique qu'avant)
+        if sim_context and metadata_loader:
+            try:
+                for col in df.columns:
+                    _ref_tid2 = execution_plan.get_ref_table_id(table_id_int, col)
+                    if not _ref_tid2:
+                        continue
+                    _sim = sim_context.get_values(_ref_tid2)
+                    if _sim:
+                        # Les anomalies déjà générées pour ce champ peuvent être
+                        # faux positifs si la valeur est dans sim_context
+                        anomalies = [
+                            a for a in anomalies
+                            if not (
+                                a.get("Champ") == col
+                                and str(a.get("Valeur","")).strip() in _sim
+                            )
+                        ]
+            except Exception:
+                pass
+
+        return anomalies
+
+    # ── Chemin 2 : fallback REFERENCE_MAP (execution_plan absent) ─────────────
     field_refs = dict(REFERENCE_MAP.get(table_id, {}))
-
     if not field_refs:
         return anomalies
 
-    # Filtrer par flag Validate Field (execution_plan fourni depuis l'extension AL)
-    if execution_plan:
-        try:
-            _tid_int = int(table_id)
-            field_refs = {
-                k: v for k, v in field_refs.items()
-                if execution_plan.validate_field_for(_tid_int, k)
-            }
-        except (ValueError, TypeError):
-            pass
-
-    if not field_refs:
-        return anomalies
-
-    # Pré-calculer les codes valides par référence (éviter recalcul à chaque ligne)
-    ref_codes_cache = {}   # {field_name: (set_codes, source_label, found)}
-    not_found_fields = set()  # champs dont la référence est introuvable
+    # Construction ref_codes_cache (logique originale préservée)
+    ref_codes_cache: dict[str, tuple[set, str, bool]] = {}
+    not_found_fields: set[str] = set()
 
     for field_name, ref_config in field_refs.items():
         if field_name not in df.columns:
-            continue  # Ce champ n'est pas dans ce fichier, ignorer
+            continue
+
+        sim_codes = set()
+        if sim_context and metadata_loader:
+            try:
+                _ref_tid_fb = metadata_loader.get_ref_table_id(table_id_int, field_name)
+                if _ref_tid_fb:
+                    sim_codes = sim_context.get_values(_ref_tid_fb)
+            except Exception:
+                pass
 
         # 1. Chercher dans le fichier
         ref_sheet = _find_ref_sheet(all_sheets, ref_config["patterns"])
         if ref_sheet:
-            ref_df    = all_sheets[ref_sheet]
-            codes     = _get_valid_codes(ref_df, ref_config["key"])
-            source    = f"onglet '{ref_sheet}'"
-            ref_codes_cache[field_name] = (codes, source, True)
+            ref_df   = all_sheets.get(ref_sheet)
+            f_codes  = _get_valid_codes(ref_df, ref_config["key"]) if ref_df is not None else set()
+            codes    = f_codes | sim_codes
+            ref_codes_cache[field_name] = (codes, f"onglet '{ref_sheet}'", True)
             continue
 
-        # 2. Chercher dans le cache Supabase
+        # 2. Cache Supabase
         if profile_code and ref_config.get("cache_key"):
-            cached_codes = get_reference_values(
-                profile_code, ref_config["cache_key"]
-            )
-            if cached_codes:
-                codes  = set(c for c in cached_codes if c)
-                source = f"cache BC ({ref_config['label']})"
-                ref_codes_cache[field_name] = (codes, source, True)
+            cached = get_reference_values(profile_code, ref_config["cache_key"])
+            if cached or sim_codes:
+                codes = set(c for c in cached if c) | sim_codes
+                ref_codes_cache[field_name] = (codes, f"cache BC ({ref_config['label']})", True)
                 continue
 
-        # 3. Référence introuvable
-        not_found_fields.add(field_name)
-        ref_codes_cache[field_name] = (set(), ref_config["label"], False)
+        # 3. Sim context seul
+        if sim_codes:
+            ref_codes_cache[field_name] = (sim_codes, "fichier (intra-package)", True)
+        else:
+            not_found_fields.add(field_name)
+            ref_codes_cache[field_name] = (set(), ref_config["label"], False)
 
-    # ── Enrichissement avec simulation_context (intra-fichier, ordre BC) ───────
-    # Reproduit ValidateFieldRelationAgainstCompanyDataAndPackage :
-    #   valeur ∈ BC_cache OU valeur ∈ simulation_context
-    if sim_context and metadata_loader:
-        try:
-            _tid_int = int(table_id)
-        except (ValueError, TypeError):
-            _tid_int = 0
-        if _tid_int:
-            for _fname in list(field_refs.keys()):
-                if _fname not in df.columns:
-                    continue
-                _ref_tid = metadata_loader.get_ref_table_id(_tid_int, _fname)
-                if not _ref_tid:
-                    continue
-                _sim_codes = sim_context.get_values(_ref_tid)
-                if not _sim_codes:
-                    continue
-                if _fname in ref_codes_cache:
-                    _codes, _src, _found = ref_codes_cache[_fname]
-                    ref_codes_cache[_fname] = (_codes | _sim_codes, _src, True)
-                else:
-                    ref_codes_cache[_fname] = (_sim_codes, "fichier (intra-package)", True)
-                not_found_fields.discard(_fname)
+    # Anomalies INFO pour champs non vérifiables
+    for field_name in not_found_fields:
+        _, label, _ = ref_codes_cache.get(field_name, (set(), field_name, False))
+        anomalies.append({
+            "Ligne":              0,
+            "Onglet":             sheet_name,
+            "Champ":              field_name,
+            "Valeur":             "",
+            "Type d'anomalie":   "Code de référence non vérifiable",
+            "Sévérité":           "Info",
+            "Message":            (
+                f"Impossible de vérifier '{field_name}' : "
+                f"la table de référence '{label}' n'est pas dans le fichier "
+                f"et n'est pas dans le cache BC. Chargez la metadata BC."
+            ),
+            "Correction suggérée": "",
+            "Axe":               "B",
+        })
 
-    # ── Validation ligne par ligne ────────────────────────────────────────────
+    # Validation ligne par ligne
     for row_idx, row in df.iterrows():
-        line_num = int(row_idx) + 1
-
+        row_num = int(row_idx) + 4
         for field_name, (valid_codes, source, found) in ref_codes_cache.items():
-            raw_val = row.get(field_name)
-
-            # Ignorer les valeurs vides (déjà traité par Axe A si obligatoire)
-            if raw_val is None or str(raw_val).strip() in ("", "nan", "None"):
+            if field_name not in df.columns or not found:
                 continue
-
-            str_val  = _normalize(str(raw_val))
-            if not str_val:
+            value = str(row.get(field_name, "") or "").strip()
+            if not value or value.lower() in ("nan", "none", ""):
                 continue
-
-            if not found:
-                # Référence introuvable — on ne peut pas valider
-                # On signale seulement une fois (pas par ligne) → géré après
-                continue
-
-            if not valid_codes:
-                continue
-
-            # Vérifier si le code existe (insensible à la casse)
-            str_val_up = str_val.upper()
-            if str_val_up not in {c.upper() for c in valid_codes}:
-                # Code introuvable dans la référence
-                # Construire la liste des valeurs valides (max 5 pour lisibilité)
-                sample = sorted({c for c in valid_codes if c})[:5]
-                sample_str = ", ".join(f"'{v}'" for v in sample)
-                if len(valid_codes) > 5:
-                    sample_str += f" ... ({len(valid_codes)} valeurs)"
-
+            if value not in valid_codes:
+                examples = sorted(valid_codes)[:3] if valid_codes else []
                 anomalies.append({
-                    "Ligne":              line_num,
+                    "Ligne":              row_num,
                     "Onglet":             sheet_name,
                     "Champ":              field_name,
-                    "Valeur":             str_val,
-                    "Type d'anomalie":    "Code de référence invalide",
+                    "Valeur":             value,
+                    "Type d'anomalie":   "Code de référence invalide",
                     "Sévérité":           "Majeure",
                     "Message":            (
-                        f"'{field_name}' = '{str_val}' n'existe pas dans "
-                        f"{source}. "
-                        f"Exemples valides : {sample_str}."
+                        f"'{field_name}' = '{value}' n'existe pas "
+                        f"dans {source}."
+                        + (f" Exemples valides : {examples}" if examples else "")
                     ),
-                    "Correction suggérée": "",
-                    "Axe":                "B",
-                })
-
-    # ── Ajouter les avertissements pour les références introuvables ───────────
-    for field_name in not_found_fields:
-        ref_config = field_refs.get(field_name, {})
-        # Vérifier si le champ a des valeurs non vides dans les données
-        if field_name in df.columns:
-            has_values = df[field_name].dropna().astype(str).str.strip().ne("").any()
-            if has_values:
-                anomalies.append({
-                    "Ligne":              0,  # 0 = avertissement global
-                    "Onglet":             sheet_name,
-                    "Champ":             field_name,
-                    "Valeur":            "",
-                    "Type d'anomalie":   "Référence non vérifiable",
-                    "Sévérité":          "Info",
-                    "Message":           (
-                        f"Impossible de vérifier '{field_name}' : "
-                        f"la table de référence '{ref_config.get('label', '')}' "
-                        "n'est pas dans le fichier et n'est pas dans le cache BC. "
-                        "Chargez la metadata BC depuis le profil client."
-                    ),
-                    "Correction suggérée": "",
+                    "Correction suggérée": examples[0] if examples else "",
                     "Axe":               "B",
+                    "BC":                found,
                 })
 
     return anomalies
-
 
 def validate_file_axe_b(
     parse_result:    dict,
@@ -534,6 +643,7 @@ def validate_file_axe_b(
             all_sheets=all_sheets,
             sheet_name=sheet_name,
             profile_code=profile_code,
+            company_id=company_id,
             sim_context=sim_context,
             metadata_loader=metadata_loader,
             execution_plan=execution_plan,
@@ -556,7 +666,7 @@ def validate_file_axe_b(
         ):
             try:
                 from app.core.trigger_simulator import TriggerSimulator
-                from app.db.metadata_db import get_reference_values
+                from app.db.metadata_db import get_reference_values, get_reference_values_by_table_id
                 if metadata_loader:
                     tsim = TriggerSimulator(sim_context, metadata_loader)
                     trigger_anom = tsim.simulate_table(
