@@ -6,6 +6,8 @@ from app.core.validator_axe_a import validate_file_axe_a
 from app.core.validator_axe_b import validate_file_axe_b
 from app.core.validator_axe_c import validate_file_axe_c, get_gemini_api_key, is_gemini_available
 from app.core.auth import require_role
+from app.core.bc_excel_processor import write_corrected_data
+from app.db.excel_template_db import get_original_template
 from app.core.execution_planner import get_execution_plan
 from app.core.simulation_context import SimulationContext
 from app.core.metadata_loader import MetadataLoader

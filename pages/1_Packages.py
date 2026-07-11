@@ -6,9 +6,13 @@ from app.core.bc_api import (
     get_config_packages_for_company,
     get_packages_qc,
 )
+from app.core.bc_excel_processor import validate_bc_excel, clear_bc_excel_data, extract_sheets_info
+from app.db.excel_template_db import (
+    save_excel_template, get_excel_template,
+    has_excel_template, delete_excel_template,
+)
 from app.core.auth import require_role, is_consultant
 from app.core.bc_api import build_tables_data_for_export
-from app.core.bc_xml_generator import generate_bc_excel
 
 
 # ── Générateur Excel template ─────────────────────────────────────────────────
@@ -298,44 +302,56 @@ with tab_list:
             st.rerun()
 
         st.markdown('<div class="export-panel">', unsafe_allow_html=True)
-        st.markdown(f"### Options d'export — `{sel_code}`")
+        st.markdown(f"### `{sel_code}` — {sel_name}")
 
-        c1, c2 = st.columns(2)
-        with c1:
-            opt_mandatory = st.checkbox("Inclure les champs obligatoires", value=True,  key="opt_mand")
-            opt_desc      = st.checkbox("Inclure les descriptions",         value=True,  key="opt_desc")
-        with c2:
-            opt_ex        = st.checkbox("Inclure les exemples",             value=True,  key="opt_ex")
-            opt_custom    = st.checkbox("Inclure les champs personnalisés", value=True,  key="opt_custom")
+        tpl_ok = has_excel_template(active_client, sel_code)
 
-        # ── Configuration xmlMaps (consultant uniquement) ───────────────────
-        if st.button("⚙ Générer le fichier", type="primary", key="btn_gen"):
-            with st.spinner("Lecture structure BC + génération Excel..."):
-                try:
-                    tables_data = build_tables_data_for_export(
-                        tenant_id, environment, sel_company_id, sel_code, token
-                    )
-                    if not tables_data:
-                        st.warning("Aucune table trouvée. Vérifiez la configuration du package dans BC.")
-                    else:
-                        excel_bytes = generate_bc_excel(ep, tables_data, {
-                            "include_mandatory":     opt_mandatory,
-                            "include_descriptions":  opt_desc,
-                            "include_examples":      opt_ex,
-                            "include_custom_fields": opt_custom,
-                        })
-                        st.session_state["excel_ready"]    = excel_bytes
-                        st.session_state["excel_pkg_code"] = sel_code
-                except Exception as err:
-                    st.error(f"Erreur : {err}")
-
-        if st.session_state.get("excel_ready") and                 st.session_state.get("excel_pkg_code") == sel_code:
-            st.download_button(
-                label="📥 Télécharger le template",
-                data=st.session_state["excel_ready"],
-                file_name=f"{sel_code}_template.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True,
+        if not tpl_ok:
+            st.warning(
+                "Template non configuré pour ce package. "
+                "Exportez le package depuis BC (**Exporter vers Excel** "
+                "sur la fiche package), puis uploadez-le ici."
             )
+            uploaded_tpl = st.file_uploader(
+                f"Fichier BC — {sel_code}",
+                type=["xlsx"], key="tpl_upload",
+            )
+            if uploaded_tpl:
+                raw = uploaded_tpl.read()
+                ok_val, err_val = validate_bc_excel(raw)
+                if not ok_val:
+                    st.error(f"❌ {err_val}")
+                else:
+                    si = extract_sheets_info(raw)
+                    ok_save, err_save = save_excel_template(
+                        active_client, sel_code, raw, si
+                    )
+                    if ok_save:
+                        n_sheets = len([s for s in si if s.get("table_id")])
+                        st.success(
+                            f"✅ Template configuré — {n_sheets} onglet(s) : "
+                            f"{', '.join(s['sheet_name'] for s in si if s.get('table_id'))}"
+                        )
+                        st.rerun()
+                    else:
+                        st.error(f"Erreur : {err_save}")
+        else:
+            tpl_bytes, _ = get_excel_template(active_client, sel_code)
+            if tpl_bytes:
+                st.success("Template configuré — prêt à télécharger.")
+                col_dl, col_del = st.columns([3, 1])
+                with col_dl:
+                    st.download_button(
+                        label="📥 Télécharger le template",
+                        data=tpl_bytes,
+                        file_name=f"{sel_code}_template.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True,
+                        type="primary",
+                    )
+                with col_del:
+                    if st.button("🔄 Reconfigurer", use_container_width=True):
+                        delete_excel_template(active_client, sel_code)
+                        st.rerun()
 
         st.markdown("</div>", unsafe_allow_html=True)
