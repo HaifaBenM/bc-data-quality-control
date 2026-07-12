@@ -1,3 +1,4 @@
+import io
 import streamlit as st
 import pandas as pd
 from app.db.profiles_db import get_profile_by_code
