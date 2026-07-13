@@ -334,6 +334,7 @@ with tab_main:
     st.markdown("---")
 
     # ── Étape 1 ──────────────────────────────────────────────────────────────
+    # ── Étape 1 ──────────────────────────────────────────────────────────────
     if st.session_state.step == 1:
         st.markdown('<div class="step-header">Étape 1 — Informations</div>', unsafe_allow_html=True)
         col1, col2 = st.columns(2)
@@ -352,6 +353,60 @@ with tab_main:
                 f'</div>',
                 unsafe_allow_html=True,
             )
+
+            # ── Sélection package si pas pré-sélectionné ─────────────────────
+            sel_pkg_code = active_pkg_code
+            sel_pkg_name = active_pkg_name
+
+            if not active_pkg_code:
+                st.markdown("---")
+                st.markdown("**📦 Package BC**")
+
+                @st.cache_data(ttl=300, show_spinner=False)
+                def _load_pkgs_ses(client_code: str, company_id: str) -> list:
+                    try:
+                        p = get_profile_by_code(client_code)
+                        if not p:
+                            return []
+                        tid = p.get("bc_tenant_id","").strip()
+                        cid = p.get("bc_client_id","").strip()
+                        cs  = p.get("bc_client_secret","").strip()
+                        env = p.get("bc_environment","").strip()
+                        if not all([tid, cid, cs, env, company_id]):
+                            return []
+                        from app.core.bc_api import get_access_token, get_packages_qc
+                        tok = get_access_token(tid, cid, cs)
+                        return get_packages_qc(tid, env, company_id, tok, visible_only=True)
+                    except Exception:
+                        return []
+
+                # Société à utiliser pour charger les packages
+                _cid_for_pkgs = (
+                    _company_opts[sel_company_name]
+                    if _ses_companies and 'sel_company_name' in dir()
+                    else _default_cid
+                )
+
+                _pkgs_available = _load_pkgs_ses(active_client, _cid_for_pkgs)
+
+                if _pkgs_available:
+                    _pkg_opts = {
+                        f"{p.get('code','')} — {p.get('packageName','')}": (
+                            p.get("code",""), p.get("packageName","")
+                        )
+                        for p in _pkgs_available
+                    }
+                    _pkg_choice = st.selectbox(
+                        "Sélectionnez un package *",
+                        list(_pkg_opts.keys()),
+                        key="ses_pkg_sel",
+                    )
+                    sel_pkg_code, sel_pkg_name = _pkg_opts[_pkg_choice]
+                else:
+                    st.warning("Aucun package visible. Configurez la visibilité depuis Packages.")
+                    sel_pkg_code, sel_pkg_name = "", ""
+
+            # ── Sélection société BC ──────────────────────────────────────────
             if _ses_err:
                 st.warning(f"Impossible de charger les sociétés BC : {_ses_err}")
                 sel_company_id, sel_company_name = _default_cid, _default_cname
@@ -375,30 +430,33 @@ with tab_main:
             else:
                 st.info("Aucune société BC disponible.")
                 sel_company_id, sel_company_name = _default_cid, _default_cname
+
         with col2:
             notes     = st.text_area("Notes", height=68, key=f"step1_notes_{active_client}")
             gemini_ok = is_gemini_available()
             st.markdown("🤖 **Suggestions IA :** " + ("✅ Activées" if gemini_ok else "⚠️ Non configurées"))
+
         st.markdown("---")
         _, col_btn = st.columns([8, 2])
         with col_btn:
             if st.button("Suivant →", type="primary", use_container_width=True):
                 if not session_name.strip():
                     st.error("Nom de session obligatoire.")
+                elif not sel_pkg_code:
+                    st.error("Sélectionnez un package.")
                 else:
                     st.session_state.config = {
                         "session_name": session_name.strip(),
                         "client_code":  active_client,
                         "client_name":  active_client_name,
-                        "pkg_code":     active_pkg_code,
-                        "pkg_name":     active_pkg_name,
+                        "pkg_code":     sel_pkg_code,
+                        "pkg_name":     sel_pkg_name,
                         "notes":        notes,
                         "file_name":    "",
                         "company_id":   sel_company_id,
                         "company_name": sel_company_name,
                     }
                     st.session_state.step = 2; st.rerun()
-
     # ── Étape 2 ──────────────────────────────────────────────────────────────
     elif st.session_state.step == 2:
         cfg = st.session_state.config
