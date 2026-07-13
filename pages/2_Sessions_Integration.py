@@ -376,7 +376,7 @@ with tab_main:
                 st.info("Aucune société BC disponible.")
                 sel_company_id, sel_company_name = _default_cid, _default_cname
         with col2:
-            notes     = st.text_area("Notes", height=60, key=f"step1_notes_{active_client}")
+            notes     = st.text_area("Notes", height=68, key=f"step1_notes_{active_client}")
             gemini_ok = is_gemini_available()
             st.markdown("🤖 **Suggestions IA :** " + ("✅ Activées" if gemini_ok else "⚠️ Non configurées"))
         st.markdown("---")

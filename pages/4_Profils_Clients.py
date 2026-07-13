@@ -183,7 +183,7 @@ with tab1:
                         st.info(f"🏢 Société actuelle : **{sel_company_name}** — Testez la connexion pour changer.")
 
                     st.markdown("</div>", unsafe_allow_html=True)
-                    e_notes = st.text_area("Notes", value=profile.get("notes",""), height=60, key=f"e_notes_{code}")
+                    e_notes = st.text_area("Notes", value=profile.get("notes",""), height=68, key=f"e_notes_{code}")
 
                     cs, cc, cm, _ = st.columns([2, 2, 3, 3])
                     with cs:
@@ -262,7 +262,7 @@ with tab2:
     with nc2:
         new_url   = st.text_input("URL BC",           placeholder="https://abc.businesscentral.dynamics.com", key="new_url")
         new_env   = st.text_input("Environnement BC", placeholder="Production, Sandbox", key="new_env")
-        new_notes = st.text_area("Notes", height=97, key="new_notes")
+        new_notes = st.text_area("Notes", height=68, key="new_notes")
 
     st.markdown("---")
     st.markdown('<div class="section-bc"><p class="section-bc-title">🔌 Credentials BC (optionnel)</p>', unsafe_allow_html=True)
