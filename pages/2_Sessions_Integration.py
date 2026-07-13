@@ -590,7 +590,21 @@ with tab_main:
                                 st.write("Sample champs AL:", _debug_sample)
                         # ── FIN DEBUG ──────────────────────────────────────
 
-                        _meta_loader = MetadataLoader(client_code, cfg.get("company_id", ""))
+     # ── DEBUG ─────────────────────────────────────────
+                        if _exec_plan.source == "default":
+                            st.session_state["_debug_plan"] = "default"
+                        else:
+                            from app.core.execution_planner import _debug_sample
+                            total_ref = sum(
+                                1 for fields in _exec_plan.fields_ref.values()
+                                for rid in fields.values() if rid > 0
+                            )
+                            st.session_state["_debug_plan"] = {
+                                "tables":    len(_exec_plan.tables),
+                                "total_ref": total_ref,
+                                "sample":    _debug_sample,
+                            }
+                        # ── FIN DEBUG ──────────────────────────────────────                        _meta_loader = MetadataLoader(client_code, cfg.get("company_id", ""))
                         _sim_ctx     = SimulationContext()
                         axe_a        = validate_file_axe_a(pr, execution_plan=_exec_plan)
 
@@ -658,6 +672,15 @@ with tab_main:
                 )
 
         st.markdown("---")
+          # ── DEBUG PERSISTANT ──────────────────────────────────────────────
+        if "_debug_plan" in st.session_state:
+            d = st.session_state["_debug_plan"]
+            if d == "default":
+                st.warning("⚠️ Plan par défaut")
+            else:
+                st.info(f"Plan BC — tables: {d['tables']} | champs avec refTableId: {d['total_ref']}")
+                st.write("Sample AL:", d["sample"])
+        # ── FIN DEBUG ─────────────────────────────────────────────────────
         col_leg1, col_leg2, _ = st.columns([2, 2, 6])
         with col_leg1:
             st.markdown('<span class="tag tag-bc">🔴 BC</span> Détecté aussi par BC Config Package', unsafe_allow_html=True)
