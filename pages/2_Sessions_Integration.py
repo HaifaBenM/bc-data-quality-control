@@ -461,14 +461,36 @@ with tab_main:
                     client_code = cfg.get("client_code","")
 
                     with st.spinner("⏳ Analyse des contraintes..."):
-                        _exec_plan   = get_execution_plan(
+                        _exec_plan = get_execution_plan(
                             profile_code = client_code,
                             company_id   = cfg.get("company_id", ""),
                             package_code = cfg.get("pkg_code", ""),
                         )
+
+                        # ── DEBUG — à supprimer après vérification ────────
+                        if _exec_plan.source == "default":
+                            st.warning("⚠️ Plan par défaut — extension AL non accessible ou package non sélectionné")
+                        else:
+                            total_ref = sum(
+                                1 for fields in _exec_plan.fields_ref.values()
+                                for rid in fields.values() if rid > 0
+                            )
+                            total_ref_fid = sum(
+                                1 for fields in _exec_plan.fields_ref_field.values()
+                                for fid in fields.values() if fid > 0
+                            )
+                            st.info(
+                                f"Plan BC — source: {_exec_plan.source} | "
+                                f"tables: {len(_exec_plan.tables)} | "
+                                f"champs avec refTableId: {total_ref} | "
+                                f"champs avec refFieldId: {total_ref_fid}"
+                            )
+                        # ── FIN DEBUG ─────────────────────────────────────
+
                         _meta_loader = MetadataLoader(client_code, cfg.get("company_id", ""))
                         _sim_ctx     = SimulationContext()
-                        axe_a        = validate_file_axe_a(pr)
+                        axe_a        = validate_file_axe_a(pr, execution_plan=_exec_plan)
+
                     with st.spinner("⏳ Vérification des références..."):
                         axe_b = validate_file_axe_b(
                             pr,
