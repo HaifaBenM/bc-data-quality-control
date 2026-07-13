@@ -1,11 +1,6 @@
 import streamlit as st
 from app.core.auth import login, get_role, get_display_name, logout
 
-st.set_page_config(
-    page_title="BC Data Quality Control — Talan",
-    page_icon="🔍",
-    layout="centered",
-)
 
 st.markdown("""
 <style>
