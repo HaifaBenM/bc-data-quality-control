@@ -76,13 +76,13 @@ class TablePlan:
 
 @dataclass
 class ExecutionPlan:
-    package_code:    str
-    tables:          dict[int, TablePlan]            = field(default_factory=dict)
-    fields:          dict[int, dict[str, bool]]      = field(default_factory=dict)
-    fields_ref:      dict[int, dict[str, int]]       = field(default_factory=dict)
-    fields_ref_field:dict[int, dict[str, int]]       = field(default_factory=dict)
-    fields_meta:     dict[int, dict[str, FieldMeta]] = field(default_factory=dict)
-    source:          str = "default"
+    package_code:     str
+    tables:           dict[int, TablePlan]            = field(default_factory=dict)
+    fields:           dict[int, dict[str, bool]]      = field(default_factory=dict)
+    fields_ref:       dict[int, dict[str, int]]       = field(default_factory=dict)
+    fields_ref_field: dict[int, dict[str, int]]       = field(default_factory=dict)
+    fields_meta:      dict[int, dict[str, FieldMeta]] = field(default_factory=dict)
+    source:           str = "default"
 
     def skip_triggers_for(self, table_id: int) -> bool:
         t = self.tables.get(table_id)
@@ -98,7 +98,6 @@ class ExecutionPlan:
         return self.fields_ref.get(table_id, {}).get(field_name, 0)
 
     def get_ref_field_id(self, table_id: int, field_name: str) -> int:
-        """Retourne le fieldNo de la PK de la table relation."""
         return self.fields_ref_field.get(table_id, {}).get(field_name, 0)
 
     def get_field_def(self, table_id: int, field_name: str) -> FieldMeta | None:
@@ -143,6 +142,10 @@ def _build_field_meta(table_id: int, pf: dict) -> FieldMeta | None:
     )
 
 
+# Log debug global — rempli pendant build_plan_from_bc
+_debug_sample: list = []
+
+
 def build_plan_from_bc(
     tenant_id:    str,
     environment:  str,
@@ -151,6 +154,9 @@ def build_plan_from_bc(
     token:        str,
 ) -> ExecutionPlan:
     from app.core.bc_api import get_package_tables_qc, get_package_fields_qc
+
+    global _debug_sample
+    _debug_sample = []
 
     plan = ExecutionPlan(package_code=package_code, source="bc_api")
 
@@ -179,24 +185,35 @@ def build_plan_from_bc(
                 tenant_id, environment, company_id, package_code, tid, token
             )
 
+            # ── DEBUG — stocker un échantillon pour affichage ─────────────────
+            if not _debug_sample and pkg_fields:
+                _debug_sample = [
+                    {
+                        "table":      tid,
+                        "field":      pf.get("fieldName", ""),
+                        "refTableId": pf.get("refTableId"),
+                        "refFieldId": pf.get("refFieldId"),
+                        "fieldType":  pf.get("fieldType"),
+                    }
+                    for pf in pkg_fields[:5]
+                ]
+            # ── FIN DEBUG ─────────────────────────────────────────────────────
+
             plan.fields[tid] = {
                 pf.get("fieldName", ""): bool(pf.get("validateField", True))
                 for pf in pkg_fields if pf.get("fieldName")
             }
 
-            # refTableId — table relation
             plan.fields_ref[tid] = {
                 pf.get("fieldName", ""): int(pf.get("refTableId") or 0)
                 for pf in pkg_fields if pf.get("fieldName")
             }
 
-            # refFieldId — PK field de la table relation (NOUVEAU)
             plan.fields_ref_field[tid] = {
                 pf.get("fieldName", ""): int(pf.get("refFieldId") or 0)
                 for pf in pkg_fields if pf.get("fieldName")
             }
 
-            # fieldType + fieldLength → FieldMeta pour Axe A
             meta_map: dict[str, FieldMeta] = {}
             for pf in pkg_fields:
                 fm = _build_field_meta(tid, pf)

@@ -577,6 +577,7 @@ with tab_main:
                         if _exec_plan.source == "default":
                             st.warning("⚠️ Plan par défaut — extension AL non accessible")
                         else:
+                            from app.core.execution_planner import _debug_sample
                             total_ref = sum(
                                 1 for fields in _exec_plan.fields_ref.values()
                                 for rid in fields.values() if rid > 0
@@ -585,6 +586,8 @@ with tab_main:
                                 f"Plan BC — tables: {len(_exec_plan.tables)} | "
                                 f"champs avec refTableId: {total_ref}"
                             )
+                            if _debug_sample:
+                                st.write("Sample champs AL:", _debug_sample)
                         # ── FIN DEBUG ──────────────────────────────────────
 
                         _meta_loader = MetadataLoader(client_code, cfg.get("company_id", ""))
