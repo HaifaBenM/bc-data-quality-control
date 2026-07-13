@@ -67,34 +67,38 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-with st.form("login_form"):
-    st.markdown("#### Connexion")
-    username = st.text_input(
-        "Identifiant",
-        placeholder="votre identifiant",
-        autocomplete="username",
-    )
-    password = st.text_input(
-        "Mot de passe",
-        type="password",
-        placeholder="••••••••",
-        autocomplete="current-password",
-    )
-    submitted = st.form_submit_button(
-        "Se connecter",
-        type="primary",
-        use_container_width=True,
-    )
+_, col, _ = st.columns([1, 2, 1])
+with col:
+    with st.form("login_form"):
+        st.markdown("#### Connexion")
+        username = st.text_input(
+            "Identifiant",
+            placeholder="votre identifiant",
+            autocomplete="username",
+        )
+        password = st.text_input(
+            "Mot de passe",
+            type="password",
+            placeholder="••••••••",
+            autocomplete="current-password",
+        )
+        submitted = st.form_submit_button(
+            "Se connecter",
+            type="primary",
+            use_container_width=True,
+        )
 
 if submitted:
     if not username or not password:
-        st.error("Saisissez votre identifiant et votre mot de passe.")
+        with col:
+            st.error("Saisissez votre identifiant et votre mot de passe.")
     else:
         ok, msg = login(username, password)
         if ok:
             st.rerun()
         else:
-            st.error(msg)
+            with col:
+                st.error(msg)
 
 st.markdown(
     "<p style='text-align:center;color:#CBD5E1;font-size:.75rem;margin-top:2rem'>"
