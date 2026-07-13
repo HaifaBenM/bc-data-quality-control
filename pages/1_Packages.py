@@ -8,12 +8,6 @@ from app.core.bc_api import (
 )
 from app.core.auth import require_role, is_consultant
 
-st.set_page_config(
-    page_title="Packages — BC Quality Control",
-    page_icon="📦",
-    layout="wide",
-)
-
 require_role()
 
 active_client      = st.session_state.get("active_client", "")
@@ -69,7 +63,7 @@ with col_soc:
     sel_company_name = st.selectbox("Société", list(company_opts.keys()), label_visibility="collapsed")
     sel_company_id   = company_opts[sel_company_name]
 with col_refresh:
-    if st.button("🔄 Rafraîchir", width="stretch"):
+    if st.button("🔄 Rafraîchir", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
 
@@ -111,7 +105,7 @@ df = pd.DataFrame([{
 } for p in displayed])
 
 event = st.dataframe(
-    df, width='stretch', hide_index=True,
+    df, use_container_width=True, hide_index=True,
     on_select="rerun", selection_mode="single-row",
     column_config={
         "Code":        st.column_config.TextColumn(width="small"),
@@ -138,7 +132,7 @@ if has_sel:
 
 col_ses, _ = st.columns([2, 6])
 with col_ses:
-    if st.button("📁 Ouvrir dans Sessions", disabled=not has_sel, width="stretch", type="primary"):
+    if st.button("📁 Ouvrir dans Sessions", disabled=not has_sel, use_container_width=True, type="primary"):
         st.session_state["active_package_code"] = sel_code
         st.session_state["active_package_name"] = sel_name
         st.session_state["active_company_id"]   = sel_company_id

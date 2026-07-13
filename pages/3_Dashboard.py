@@ -1,31 +1,19 @@
-"""
-Page Dashboard — Vue globale des sessions pour le client actif.
-"""
 import streamlit as st
+import pandas as pd
 from app.core.auth import require_role
 from app.db.sessions_db import get_all_sessions, STATUS_COLORS, STATUS_ICONS
 
-st.set_page_config(
-    page_title="Dashboard — BC Quality Control",
-    page_icon="📊",
-    layout="wide",
-)
-
 require_role()
 
-# ── Guard ─────────────────────────────────────────────────────────────────────
 active_client      = st.session_state.get("active_client", "")
 active_client_name = st.session_state.get("active_client_name", "")
 
-
-# ── Page ──────────────────────────────────────────────────────────────────────
 st.markdown(f"# 📊 Dashboard — {active_client_name}")
 st.caption(f"Client : **{active_client_name}** ({active_client})")
 st.markdown("---")
 
 sessions = get_all_sessions(profile_code=active_client)
 
-# ── Métriques ─────────────────────────────────────────────────────────────────
 total_ses   = len(sessions)
 active_ses  = sum(1 for s in sessions if s.get("status") not in ("Terminée",))
 total_major = sum(s.get("major_anomalies", 0) for s in sessions)
@@ -42,7 +30,6 @@ st.markdown("---")
 if not sessions:
     st.info("Aucune session pour ce client. Lancez une analyse depuis **Sessions Intégration** ou **Packages**.")
 else:
-    # ── Tableau des sessions ──────────────────────────────────────────────────
     st.markdown(f"### 📋 {total_ses} session(s)")
 
     for s in sessions:
@@ -78,17 +65,15 @@ else:
 
     st.markdown("---")
 
-    # ── Stats agrégées ────────────────────────────────────────────────────────
     if sessions:
-        import pandas as pd
         df_stats = pd.DataFrame([{
-            "Session":       s.get("name", ""),
-            "Statut":        s.get("status", ""),
-            "Anomalies":     s.get("total_anomalies", 0),
-            "Majeures":      s.get("major_anomalies", 0),
-            "Mineures":      s.get("minor_anomalies", 0),
-            "Date":          s.get("created_at", "")[:10],
+            "Session":   s.get("name", ""),
+            "Statut":    s.get("status", ""),
+            "Anomalies": s.get("total_anomalies", 0),
+            "Majeures":  s.get("major_anomalies", 0),
+            "Mineures":  s.get("minor_anomalies", 0),
+            "Date":      s.get("created_at", "")[:10],
         } for s in sessions])
 
         with st.expander("📈 Données détaillées"):
-            st.dataframe(df_stats, width='stretch', hide_index=True)
+            st.dataframe(df_stats, use_container_width=True, hide_index=True)

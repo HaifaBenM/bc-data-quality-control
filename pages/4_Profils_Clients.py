@@ -10,7 +10,6 @@ from app.db.metadata_db import get_cache_summary, delete_cache, save_metadata, s
 from app.core.bc_connector import test_bc_connection, get_bc_companies
 from app.core.bc_metadata import read_bc_metadata, load_all_reference_data
 
-st.set_page_config(page_title="Profils Clients — BC Quality Control", page_icon="👥", layout="wide")
 require_consultant()
 st.session_state.setdefault("active_page", "profiles")
 
@@ -46,6 +45,7 @@ for key, default in [("confirm_delete",None),("edit_profile",None),("bc_test_res
 
 tab1, tab2, tab3 = st.tabs(["👥 Mes profils", "➕ Nouveau profil", "👤 Utilisateurs"])
 
+
 # ════════════════════════════════════════════════════════════════════════════
 # FONCTION METADATA
 # ════════════════════════════════════════════════════════════════════════════
@@ -53,7 +53,6 @@ def charger_metadata(code, tenant_id, client_id, client_secret, environment, com
     progress = st.progress(0, text="Lecture de la metadata BC...")
     total = 0
 
-    # Étape 1 — Metadata champs
     progress.progress(10, text="Lecture des définitions de champs...")
     meta = read_bc_metadata(tenant_id, client_id, client_secret, environment)
     if meta["success"]:
@@ -64,7 +63,6 @@ def charger_metadata(code, tenant_id, client_id, client_secret, environment, com
             ok, _ = save_metadata(code, name, "data", data.get("fields", []))
             if ok: total += 1
 
-    # Étape 2 — Données de référence
     progress.progress(55, text="Chargement tables de référence...")
     ref_data = load_all_reference_data(tenant_id, client_id, client_secret, environment, company_id)
     for i, (path, info) in enumerate(ref_data.items()):
@@ -99,13 +97,13 @@ with tab1:
             has_bc = bool(profile.get("bc_tenant_id") and profile.get("bc_client_id") and profile.get("bc_client_secret"))
             cache  = get_cache_summary(code)
 
-            col_info, col_actions = st.columns([7,3])
+            col_info, col_actions = st.columns([7, 3])
             with col_info:
-                s_badge = f'<span class="badge badge-sector">{profile.get("sector","")}</span>' if profile.get("sector") else ""
-                b_badge = '<span class="badge badge-bc-ok">🔌 BC configuré</span>' if has_bc else '<span class="badge badge-bc-none">⚙️ BC non configuré</span>'
-                m_badge = ""
+                s_badge      = f'<span class="badge badge-sector">{profile.get("sector","")}</span>' if profile.get("sector") else ""
+                b_badge      = '<span class="badge badge-bc-ok">🔌 BC configuré</span>' if has_bc else '<span class="badge badge-bc-none">⚙️ BC non configuré</span>'
+                m_badge      = ""
                 company_name = profile.get("bc_company_name","")
-                bc_info = f'<span style="font-size:11px;color:#94A3B8">{profile.get("bc_url","")}{" · "+profile.get("bc_environment","") if profile.get("bc_environment") else ""}{" · 🏢 "+company_name if company_name else ""}</span>' if profile.get("bc_url") else ""
+                bc_info      = f'<span style="font-size:11px;color:#94A3B8">{profile.get("bc_url","")}{" · "+profile.get("bc_environment","") if profile.get("bc_environment") else ""}{" · 🏢 "+company_name if company_name else ""}</span>' if profile.get("bc_url") else ""
                 st.markdown(
                     f'<div class="profile-card">'
                     f'<p class="profile-name">{profile.get("name","")}</p>'
@@ -120,12 +118,12 @@ with tab1:
                 st.markdown("<div style='padding-top:14px'>", unsafe_allow_html=True)
                 c1, c2, c3 = st.columns(3)
                 with c2:
-                    if st.button("✏️ Éditer", key=f"edit_{code}", width='stretch'):
-                        st.session_state.edit_profile = code
-                        st.session_state.bc_test_result = {}
-                        st.session_state.companies_list = {}
+                    if st.button("✏️ Éditer", key=f"edit_{code}", use_container_width=True):
+                        st.session_state.edit_profile    = code
+                        st.session_state.bc_test_result  = {}
+                        st.session_state.companies_list  = {}
                 with c3:
-                    if st.button("🗑️", key=f"del_{code}", width='stretch'):
+                    if st.button("🗑️", key=f"del_{code}", use_container_width=True):
                         st.session_state.confirm_delete = code
                 st.markdown("</div>", unsafe_allow_html=True)
 
@@ -140,18 +138,18 @@ with tab1:
                         e_lang   = st.selectbox("Langue", langs, index=langs.index(cur_lang) if cur_lang in langs else 0, key=f"e_lang_{code}")
                     with ec2:
                         e_url = st.text_input("URL BC",           value=profile.get("bc_url",""),         placeholder="https://abc.businesscentral.dynamics.com", key=f"e_url_{code}")
-                        e_env = st.text_input("Environnement BC", value=profile.get("bc_environment",""), placeholder="Production, Sandbox", key=f"e_env_{code}")
+                        e_env = st.text_input("Environnement BC", value=profile.get("bc_environment",""), placeholder="Production, Sandbox",                       key=f"e_env_{code}")
 
                     st.markdown('<div class="section-bc"><p class="section-bc-title">🔌 Credentials BC</p>', unsafe_allow_html=True)
                     st.caption("Ces 3 informations sont spécifiques à ce client.")
                     bc1, bc2, bc3 = st.columns(3)
-                    with bc1: e_tenant    = st.text_input("Tenant ID",     value=profile.get("bc_tenant_id",""),     placeholder="xxxx-xxxx-xxxx", type="password", key=f"e_tenant_{code}",    help="BC : Aide → Signaler un problème → ID abonné Entra")
+                    with bc1: e_tenant    = st.text_input("Tenant ID",     value=profile.get("bc_tenant_id",""),     placeholder="xxxx-xxxx-xxxx", type="password", key=f"e_tenant_{code}",  help="BC : Aide → Signaler un problème → ID abonné Entra")
                     with bc2: e_client_id = st.text_input("Client ID",     value=profile.get("bc_client_id",""),     placeholder="xxxx-xxxx-xxxx", type="password", key=f"e_cid_{code}")
                     with bc3: e_secret    = st.text_input("Client Secret", value=profile.get("bc_client_secret",""), placeholder="Valeur secret",  type="password", key=f"e_secret_{code}")
 
-                    col_test, col_result = st.columns([2,5])
+                    col_test, col_result = st.columns([2, 5])
                     with col_test:
-                        if st.button("🔌 Tester la connexion", key=f"test_{code}", width='stretch'):
+                        if st.button("🔌 Tester la connexion", key=f"test_{code}", use_container_width=True):
                             missing = [f for f,v in [("Tenant ID",e_tenant),("Client ID",e_client_id),("Secret",e_secret)] if not str(v or "").strip()]
                             if missing:
                                 st.session_state.bc_test_result[code] = (False, f"Manquants : {', '.join(missing)}")
@@ -169,7 +167,6 @@ with tab1:
                             if res[0]: st.success(f"✅ {res[1]}")
                             else:      st.error(f"❌ {res[1]}")
 
-                    # Sélection société
                     companies        = st.session_state.companies_list.get(code, [])
                     sel_company_name = profile.get("bc_company_name","")
                     sel_company_id   = profile.get("bc_company_id","")
@@ -188,43 +185,44 @@ with tab1:
                     st.markdown("</div>", unsafe_allow_html=True)
                     e_notes = st.text_area("Notes", value=profile.get("notes",""), height=60, key=f"e_notes_{code}")
 
-                    cs, cc, cm, _ = st.columns([2,2,3,3])
+                    cs, cc, cm, _ = st.columns([2, 2, 3, 3])
                     with cs:
-                        if st.button("💾 Enregistrer", key=f"save_{code}", type="primary", width='stretch'):
+                        if st.button("💾 Enregistrer", key=f"save_{code}", type="primary", use_container_width=True):
                             ok, err = update_profile(code, {
-                                "name": str(e_name or "").strip(), "sector": str(e_sector or "").strip(),
-                                "data_language": e_lang, "bc_url": str(e_url or "").strip(),
-                                "bc_environment": str(e_env or "").strip(),
+                                "name":             str(e_name or "").strip(),
+                                "sector":           str(e_sector or "").strip(),
+                                "data_language":    e_lang,
+                                "bc_url":           str(e_url or "").strip(),
+                                "bc_environment":   str(e_env or "").strip(),
                                 "bc_tenant_id":     str(e_tenant or "").strip() or None,
                                 "bc_client_id":     str(e_client_id or "").strip() or None,
                                 "bc_client_secret": str(e_secret or "").strip() or None,
                                 "bc_company_id":    sel_company_id or None,
                                 "bc_company_name":  sel_company_name or None,
-                                "notes": str(e_notes or "").strip(),
+                                "notes":            str(e_notes or "").strip(),
                             })
                             if ok:
                                 st.success("✅ Profil mis à jour !")
-                                st.session_state.edit_profile  = None
+                                st.session_state.edit_profile   = None
                                 st.session_state.bc_test_result = {}
                                 st.session_state.companies_list = {}
                                 st.rerun()
                             else:
                                 st.error(f"❌ {err}")
                     with cc:
-                        if st.button("Annuler", key=f"cancel_{code}", width='stretch'):
-                            st.session_state.edit_profile  = None
+                        if st.button("Annuler", key=f"cancel_{code}", use_container_width=True):
+                            st.session_state.edit_profile   = None
                             st.session_state.bc_test_result = {}
                             st.session_state.companies_list = {}
                             st.rerun()
                     with cm:
                         can_load = bool(str(e_tenant or "").strip() and str(e_client_id or "").strip() and str(e_secret or "").strip() and sel_company_id)
-                        if st.button("📋 Charger metadata BC", key=f"meta_{code}", width='stretch', disabled=not can_load, help="Lit les champs et tables de référence depuis BC"):
+                        if st.button("📋 Charger metadata BC", key=f"meta_{code}", use_container_width=True, disabled=not can_load, help="Lit les champs et tables de référence depuis BC"):
                             charger_metadata(code, str(e_tenant).strip(), str(e_client_id).strip(), str(e_secret).strip(), str(e_env or "").strip(), sel_company_id)
 
-                    # Statut cache
                     cache_now = get_cache_summary(code)
                     if cache_now["total"] > 0:
-                        col_cs, col_cb, _ = st.columns([3,2,5])
+                        col_cs, col_cb, _ = st.columns([3, 2, 5])
                         with col_cs:
                             st.success(f"✅ Metadata BC chargée — {cache_now['last_update']}")
                         with col_cb:
@@ -234,7 +232,7 @@ with tab1:
 
             if st.session_state.confirm_delete == code:
                 st.warning(f"⚠️ Supprimer **{profile.get('name','')}** ?")
-                cy, cn, _ = st.columns([2,2,6])
+                cy, cn, _ = st.columns([2, 2, 6])
                 with cy:
                     if st.button("✅ Confirmer", key=f"yes_{code}", type="primary"):
                         ok, err = delete_profile(code)
@@ -248,6 +246,7 @@ with tab1:
                     if st.button("❌ Annuler", key=f"no_{code}"):
                         st.session_state.confirm_delete = None
                         st.rerun()
+
 
 # ════════════════════════════════════════════════════════════════════════════
 # TAB 2 — NOUVEAU PROFIL
@@ -272,9 +271,9 @@ with tab2:
     with nb2: new_client_id = st.text_input("Client ID",     placeholder="xxxx-xxxx", type="password", key="new_client_id")
     with nb3: new_secret    = st.text_input("Client Secret", placeholder="Valeur",    type="password", key="new_secret")
 
-    ct, cr = st.columns([2,5])
+    ct, cr = st.columns([2, 5])
     with ct:
-        if st.button("🔌 Tester", key="test_new", width='stretch'):
+        if st.button("🔌 Tester", key="test_new", use_container_width=True):
             missing = [f for f,v in [("Tenant",new_tenant),("Client ID",new_client_id),("Secret",new_secret)] if not str(v or "").strip()]
             if missing:
                 st.session_state.bc_test_result["new"] = (False, f"Manquants : {', '.join(missing)}")
@@ -327,10 +326,10 @@ with tab3:
     st.caption("Créez les identifiants de connexion pour vos clients. Communiquez-leur username + mot de passe.")
     st.markdown("---")
 
-    # ── Liste des utilisateurs existants ──────────────────────────────────────
     all_users = get_all_users()
     if all_users:
         st.markdown(f"**{len(all_users)} utilisateur(s)**")
+        import pandas as pd
         df_users = [
             {
                 "Username":      u.get("username", ""),
@@ -342,24 +341,22 @@ with tab3:
             }
             for u in all_users
         ]
-        import pandas as pd
-        st.dataframe(pd.DataFrame(df_users), width='stretch', hide_index=True)
+        st.dataframe(pd.DataFrame(df_users), use_container_width=True, hide_index=True)
         st.markdown("---")
     else:
         st.info("Aucun utilisateur créé.")
 
-    # ── Formulaire création ───────────────────────────────────────────────────
     st.markdown("#### Créer un accès")
     profiles_list = get_all_profiles()
 
     u1, u2 = st.columns(2)
     with u1:
-        new_username  = st.text_input("Username *", placeholder="aquachiara", key="u_username")
-        new_pwd       = st.text_input("Mot de passe *", type="password", key="u_pwd")
-        new_pwd_conf  = st.text_input("Confirmer le mot de passe *", type="password", key="u_pwd2")
+        new_username = st.text_input("Username *",                    placeholder="aquachiara", key="u_username")
+        new_pwd      = st.text_input("Mot de passe *",                type="password",           key="u_pwd")
+        new_pwd_conf = st.text_input("Confirmer le mot de passe *",   type="password",           key="u_pwd2")
     with u2:
-        new_display   = st.text_input("Nom affiché *", placeholder="Aquachiara", key="u_display")
-        new_role      = st.radio("Rôle", ["client", "consultant"], horizontal=True, key="u_role")
+        new_display = st.text_input("Nom affiché *", placeholder="Aquachiara", key="u_display")
+        new_role    = st.radio("Rôle", ["client", "consultant"], horizontal=True, key="u_role")
         if new_role == "client":
             profile_opts   = {f"{p['name']} ({p['code']})": p["code"] for p in profiles_list}
             profile_choice = st.selectbox("Profil client associé *", list(profile_opts.keys()), key="u_profile")
@@ -370,10 +367,10 @@ with tab3:
 
     if st.button("💾 Créer l'utilisateur", type="primary", key="btn_create_user"):
         errs = []
-        if not new_username.strip():  errs.append("Username obligatoire.")
-        if not new_pwd:               errs.append("Mot de passe obligatoire.")
-        if new_pwd != new_pwd_conf:   errs.append("Les mots de passe ne correspondent pas.")
-        if not new_display.strip():   errs.append("Nom affiché obligatoire.")
+        if not new_username.strip(): errs.append("Username obligatoire.")
+        if not new_pwd:              errs.append("Mot de passe obligatoire.")
+        if new_pwd != new_pwd_conf:  errs.append("Les mots de passe ne correspondent pas.")
+        if not new_display.strip():  errs.append("Nom affiché obligatoire.")
         if new_role == "client" and not profile_code:
             errs.append("Sélectionnez un profil client.")
         for e in errs:

@@ -17,19 +17,15 @@ from app.db.sessions_db import (
     get_all_sessions, SESSION_STATUSES, STATUS_COLORS, STATUS_ICONS
 )
 
-st.set_page_config(page_title="Sessions Intégration — BC Quality Control", page_icon="📁", layout="wide")
-
 require_role()
 
 st.markdown("""
 <style>
-/* ── Step header ─────────────────────────────────────────────────────────── */
 .step-header {
     background: #EEF4FD; border-left: 4px solid #2E6FBF;
     padding: .5rem 1rem; border-radius: 4px;
     font-weight: 600; color: #1B3A6B; margin-bottom: 1rem;
 }
-/* ── Anomaly cards ───────────────────────────────────────────────────────── */
 .card-major {
     background: #FAECE7; border-left: 4px solid #993C1D;
     padding: .6rem 1rem; border-radius: 6px;
@@ -45,7 +41,6 @@ st.markdown("""
     padding: .6rem 1rem; border-radius: 6px;
     margin: .25rem 0; font-size: .85rem; line-height: 1.5;
 }
-/* ── File summary cards ──────────────────────────────────────────────────── */
 .card-data {
     background: #EEF4FD; border-left: 4px solid #2E6FBF;
     padding: .5rem 1rem; border-radius: 6px; margin: .3rem 0;
@@ -54,26 +49,22 @@ st.markdown("""
     background: #F0FBF5; border-left: 4px solid #0F6E56;
     padding: .5rem 1rem; border-radius: 6px; margin: .3rem 0;
 }
-/* ── Session list cards ──────────────────────────────────────────────────── */
 .card-session {
     background: white; border: 1px solid #E2E8F0;
     border-radius: 8px; padding: 1rem 1.2rem; margin: .4rem 0;
 }
 .session-name { font-size: 1rem; font-weight: 600; color: #1B3A6B; margin: 0 0 .2rem 0; }
 .session-meta { font-size: .8rem; color: #64748B; margin: .1rem 0; }
-/* ── Stat boxes ──────────────────────────────────────────────────────────── */
 .stat-box {
     text-align: center; padding: 1rem .5rem;
     background: white; border: 1px solid #E2E8F0; border-radius: 8px;
 }
 .stat-num { font-size: 2rem; font-weight: 700; margin: 0; }
 .stat-lbl { font-size: .75rem; color: #64748B; margin: .2rem 0 0; }
-/* ── Save box ────────────────────────────────────────────────────────────── */
 .save-box {
     background: #E1F5EE; border: 1px solid #0F6E56; border-radius: 6px;
     padding: .5rem 1rem; font-size: .85rem; color: #0F6E56;
 }
-/* ── Tags ────────────────────────────────────────────────────────────────── */
 .tag {
     display: inline-block; padding: .15rem .5rem;
     border-radius: 4px; font-size: .72rem; font-weight: 600;
@@ -88,7 +79,6 @@ st.markdown("""
 .tag-minor { background: #FAEEDA; color: #854F0B; }
 .tag-ai    { background: #F3E8FF; color: #7C3AED; }
 .tag-auto  { background: #E1F5EE; color: #0F6E56; }
-/* ── IA confidence bar ───────────────────────────────────────────────────── */
 .conf-bar { background: #E2E8F0; border-radius: 3px; height: 5px; margin: 4px 0; }
 </style>
 """, unsafe_allow_html=True)
@@ -104,10 +94,9 @@ if not active_client:
     st.warning("⚠️ Sélectionnez un client depuis le menu latéral.")
     st.stop()
 
-# ── Société BC — chargée depuis BC API, sélectionnable ───────────────────────
+# ── Société BC ────────────────────────────────────────────────────────────────
 @st.cache_data(ttl=600, show_spinner=False)
 def _load_companies_ses(client_code: str) -> tuple[list, str, str]:
-    """Charge les sociétés BC pour ce client. Retourne (companies, token_err)."""
     try:
         p = get_profile_by_code(client_code)
         if not p:
@@ -126,8 +115,7 @@ def _load_companies_ses(client_code: str) -> tuple[list, str, str]:
 
 _ses_companies, _ses_err, _ = _load_companies_ses(active_client)
 
-# company sélectionnée (depuis Packages en priorité, sinon premier de la liste)
-_default_cid  = st.session_state.get("active_company_id", "")
+_default_cid   = st.session_state.get("active_company_id", "")
 _default_cname = st.session_state.get("active_company_name", "")
 if not _default_cid and _ses_companies:
     _p = get_profile_by_code(active_client)
@@ -136,7 +124,7 @@ if not _default_cid and _ses_companies:
         _default_cname = _p.get("bc_company_name", "") or ""
 
 
-# ── Erreurs détectées aussi par BC Config Package ─────────────────────────────
+# ── BC_DETECTED ───────────────────────────────────────────────────────────────
 BC_DETECTED = {
     "Longueur maximale dépassée",
     "Valeur Option non autorisée",
@@ -153,18 +141,11 @@ def bc_badge(error_type: str) -> str:
 
 
 def merge_results(axe_a: dict, axe_b: dict, axe_c: dict) -> dict:
-    """
-    Fusionne les résultats de tous les validateurs en un résultat unique par onglet.
-    Enrichit les anomalies avec les suggestions IA si disponibles.
-    """
     merged = {"by_sheet": {}, "all_anomalies": [], "ai_by_sheet": {}}
-
-    # Récupérer toutes les sheets de données
     all_sheets = set()
     for result in [axe_a, axe_b]:
         all_sheets.update(result.get("by_sheet", {}).keys())
 
-    # Map des suggestions IA par (sheet, ligne, champ)
     ai_map = {}
     if axe_c.get("available") and axe_c.get("by_sheet"):
         for sn, anomalies in axe_c["by_sheet"].items():
@@ -172,35 +153,29 @@ def merge_results(axe_a: dict, axe_b: dict, axe_c: dict) -> dict:
                 if a.get("suggestion_ia"):
                     key = (sn, a.get("Ligne",0), a.get("Champ",""))
                     ai_map[key] = {
-                        "suggestion": a["suggestion_ia"],
-                        "confiance":  a.get("confiance_ia", 0),
+                        "suggestion":  a["suggestion_ia"],
+                        "confiance":   a.get("confiance_ia", 0),
                         "explication": a.get("explication_ia",""),
                         "auto":        a.get("auto_corrige", False),
                     }
 
     for sn in all_sheets:
         sheet_anomalies = []
-
-        # Combiner A + B pour cet onglet
         for result in [axe_a, axe_b]:
             for a in result.get("by_sheet",{}).get(sn, []):
-                # Nettoyer la colonne Axe (ne pas l'afficher)
                 clean = {k: v for k, v in a.items() if k != "Axe"}
-                # Enrichir avec suggestion IA si disponible
                 key = (sn, a.get("Ligne",0), a.get("Champ",""))
                 if key in ai_map:
                     ia = ai_map[key]
-                    clean["suggestion_ia"]   = ia["suggestion"]
-                    clean["confiance_ia"]    = ia["confiance"]
-                    clean["explication_ia"]  = ia["explication"]
-                    clean["auto_corrige"]    = ia["auto"]
-                    # Mettre à jour la correction suggérée
+                    clean["suggestion_ia"]  = ia["suggestion"]
+                    clean["confiance_ia"]   = ia["confiance"]
+                    clean["explication_ia"] = ia["explication"]
+                    clean["auto_corrige"]   = ia["auto"]
                     if ia["auto"]:
                         clean["Correction suggérée"] = f"⚡ {ia['suggestion']}"
                     elif not clean.get("Correction suggérée"):
                         clean["Correction suggérée"] = f"🤖 {ia['suggestion']} ({ia['confiance']}%)"
                 sheet_anomalies.append(clean)
-
         merged["by_sheet"][sn] = sheet_anomalies
         merged["all_anomalies"].extend(sheet_anomalies)
 
@@ -208,7 +183,6 @@ def merge_results(axe_a: dict, axe_b: dict, axe_c: dict) -> dict:
 
 
 def display_unified_results(merged: dict, axe_c: dict):
-    """Affiche les résultats unifiés en tabs par onglet."""
     all_anomalies = merged.get("all_anomalies", [])
     real = [a for a in all_anomalies if a.get("Ligne",0) > 0]
     info = [a for a in all_anomalies if a.get("Ligne",0) == 0]
@@ -217,14 +191,12 @@ def display_unified_results(merged: dict, axe_c: dict):
         st.success("🎉 **Aucune anomalie détectée !** Les données sont conformes.")
         return
 
-    # Métriques IA
     has_ia = axe_c.get("available") and axe_c.get("total_suggestions",0) > 0
     auto_c = axe_c.get("auto_corrected", 0)
     if has_ia and auto_c > 0:
         st.info(f"🤖 **{auto_c} correction(s) appliquée(s) automatiquement** par l'IA")
 
-    # Tabs par onglet de données
-    by_sheet   = merged.get("by_sheet", {})
+    by_sheet    = merged.get("by_sheet", {})
     sheet_names = list(by_sheet.keys())
     tab_labels  = []
     for sn in sheet_names:
@@ -251,18 +223,17 @@ def display_unified_results(merged: dict, axe_c: dict):
                 nb_min = sum(1 for a in real_anomalies if a.get("Sévérité")=="Mineure")
                 nb_ia  = sum(1 for a in real_anomalies if a.get("suggestion_ia"))
                 t1,t2,t3,t4 = st.columns(4)
-                t1.metric("Anomalies",    len(real_anomalies))
-                t2.metric("🔴 Majeures",  nb_maj)
-                t3.metric("🟠 Mineures",  nb_min)
+                t1.metric("Anomalies",     len(real_anomalies))
+                t2.metric("🔴 Majeures",   nb_maj)
+                t3.metric("🟠 Mineures",   nb_min)
                 t4.metric("🤖 IA suggère", nb_ia)
 
-                # Filtres
                 cf1, cf2 = st.columns(2)
                 with cf1:
-                    sevs = sorted(set(a.get("Sévérité","") for a in real_anomalies))
+                    sevs     = sorted(set(a.get("Sévérité","") for a in real_anomalies))
                     filt_sev = st.multiselect("Sévérité", sevs, default=sevs, key=f"fs_{sn}")
                 with cf2:
-                    types = sorted(set(a.get("Type d'anomalie","") for a in real_anomalies))
+                    types     = sorted(set(a.get("Type d'anomalie","") for a in real_anomalies))
                     filt_type = st.multiselect("Type d'anomalie", types, default=types, key=f"ft_{sn}")
 
                 filtered = [
@@ -272,7 +243,6 @@ def display_unified_results(merged: dict, axe_c: dict):
                 ]
 
                 if filtered:
-                    # Tableau unifié (sans colonne Axe)
                     cols_to_show = ["Ligne","Champ","Valeur","Type d'anomalie","Sévérité","Message","Correction suggérée"]
                     df_show = pd.DataFrame([
                         {c: a.get(c,"") for c in cols_to_show}
@@ -287,16 +257,15 @@ def display_unified_results(merged: dict, axe_c: dict):
 
                     st.dataframe(
                         df_show.style.apply(color_row, axis=1),
-                        width='stretch', hide_index=True,
+                        use_container_width=True, hide_index=True,
                         height=min(400, 50+len(filtered)*35)
                     )
 
                     with st.expander(f"📋 Détail — {len(filtered)} anomalie(s)"):
                         for a in filtered[:50]:
-                            css  = "card-major" if a.get("Sévérité")=="Majeure" else "card-minor"
-                            fix  = f" → <b>{a['Correction suggérée']}</b>" if a.get("Correction suggérée") else ""
-                            err_t= a.get("Type d'anomalie","")
-                            # Bloc IA si suggestion disponible
+                            css   = "card-major" if a.get("Sévérité")=="Majeure" else "card-minor"
+                            fix   = f" → <b>{a['Correction suggérée']}</b>" if a.get("Correction suggérée") else ""
+                            err_t = a.get("Type d'anomalie","")
                             ia_block = ""
                             if a.get("suggestion_ia"):
                                 conf     = a.get("confiance_ia",0)
@@ -311,7 +280,6 @@ def display_unified_results(merged: dict, axe_c: dict):
                                     f'{"<br><i>" + a.get("explication_ia","") + "</i>" if a.get("explication_ia") else ""}'
                                     f'</div>'
                                 )
-
                             st.markdown(
                                 f'<div class="{css}">'
                                 f'<b>Ligne {a.get("Ligne","")}</b> · <b>{a.get("Champ","")}</b> · '
@@ -372,17 +340,14 @@ with tab_main:
     # ── Étape 1 ──────────────────────────────────────────────────────────────
     if st.session_state.step == 1:
         st.markdown('<div class="step-header">Étape 1 — Informations</div>', unsafe_allow_html=True)
-        col1,col2 = st.columns(2)
+        col1, col2 = st.columns(2)
         with col1:
-            # Nom pré-rempli si import depuis Packages
             default_name = f"{active_pkg_code} — " if active_pkg_code else ""
             session_name = st.text_input(
                 "Nom de la session *",
                 value=default_name,
                 placeholder="MDD Vente — Juin 2026",
             )
-            # Client affiché depuis le contexte (pas de selectbox)
-            # Affichage client + package
             st.markdown(
                 f'<div style="background:#EEF4FD;border:1px solid #BFDBFE;border-radius:6px;'
                 f'padding:.5rem .75rem;font-size:.88rem;color:#1B3A6B;">'
@@ -391,7 +356,6 @@ with tab_main:
                 f'</div>',
                 unsafe_allow_html=True,
             )
-            # Sélection société BC
             if _ses_err:
                 st.warning(f"Impossible de charger les sociétés BC : {_ses_err}")
                 sel_company_id, sel_company_name = _default_cid, _default_cname
@@ -400,8 +364,7 @@ with tab_main:
                     c.get("displayName") or c.get("name", c["id"]): c["id"]
                     for c in _ses_companies
                 }
-                _names = list(_company_opts.keys())
-                # Pré-sélectionner la société venue de Packages
+                _names   = list(_company_opts.keys())
                 _def_idx = 0
                 if _default_cname and _default_cname in _names:
                     _def_idx = _names.index(_default_cname)
@@ -417,13 +380,13 @@ with tab_main:
                 st.info("Aucune société BC disponible.")
                 sel_company_id, sel_company_name = _default_cid, _default_cname
         with col2:
-            notes = st.text_area("Notes", height=60)
+            notes     = st.text_area("Notes", height=60)
             gemini_ok = is_gemini_available()
             st.markdown("🤖 **Suggestions IA :** " + ("✅ Activées" if gemini_ok else "⚠️ Non configurées"))
         st.markdown("---")
-        _,col_btn = st.columns([8,2])
+        _, col_btn = st.columns([8, 2])
         with col_btn:
-            if st.button("Suivant →", type="primary", width='stretch'):
+            if st.button("Suivant →", type="primary", use_container_width=True):
                 if not session_name.strip():
                     st.error("Nom de session obligatoire.")
                 else:
@@ -435,8 +398,10 @@ with tab_main:
                         "pkg_name":     active_pkg_name,
                         "notes":        notes,
                         "file_name":    "",
+                        "company_id":   sel_company_id,
+                        "company_name": sel_company_name,
                     }
-                    st.session_state.step=2; st.rerun()
+                    st.session_state.step = 2; st.rerun()
 
     # ── Étape 2 ──────────────────────────────────────────────────────────────
     elif st.session_state.step == 2:
@@ -447,80 +412,75 @@ with tab_main:
         uploaded = st.file_uploader("Glissez-déposez ou cliquez", type=["xlsx","xls"], key="upl_s")
         if uploaded:
             st.session_state.config["file_name"] = uploaded.name
-            with st.spinner("🔍 Lecture..."): pr=parse_uploaded_file(uploaded); st.session_state.parse_result=pr
+            with st.spinner("🔍 Lecture..."): pr = parse_uploaded_file(uploaded); st.session_state.parse_result = pr
             if not pr["success"]:
                 for e in pr["errors"]: st.error(f"❌ {e}")
             else:
                 s = get_file_summary(pr)
                 st.success(f"✅ **{uploaded.name}**")
-                c1,c2,c3 = st.columns(3)
-                c1.metric("Tables de données",  s.get("nb_data_tables",0))
-                c2.metric("Tables de référence",s.get("nb_ref_tables",0))
-                c3.metric("Lignes",             s.get("total_data_rows",0))
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Tables de données",   s.get("nb_data_tables",0))
+                c2.metric("Tables de référence", s.get("nb_ref_tables",0))
+                c3.metric("Lignes",              s.get("total_data_rows",0))
                 for t in s.get("data_tables",[]):
                     st.markdown(f'<div class="card-data"><span class="tag tag-data">DONNÉES</span><b>{t["sheet"]}</b> — {t["label"]} · <b>{t["rows"]} lignes</b></div>', unsafe_allow_html=True)
-                ref_t=pr.get("ref_tables",[]); meta=pr.get("metadata",{}); tr=pr.get("total_rows",{})
+                ref_t = pr.get("ref_tables",[]); meta = pr.get("metadata",{}); tr = pr.get("total_rows",{})
                 with st.expander(f"📋 Tables de référence ({len(ref_t)})"):
                     for sheet in ref_t:
-                        m=meta.get(sheet,{})
+                        m = meta.get(sheet,{})
                         st.markdown(f'<div class="card-ref"><span class="tag tag-ref">RÉFÉRENCE</span><b>{sheet}</b> — {m.get("label",sheet)} · {tr.get(sheet,0)} valeurs</div>', unsafe_allow_html=True)
                 st.markdown("---")
-                cb,cv = st.columns([2,3])
+                cb, cv = st.columns([2, 3])
                 with cb:
-                    if st.button("← Étape précédente", width='stretch'): st.session_state.step=1; st.rerun()
+                    if st.button("← Étape précédente", use_container_width=True): st.session_state.step=1; st.rerun()
                 with cv:
-                    if st.button("🔍 Vérifier la structure →", type="primary", width='stretch', disabled=not s.get("data_tables")):
-                        with st.spinner("..."): val=validate_file_structure(pr); st.session_state.validation=val
-                        st.session_state.step=3; st.rerun()
+                    if st.button("🔍 Vérifier la structure →", type="primary", use_container_width=True, disabled=not s.get("data_tables")):
+                        with st.spinner("..."): val = validate_file_structure(pr); st.session_state.validation = val
+                        st.session_state.step = 3; st.rerun()
         else:
-            cb,_ = st.columns([2,8])
+            cb, _ = st.columns([2, 8])
             with cb:
-                if st.button("← Étape précédente", width='stretch'): st.session_state.step=1; st.rerun()
+                if st.button("← Étape précédente", use_container_width=True): st.session_state.step=1; st.rerun()
 
     # ── Étape 3 ──────────────────────────────────────────────────────────────
     elif st.session_state.step == 3:
-        cfg=st.session_state.config; val=st.session_state.validation; pr=st.session_state.parse_result
+        cfg = st.session_state.config; val = st.session_state.validation; pr = st.session_state.parse_result
         st.markdown('<div class="step-header">Étape 3 — Vérification structurelle</div>', unsafe_allow_html=True)
-        sv=val.get("summary",{})
+        sv = val.get("summary",{})
         if val["is_valid"]: st.success(f"**{sv.get('status','✅ Conforme')}**")
         else:               st.error(f"**{sv.get('status','❌ Non conforme')}**")
         for e in val.get("blocking_errors",[]): st.error(e)
-        for w in val.get("warnings",[]): st.warning(w)
+        for w in val.get("warnings",[]):        st.warning(w)
         for t in val.get("data_tables",[]):
             st.markdown(f'<div class="card-data"><span class="tag tag-data">DONNÉES</span><b>{t["sheet"]}</b> — {t["label"]} · <b>{t["rows"]} lignes · {t["cols"]} champs</b></div>', unsafe_allow_html=True)
         st.markdown("---")
-        cb,cv = st.columns([2,5])
+        cb, cv = st.columns([2, 5])
         with cb:
-            if st.button("← Étape précédente", width='stretch'):
+            if st.button("← Étape précédente", use_container_width=True):
                 st.session_state.step=2; st.session_state.parse_result=None; st.session_state.validation=None; st.rerun()
         with cv:
             if val["is_valid"]:
-                if st.button("🚀 Lancer l'analyse qualité →", type="primary", width='stretch'):
+                if st.button("🚀 Lancer l'analyse qualité →", type="primary", use_container_width=True):
                     api_key     = get_gemini_api_key()
                     client_code = cfg.get("client_code","")
 
                     with st.spinner("⏳ Analyse des contraintes..."):
-                        # ── Pipeline complet BC ───────────────────────────────
                         _exec_plan = get_execution_plan(
                             profile_code = client_code,
                             company_id   = cfg.get("company_id", ""),
                             package_code = cfg.get("pkg_code", ""),
                         )
-                        _meta_loader = MetadataLoader(
-                            client_code,
-                            cfg.get("company_id", ""),
-                        )
-                        _sim_ctx = SimulationContext()
-
-                        axe_a = validate_file_axe_a(pr)
+                        _meta_loader = MetadataLoader(client_code, cfg.get("company_id", ""))
+                        _sim_ctx     = SimulationContext()
+                        axe_a        = validate_file_axe_a(pr)
                     with st.spinner("⏳ Vérification des références..."):
                         axe_b = validate_file_axe_b(
                             pr,
-                            profile_code   = client_code,
-                            company_id     = cfg.get('company_id',''),
-                            sim_context    = _sim_ctx,
-                            metadata_loader= _meta_loader,
-                            execution_plan = _exec_plan,
+                            profile_code    = client_code,
+                            company_id      = cfg.get("company_id",""),
+                            sim_context     = _sim_ctx,
+                            metadata_loader = _meta_loader,
+                            execution_plan  = _exec_plan,
                         )
 
                     axe_c = {"available": False, "total_suggestions":0, "auto_corrected":0, "by_sheet":{}}
@@ -528,25 +488,23 @@ with tab_main:
                         with st.spinner("🤖 Suggestions IA en cours..."):
                             axe_c = validate_file_axe_c(axe_a, axe_b, pr, api_key=api_key)
 
-                    # Fusionner tous les résultats
                     merged = merge_results(axe_a, axe_b, axe_c)
                     st.session_state.merged_result = merged
                     st.session_state.axe_c_result  = axe_c
 
-                    # Calculer les totaux pour la sauvegarde
                     all_r = merged.get("all_anomalies",[])
                     real  = [a for a in all_r if a.get("Ligne",0)>0]
-                    st.session_state.config["total"]  = len(real)
-                    st.session_state.config["major"]  = sum(1 for a in real if a.get("Sévérité")=="Majeure")
-                    st.session_state.config["minor"]  = sum(1 for a in real if a.get("Sévérité")=="Mineure")
-                    st.session_state.config["lines"]  = axe_a.get("lines_analyzed",0)
+                    st.session_state.config["total"] = len(real)
+                    st.session_state.config["major"] = sum(1 for a in real if a.get("Sévérité")=="Majeure")
+                    st.session_state.config["minor"] = sum(1 for a in real if a.get("Sévérité")=="Mineure")
+                    st.session_state.config["lines"] = axe_a.get("lines_analyzed",0)
 
                     st.session_state.saved_session_id = None
                     st.session_state.step = 4; st.rerun()
             else:
                 st.error("❌ Corrigez les erreurs structurelles.")
 
-    # ── Étape 4 — Résultats unifiés ───────────────────────────────────────────
+    # ── Étape 4 ──────────────────────────────────────────────────────────────
     elif st.session_state.step == 4:
         cfg    = st.session_state.config
         merged = st.session_state.merged_result
@@ -562,33 +520,27 @@ with tab_main:
         lines = cfg.get("lines",0)
         auto  = axe_c.get("auto_corrected",0)
 
-        # Métriques
         c1,c2,c3,c4,c5 = st.columns(5)
         for cw,v,l,col in [
-            (c1, lines, "Lignes analysées",   "#1B3A6B"),
-            (c2, total, "Total anomalies",     "#993C1D" if total>0 else "#0F6E56"),
-            (c3, major, "🔴 Majeures",         "#993C1D" if major>0 else "#0F6E56"),
-            (c4, minor, "🟠 Mineures",         "#854F0B" if minor>0 else "#0F6E56"),
-            (c5, auto,  "🤖 Corrigées auto",   "#7C3AED" if auto>0 else "#64748B"),
+            (c1, lines, "Lignes analysées",  "#1B3A6B"),
+            (c2, total, "Total anomalies",    "#993C1D" if total>0 else "#0F6E56"),
+            (c3, major, "🔴 Majeures",        "#993C1D" if major>0 else "#0F6E56"),
+            (c4, minor, "🟠 Mineures",        "#854F0B" if minor>0 else "#0F6E56"),
+            (c5, auto,  "🤖 Corrigées auto",  "#7C3AED" if auto>0 else "#64748B"),
         ]:
             with cw:
                 st.markdown(f'<div class="stat-box"><p class="stat-num" style="color:{col}">{v}</p><p class="stat-lbl">{l}</p></div>', unsafe_allow_html=True)
 
         st.markdown("---")
-
-        # Légende des badges
         col_leg1, col_leg2, _ = st.columns([2, 2, 6])
         with col_leg1:
             st.markdown('<span class="tag tag-bc">🔴 BC</span> Détecté aussi par BC Config Package', unsafe_allow_html=True)
         with col_leg2:
             st.markdown('<span class="tag tag-plus">⭐ Plus</span> Valeur ajoutée de notre outil', unsafe_allow_html=True)
-
         st.markdown("---")
 
-        # Résultats unifiés
         display_unified_results(merged, axe_c)
 
-        # Prévisualisation
         if pr:
             with st.expander("👀 Données source"):
                 for sn in pr.get("data_tables",[]):
@@ -596,23 +548,23 @@ with tab_main:
                     if df is not None and not df.empty:
                         meta = pr.get("metadata",{}).get(sn,{})
                         st.markdown(f"**{sn}** — {meta.get('label','')} · {len(df)} lignes")
-                        st.dataframe(df.head(10), width='stretch', hide_index=True)
+                        st.dataframe(df.head(10), use_container_width=True, hide_index=True)
 
         st.markdown("---")
-        cb,cr,cs,cst = st.columns([2,2,3,3])
+        cb, cr, cs, cst = st.columns([2,2,3,3])
         with cb:
-            if st.button("← Étape précédente", width='stretch'):
-                st.session_state.step=3
-                for k in ["merged_result","axe_c_result","saved_session_id"]: st.session_state[k]=None
+            if st.button("← Étape précédente", use_container_width=True):
+                st.session_state.step = 3
+                for k in ["merged_result","axe_c_result","saved_session_id"]: st.session_state[k] = None
                 st.rerun()
         with cr:
-            if st.button("🔄 Recommencer", width='stretch'): reset_session(); st.rerun()
+            if st.button("🔄 Recommencer", use_container_width=True): reset_session(); st.rerun()
         with cs:
             if st.session_state.saved_session_id:
                 st.markdown(f'<div class="save-box">✅ <b>Session sauvegardée</b><br><span style="font-size:11px;color:#64748B">{st.session_state.saved_session_id}</span></div>', unsafe_allow_html=True)
             else:
-                if st.button("💾 Sauvegarder la session", type="primary", width='stretch'):
-                    ok,res = save_session({
+                if st.button("💾 Sauvegarder la session", type="primary", use_container_width=True):
+                    ok, res = save_session({
                         "session_name":    cfg["session_name"],
                         "profile_code":    cfg["client_code"],
                         "file_name":       cfg.get("file_name",""),
@@ -622,21 +574,21 @@ with tab_main:
                         "major_anomalies": major,
                         "minor_anomalies": minor,
                     })
-                    if ok: st.session_state.saved_session_id=res; st.success("✅ Sauvegardée !"); st.rerun()
+                    if ok: st.session_state.saved_session_id = res; st.success("✅ Sauvegardée !"); st.rerun()
                     else:  st.error(f"❌ {res}")
         with cst:
             if major==0: st.success("✅ Prêt pour Sprint 7")
             else:        st.warning(f"⚠️ {major} anomalie(s) majeure(s)")
+
 
 # ════════════════════════════════════════════════════════════════════════════
 # TAB 2 — MES SESSIONS
 # ════════════════════════════════════════════════════════════════════════════
 with tab_ses:
     st.markdown("### 📋 Mes sessions de contrôle")
-    for key,default in [("edit_session_id",None),("confirm_delete_ses",None)]:
-        if key not in st.session_state: st.session_state[key]=default
+    for key, default in [("edit_session_id",None),("confirm_delete_ses",None)]:
+        if key not in st.session_state: st.session_state[key] = default
 
-    # Sessions filtrées par le client actif (défini via la sidebar)
     sessions = get_all_sessions(profile_code=active_client)
     st.markdown("---")
 
@@ -645,56 +597,56 @@ with tab_ses:
     else:
         st.markdown(f"**{len(sessions)} session(s)**")
         for s in sessions:
-            sid=s.get("id",""); status=s.get("status","Nouvelle")
-            sc=STATUS_COLORS.get(status,"#64748B"); si=STATUS_ICONS.get(status,"")
-            tot_a=s.get("total_anomalies",0); maj_a=s.get("major_anomalies",0); min_a=s.get("minor_anomalies",0)
-            crd=s.get("created_at","")[:16].replace("T"," ") if s.get("created_at") else ""
-            upd=s.get("updated_at","")[:16].replace("T"," ") if s.get("updated_at") else ""
-            fn=s.get("file_name","")
-            an_s=(f'<span style="color:#993C1D">🔴 {maj_a} majeures</span> · <span style="color:#854F0B">🟠 {min_a} mineures</span>' if tot_a>0 else '<span style="color:#0F6E56">✅ Aucune anomalie</span>')
+            sid    = s.get("id",""); status = s.get("status","Nouvelle")
+            sc     = STATUS_COLORS.get(status,"#64748B"); si = STATUS_ICONS.get(status,"")
+            tot_a  = s.get("total_anomalies",0); maj_a = s.get("major_anomalies",0); min_a = s.get("minor_anomalies",0)
+            crd    = s.get("created_at","")[:16].replace("T"," ") if s.get("created_at") else ""
+            upd    = s.get("updated_at","")[:16].replace("T"," ") if s.get("updated_at") else ""
+            fn     = s.get("file_name","")
+            an_s   = (f'<span style="color:#993C1D">🔴 {maj_a} majeures</span> · <span style="color:#854F0B">🟠 {min_a} mineures</span>' if tot_a>0 else '<span style="color:#0F6E56">✅ Aucune anomalie</span>')
 
-            ci,ca=st.columns([7,3])
+            ci, ca = st.columns([7, 3])
             with ci:
                 st.markdown(f'<div class="card-session"><p class="session-name">{s.get("name","")}</p><p class="session-meta">Client : <b>{s.get("profile_code","")}</b> · <span style="color:{sc};font-weight:500">{si} {status}</span></p><p class="session-meta">{an_s}</p><p class="session-meta">{"📄 "+fn+" · " if fn else ""}🕐 {crd}{"  ·  ✏️ "+upd if upd!=crd else ""}</p></div>', unsafe_allow_html=True)
             with ca:
                 st.markdown("<div style='padding-top:14px'>", unsafe_allow_html=True)
-                ce,cd=st.columns(2)
+                ce, cd = st.columns(2)
                 with ce:
-                    if st.button("✏️ Éditer",key=f"es_{sid}",width='stretch'):
-                        st.session_state.edit_session_id=sid; st.session_state.confirm_delete_ses=None
+                    if st.button("✏️ Éditer", key=f"es_{sid}", use_container_width=True):
+                        st.session_state.edit_session_id = sid; st.session_state.confirm_delete_ses = None
                 with cd:
-                    if st.button("🗑️",key=f"ds_{sid}",width='stretch'):
-                        st.session_state.confirm_delete_ses=sid; st.session_state.edit_session_id=None
+                    if st.button("🗑️", key=f"ds_{sid}", use_container_width=True):
+                        st.session_state.confirm_delete_ses = sid; st.session_state.edit_session_id = None
                 st.markdown("</div>", unsafe_allow_html=True)
 
-            if st.session_state.edit_session_id==sid:
+            if st.session_state.edit_session_id == sid:
                 st.markdown("---")
                 st.markdown(f"**✏️ Modifier — {s.get('name','')}**")
-                e1,e2=st.columns(2)
+                e1, e2 = st.columns(2)
                 with e1:
-                    nn=st.text_input("Nom",value=s.get("name",""),key=f"en_{sid}")
-                    ns=st.selectbox("Statut",SESSION_STATUSES,index=SESSION_STATUSES.index(status) if status in SESSION_STATUSES else 0,key=f"est_{sid}")
+                    nn = st.text_input("Nom", value=s.get("name",""), key=f"en_{sid}")
+                    ns = st.selectbox("Statut", SESSION_STATUSES, index=SESSION_STATUSES.index(status) if status in SESSION_STATUSES else 0, key=f"est_{sid}")
                 with e2:
-                    no=st.text_area("Notes",value=s.get("notes",""),height=100,key=f"eno_{sid}")
-                sv1,sv2,_=st.columns([2,2,6])
+                    no = st.text_area("Notes", value=s.get("notes",""), height=100, key=f"eno_{sid}")
+                sv1, sv2, _ = st.columns([2, 2, 6])
                 with sv1:
-                    if st.button("💾 Enregistrer",key=f"esv_{sid}",type="primary",width='stretch'):
-                        ok,err=update_session(sid,{"name":nn.strip(),"status":ns,"notes":no.strip()})
-                        if ok: st.success("✅ Mis à jour !"); st.session_state.edit_session_id=None; st.rerun()
+                    if st.button("💾 Enregistrer", key=f"esv_{sid}", type="primary", use_container_width=True):
+                        ok, err = update_session(sid, {"name":nn.strip(),"status":ns,"notes":no.strip()})
+                        if ok: st.success("✅ Mis à jour !"); st.session_state.edit_session_id = None; st.rerun()
                         else:  st.error(f"❌ {err}")
                 with sv2:
-                    if st.button("Annuler",key=f"eca_{sid}",width='stretch'):
-                        st.session_state.edit_session_id=None; st.rerun()
+                    if st.button("Annuler", key=f"eca_{sid}", use_container_width=True):
+                        st.session_state.edit_session_id = None; st.rerun()
                 st.markdown("---")
 
-            if st.session_state.confirm_delete_ses==sid:
+            if st.session_state.confirm_delete_ses == sid:
                 st.warning(f"⚠️ Supprimer **{s.get('name','')}** ? Action irréversible.")
-                dy,dn,_=st.columns([2,2,6])
+                dy, dn, _ = st.columns([2, 2, 6])
                 with dy:
-                    if st.button("✅ Confirmer",key=f"dcy_{sid}",type="primary"):
-                        ok,err=delete_session(sid)
-                        if ok: st.success("Supprimée."); st.session_state.confirm_delete_ses=None; st.rerun()
+                    if st.button("✅ Confirmer", key=f"dcy_{sid}", type="primary"):
+                        ok, err = delete_session(sid)
+                        if ok: st.success("Supprimée."); st.session_state.confirm_delete_ses = None; st.rerun()
                         else:  st.error(err)
                 with dn:
-                    if st.button("❌ Annuler",key=f"dcn_{sid}"):
-                        st.session_state.confirm_delete_ses=None; st.rerun()
+                    if st.button("❌ Annuler", key=f"dcn_{sid}"):
+                        st.session_state.confirm_delete_ses = None; st.rerun()
