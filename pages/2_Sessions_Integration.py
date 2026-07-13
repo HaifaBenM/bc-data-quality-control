@@ -94,7 +94,6 @@ if not active_client:
     st.stop()
 
 
-# ── Société BC ────────────────────────────────────────────────────────────────
 @st.cache_data(ttl=600, show_spinner=False)
 def _load_companies_ses(client_code: str) -> tuple[list, str, str]:
     try:
@@ -143,7 +142,6 @@ if not _default_cid and _ses_companies:
         _default_cname = _p.get("bc_company_name", "") or ""
 
 
-# ── BC_DETECTED ───────────────────────────────────────────────────────────────
 BC_DETECTED = {
     "Longueur maximale dépassée",
     "Valeur Option non autorisée",
@@ -161,16 +159,14 @@ def bc_badge(error_type: str) -> str:
 
 
 def merge_results(axe_a: dict, axe_b: dict, axe_c: dict, parse_result: dict = None) -> dict:
-    merged     = {"by_sheet": {}, "all_anomalies": [], "ai_by_sheet": {}}
+    merged = {"by_sheet": {}, "all_anomalies": [], "ai_by_sheet": {}}
 
-    # Toutes les sheets du fichier parsé — data + ref
     all_sheets = []
     if parse_result:
         all_sheets = (
             parse_result.get("data_tables", []) +
             parse_result.get("ref_tables", [])
         )
-    # Ajouter les sheets avec anomalies non couvertes
     for result in [axe_a, axe_b]:
         for sn in result.get("by_sheet", {}).keys():
             if sn not in all_sheets:
@@ -334,7 +330,7 @@ def display_unified_results(merged: dict, axe_c: dict):
 
 def reset_session():
     for k in ["step", "config", "parse_result", "validation",
-              "merged_result", "axe_c_result", "saved_session_id"]:
+              "merged_result", "axe_c_result", "saved_session_id", "_debug_plan"]:
         st.session_state[k] = (1 if k == "step" else {} if k == "config" else None)
 
 
@@ -346,9 +342,6 @@ st.markdown("---")
 
 tab_main, tab_ses = st.tabs(["➕ Nouvelle session", "📋 Mes sessions"])
 
-# ════════════════════════════════════════════════════════════════════════════
-# TAB 1 — NOUVELLE SESSION
-# ════════════════════════════════════════════════════════════════════════════
 with tab_main:
     for key, default in [
         ("step", 1), ("config", {}), ("parse_result", None), ("validation", None),
@@ -390,7 +383,6 @@ with tab_main:
                 unsafe_allow_html=True,
             )
 
-            # Société BC
             if _ses_err:
                 st.warning(f"Impossible de charger les sociétés BC : {_ses_err}")
                 sel_company_id, sel_company_name = _default_cid, _default_cname
@@ -416,7 +408,6 @@ with tab_main:
                 st.info("Aucune société BC disponible.")
                 sel_company_id, sel_company_name = _default_cid, _default_cname
 
-            # Package
             sel_pkg_code = active_pkg_code
             sel_pkg_name = active_pkg_name
 
@@ -572,41 +563,26 @@ with tab_main:
                             company_id   = cfg.get("company_id", ""),
                             package_code = cfg.get("pkg_code", ""),
                         )
+                        _meta_loader = MetadataLoader(client_code, cfg.get("company_id", ""))
+                        _sim_ctx     = SimulationContext()
+                        axe_a        = validate_file_axe_a(pr, execution_plan=_exec_plan)
 
-                        # ── DEBUG ─────────────────────────────────────────
-                        if _exec_plan.source == "default":
-                            st.warning("⚠️ Plan par défaut — extension AL non accessible")
-                        else:
-                            from app.core.execution_planner import _debug_sample
-                            total_ref = sum(
-                                1 for fields in _exec_plan.fields_ref.values()
-                                for rid in fields.values() if rid > 0
-                            )
-                            st.info(
-                                f"Plan BC — tables: {len(_exec_plan.tables)} | "
-                                f"champs avec refTableId: {total_ref}"
-                            )
-                            if _debug_sample:
-                                st.write("Sample champs AL:", _debug_sample)
-                        # ── FIN DEBUG ──────────────────────────────────────
-
-     # ── DEBUG ─────────────────────────────────────────
-                        if _exec_plan.source == "default":
-                            st.session_state["_debug_plan"] = "default"
-                        else:
+                        # ── DEBUG persistant ──────────────────────────────
+                        try:
                             from app.core.execution_planner import _debug_sample
                             total_ref = sum(
                                 1 for fields in _exec_plan.fields_ref.values()
                                 for rid in fields.values() if rid > 0
                             )
                             st.session_state["_debug_plan"] = {
+                                "source":    _exec_plan.source,
                                 "tables":    len(_exec_plan.tables),
                                 "total_ref": total_ref,
-                                "sample":    _debug_sample,
+                                "sample":    list(_debug_sample),
                             }
-                        # ── FIN DEBUG ──────────────────────────────────────                        _meta_loader = MetadataLoader(client_code, cfg.get("company_id", ""))
-                        _sim_ctx     = SimulationContext()
-                        axe_a        = validate_file_axe_a(pr, execution_plan=_exec_plan)
+                        except Exception:
+                            pass
+                        # ── FIN DEBUG ─────────────────────────────────────
 
                     with st.spinner("⏳ Vérification des références..."):
                         axe_b = validate_file_axe_b(
@@ -650,6 +626,20 @@ with tab_main:
         st.markdown('<div class="step-header">Étape 4 — Résultats de l\'analyse qualité</div>', unsafe_allow_html=True)
         st.caption(f"Session : **{cfg['session_name']}** · Client : **{cfg['client_name']}** · **{cfg.get('file_name', '')}**")
 
+        # ── DEBUG persistant affiché étape 4 ─────────────────────────────────
+        if "_debug_plan" in st.session_state:
+            d = st.session_state["_debug_plan"]
+            if d.get("source") == "default":
+                st.warning("⚠️ Plan par défaut — extension AL non accessible")
+            else:
+                st.info(
+                    f"Plan BC — tables: {d.get('tables')} | "
+                    f"champs avec refTableId: {d.get('total_ref')}"
+                )
+                if d.get("sample"):
+                    st.write("Sample AL:", d["sample"])
+        # ── FIN DEBUG ─────────────────────────────────────────────────────────
+
         total = cfg.get("total", 0)
         major = cfg.get("major", 0)
         minor = cfg.get("minor", 0)
@@ -672,15 +662,6 @@ with tab_main:
                 )
 
         st.markdown("---")
-          # ── DEBUG PERSISTANT ──────────────────────────────────────────────
-        if "_debug_plan" in st.session_state:
-            d = st.session_state["_debug_plan"]
-            if d == "default":
-                st.warning("⚠️ Plan par défaut")
-            else:
-                st.info(f"Plan BC — tables: {d['tables']} | champs avec refTableId: {d['total_ref']}")
-                st.write("Sample AL:", d["sample"])
-        # ── FIN DEBUG ─────────────────────────────────────────────────────
         col_leg1, col_leg2, _ = st.columns([2, 2, 6])
         with col_leg1:
             st.markdown('<span class="tag tag-bc">🔴 BC</span> Détecté aussi par BC Config Package', unsafe_allow_html=True)
