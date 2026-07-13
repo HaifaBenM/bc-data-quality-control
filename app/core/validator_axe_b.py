@@ -258,9 +258,9 @@ def validate_file_axe_b(
                         table_id   = int(table_id),
                         sheet_name = sheet_name,
                         df         = df,
-                        bc_cache_fn= lambda tid: set(
-                            get_reference_values(profile_code, str(tid)) or []
-                        ),
+                        bc_cache_fn= lambda tid: get_reference_values_by_table_id(
+    profile_code, company_id, tid
+)[0],
                     )
                     for ta in trigger_anom:
                         anomalies.append({
