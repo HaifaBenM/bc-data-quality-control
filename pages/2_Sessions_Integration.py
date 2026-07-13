@@ -11,7 +11,6 @@ from app.core.simulation_context import SimulationContext
 from app.core.metadata_loader import MetadataLoader
 from app.db.profiles_db import get_profile_by_code
 from app.core.bc_api import get_access_token, get_companies
-from datetime import date
 from app.db.sessions_db import (
     save_session, update_session, delete_session,
     get_all_sessions, SESSION_STATUSES, STATUS_COLORS, STATUS_ICONS
@@ -84,7 +83,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-# ── Guard : client actif requis ───────────────────────────────────────────────
+# ── Guard ─────────────────────────────────────────────────────────────────────
 active_client      = st.session_state.get("active_client", "")
 active_client_name = st.session_state.get("active_client_name", "")
 active_pkg_code    = st.session_state.get("active_package_code", "")
@@ -107,7 +106,7 @@ def _load_companies_ses(client_code: str) -> tuple[list, str, str]:
         env = p.get("bc_environment","").strip()
         if not all([tid, cid, cs, env]):
             return [], "", ""
-        tok = get_access_token(tid, cid, cs)
+        tok       = get_access_token(tid, cid, cs)
         companies = get_companies(tid, env, tok)
         return companies, "", ""
     except Exception as e:
@@ -141,7 +140,7 @@ def bc_badge(error_type: str) -> str:
 
 
 def merge_results(axe_a: dict, axe_b: dict, axe_c: dict) -> dict:
-    merged = {"by_sheet": {}, "all_anomalies": [], "ai_by_sheet": {}}
+    merged     = {"by_sheet": {}, "all_anomalies": [], "ai_by_sheet": {}}
     all_sheets = set()
     for result in [axe_a, axe_b]:
         all_sheets.update(result.get("by_sheet", {}).keys())
@@ -164,7 +163,7 @@ def merge_results(axe_a: dict, axe_b: dict, axe_c: dict) -> dict:
         for result in [axe_a, axe_b]:
             for a in result.get("by_sheet",{}).get(sn, []):
                 clean = {k: v for k, v in a.items() if k != "Axe"}
-                key = (sn, a.get("Ligne",0), a.get("Champ",""))
+                key   = (sn, a.get("Ligne",0), a.get("Champ",""))
                 if key in ai_map:
                     ia = ai_map[key]
                     clean["suggestion_ia"]  = ia["suggestion"]
@@ -176,7 +175,7 @@ def merge_results(axe_a: dict, axe_b: dict, axe_c: dict) -> dict:
                     elif not clean.get("Correction suggérée"):
                         clean["Correction suggérée"] = f"🤖 {ia['suggestion']} ({ia['confiance']}%)"
                 sheet_anomalies.append(clean)
-        merged["by_sheet"][sn] = sheet_anomalies
+        merged["by_sheet"][sn]       = sheet_anomalies
         merged["all_anomalies"].extend(sheet_anomalies)
 
     return merged
@@ -184,8 +183,8 @@ def merge_results(axe_a: dict, axe_b: dict, axe_c: dict) -> dict:
 
 def display_unified_results(merged: dict, axe_c: dict):
     all_anomalies = merged.get("all_anomalies", [])
-    real = [a for a in all_anomalies if a.get("Ligne",0) > 0]
-    info = [a for a in all_anomalies if a.get("Ligne",0) == 0]
+    real          = [a for a in all_anomalies if a.get("Ligne",0) > 0]
+    info          = [a for a in all_anomalies if a.get("Ligne",0) == 0]
 
     if not real and not info:
         st.success("🎉 **Aucune anomalie détectée !** Les données sont conformes.")
@@ -244,10 +243,7 @@ def display_unified_results(merged: dict, axe_c: dict):
 
                 if filtered:
                     cols_to_show = ["Ligne","Champ","Valeur","Type d'anomalie","Sévérité","Message","Correction suggérée"]
-                    df_show = pd.DataFrame([
-                        {c: a.get(c,"") for c in cols_to_show}
-                        for a in filtered
-                    ])
+                    df_show      = pd.DataFrame([{c: a.get(c,"") for c in cols_to_show} for a in filtered])
 
                     def color_row(row):
                         s = row.get("Sévérité","")
@@ -380,7 +376,7 @@ with tab_main:
                 st.info("Aucune société BC disponible.")
                 sel_company_id, sel_company_name = _default_cid, _default_cname
         with col2:
-            notes     = st.text_area("Notes", height=60)
+            notes     = st.text_area("Notes", height=60, key="step1_notes")
             gemini_ok = is_gemini_available()
             st.markdown("🤖 **Suggestions IA :** " + ("✅ Activées" if gemini_ok else "⚠️ Non configurées"))
         st.markdown("---")
@@ -465,7 +461,7 @@ with tab_main:
                     client_code = cfg.get("client_code","")
 
                     with st.spinner("⏳ Analyse des contraintes..."):
-                        _exec_plan = get_execution_plan(
+                        _exec_plan   = get_execution_plan(
                             profile_code = client_code,
                             company_id   = cfg.get("company_id", ""),
                             package_code = cfg.get("pkg_code", ""),
@@ -597,13 +593,13 @@ with tab_ses:
     else:
         st.markdown(f"**{len(sessions)} session(s)**")
         for s in sessions:
-            sid    = s.get("id",""); status = s.get("status","Nouvelle")
-            sc     = STATUS_COLORS.get(status,"#64748B"); si = STATUS_ICONS.get(status,"")
-            tot_a  = s.get("total_anomalies",0); maj_a = s.get("major_anomalies",0); min_a = s.get("minor_anomalies",0)
-            crd    = s.get("created_at","")[:16].replace("T"," ") if s.get("created_at") else ""
-            upd    = s.get("updated_at","")[:16].replace("T"," ") if s.get("updated_at") else ""
-            fn     = s.get("file_name","")
-            an_s   = (f'<span style="color:#993C1D">🔴 {maj_a} majeures</span> · <span style="color:#854F0B">🟠 {min_a} mineures</span>' if tot_a>0 else '<span style="color:#0F6E56">✅ Aucune anomalie</span>')
+            sid   = s.get("id",""); status = s.get("status","Nouvelle")
+            sc    = STATUS_COLORS.get(status,"#64748B"); si = STATUS_ICONS.get(status,"")
+            tot_a = s.get("total_anomalies",0); maj_a = s.get("major_anomalies",0); min_a = s.get("minor_anomalies",0)
+            crd   = s.get("created_at","")[:16].replace("T"," ") if s.get("created_at") else ""
+            upd   = s.get("updated_at","")[:16].replace("T"," ") if s.get("updated_at") else ""
+            fn    = s.get("file_name","")
+            an_s  = (f'<span style="color:#993C1D">🔴 {maj_a} majeures</span> · <span style="color:#854F0B">🟠 {min_a} mineures</span>' if tot_a>0 else '<span style="color:#0F6E56">✅ Aucune anomalie</span>')
 
             ci, ca = st.columns([7, 3])
             with ci:
@@ -613,10 +609,12 @@ with tab_ses:
                 ce, cd = st.columns(2)
                 with ce:
                     if st.button("✏️ Éditer", key=f"es_{sid}", use_container_width=True):
-                        st.session_state.edit_session_id = sid; st.session_state.confirm_delete_ses = None
+                        st.session_state.edit_session_id    = sid
+                        st.session_state.confirm_delete_ses = None
                 with cd:
                     if st.button("🗑️", key=f"ds_{sid}", use_container_width=True):
-                        st.session_state.confirm_delete_ses = sid; st.session_state.edit_session_id = None
+                        st.session_state.confirm_delete_ses = sid
+                        st.session_state.edit_session_id    = None
                 st.markdown("</div>", unsafe_allow_html=True)
 
             if st.session_state.edit_session_id == sid:

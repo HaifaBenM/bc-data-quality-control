@@ -109,3 +109,46 @@ def update_package_stats(pkg_id: str, nb_tables: int, nb_records: int, nb_errors
         }).eq("id", pkg_id).execute()
     except Exception:
         pass
+def get_template(profile_code: str, package_code: str) -> dict | None:
+    try:
+        res = supabase.table("package_excel_templates") \
+            .select("original_b64, file_name") \
+            .eq("client_code", profile_code) \
+            .eq("package_code", package_code) \
+            .maybe_single() \
+            .execute()
+        return res.data
+    except Exception:
+        return None
+
+def save_template(profile_code: str, package_code: str, b64: str, file_name: str) -> tuple[bool, str]:
+    try:
+        existing = get_template(profile_code, package_code)
+        payload  = {
+            "client_code":   profile_code,
+            "package_code":  package_code,
+            "original_b64":  b64,
+            "file_name":     file_name,
+        }
+        if existing:
+            supabase.table("package_excel_templates") \
+                .update({"original_b64": b64, "file_name": file_name}) \
+                .eq("client_code", profile_code) \
+                .eq("package_code", package_code) \
+                .execute()
+        else:
+            supabase.table("package_excel_templates").insert(payload).execute()
+        return True, ""
+    except Exception as e:
+        return False, str(e)
+
+def delete_template(profile_code: str, package_code: str) -> tuple[bool, str]:
+    try:
+        supabase.table("package_excel_templates") \
+            .delete() \
+            .eq("client_code", profile_code) \
+            .eq("package_code", package_code) \
+            .execute()
+        return True, ""
+    except Exception as e:
+        return False, str(e)

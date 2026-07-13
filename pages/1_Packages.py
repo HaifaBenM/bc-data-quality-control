@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import base64
 from app.db.profiles_db import get_profile_by_code
 from app.core.bc_api import (
     get_access_token, get_companies,
@@ -7,6 +8,9 @@ from app.core.bc_api import (
     get_packages_qc,
 )
 from app.core.auth import require_role, is_consultant
+from app.db.packages_db import (
+    get_template, save_template, delete_template,
+)
 
 require_role()
 
@@ -63,7 +67,7 @@ with col_soc:
     sel_company_name = st.selectbox("Société", list(company_opts.keys()), label_visibility="collapsed")
     sel_company_id   = company_opts[sel_company_name]
 with col_refresh:
-    if st.button("🔄 Rafraîchir", use_container_width=True):
+    if st.button("🔄", use_container_width=True, help="Rafraîchir"):
         st.cache_data.clear()
         st.rerun()
 
@@ -123,6 +127,7 @@ if has_sel:
     sel_pkg  = displayed[idx]
     sel_code = sel_pkg.get("code", "")
     sel_name = sel_pkg.get("packageName", "")
+
     st.markdown(
         f'<div style="background:#EEF4FD;border:1px solid #BFDBFE;border-radius:6px;'
         f'padding:.5rem 1rem;font-size:.88rem;color:#1B3A6B;margin:.5rem 0">'
@@ -130,13 +135,76 @@ if has_sel:
         unsafe_allow_html=True,
     )
 
-col_ses, _ = st.columns([2, 6])
-with col_ses:
-    if st.button("📁 Ouvrir dans Sessions", disabled=not has_sel, use_container_width=True, type="primary"):
-        st.session_state["active_package_code"] = sel_code
-        st.session_state["active_package_name"] = sel_name
-        st.session_state["active_company_id"]   = sel_company_id
-        st.session_state["active_company_name"] = sel_company_name
-        for k in ["step","config","parse_result","validation","merged_result","axe_c_result","saved_session_id"]:
-            st.session_state[k] = 1 if k == "step" else ({} if k == "config" else None)
-        st.switch_page("pages/2_Sessions_Integration.py")
+    st.markdown("---")
+
+    # ── Template Excel ────────────────────────────────────────────────────────
+    existing = get_template(active_client, sel_code)
+
+    if is_consultant():
+        st.markdown("#### 📎 Template Excel client")
+        col_up, col_del = st.columns([3, 1])
+        with col_up:
+            uploaded_tpl = st.file_uploader(
+                "Uploader le template Excel (MDD, données exemples incluses)",
+                type=["xlsx"],
+                key=f"tpl_up_{sel_code}",
+            )
+        if uploaded_tpl:
+            raw     = uploaded_tpl.read()
+            b64     = base64.b64encode(raw).decode("utf-8")
+            ok, err = save_template(active_client, sel_code, b64, uploaded_tpl.name)
+            if ok:
+                st.success(f"✅ Template **{uploaded_tpl.name}** sauvegardé.")
+                st.rerun()
+            else:
+                st.error(f"❌ {err}")
+
+        if existing:
+            fname = existing.get("file_name", f"{sel_code}_template.xlsx")
+            raw   = base64.b64decode(existing["original_b64"])
+            with col_del:
+                st.markdown("<div style='padding-top:28px'>", unsafe_allow_html=True)
+                if st.button("🗑️ Supprimer", key=f"tpl_del_{sel_code}", use_container_width=True):
+                    ok, err = delete_template(active_client, sel_code)
+                    if ok: st.rerun()
+                    else:  st.error(err)
+                st.markdown("</div>", unsafe_allow_html=True)
+            st.download_button(
+                label=f"📥 Télécharger le template actuel — {fname}",
+                data=raw,
+                file_name=fname,
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key=f"tpl_dl_consultant_{sel_code}",
+            )
+        else:
+            st.info("Aucun template uploadé pour ce package.")
+
+    else:
+        # ── Vue client ───────────────────────────────────────────────────────
+        if existing:
+            fname = existing.get("file_name", f"{sel_code}_template.xlsx")
+            raw   = base64.b64decode(existing["original_b64"])
+            st.markdown("#### 📎 Template Excel")
+            st.download_button(
+                label=f"📥 Télécharger le template — {fname}",
+                data=raw,
+                file_name=fname,
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key=f"tpl_dl_client_{sel_code}",
+            )
+        else:
+            st.info("Aucun template disponible pour ce package.")
+
+    st.markdown("---")
+
+    # ── Ouvrir dans Sessions ──────────────────────────────────────────────────
+    col_ses, _ = st.columns([2, 6])
+    with col_ses:
+        if st.button("📁 Ouvrir dans Sessions", use_container_width=True, type="primary"):
+            st.session_state["active_package_code"] = sel_code
+            st.session_state["active_package_name"] = sel_name
+            st.session_state["active_company_id"]   = sel_company_id
+            st.session_state["active_company_name"] = sel_company_name
+            for k in ["step","config","parse_result","validation","merged_result","axe_c_result","saved_session_id"]:
+                st.session_state[k] = 1 if k == "step" else ({} if k == "config" else None)
+            st.switch_page("pages/2_Sessions_Integration.py")
