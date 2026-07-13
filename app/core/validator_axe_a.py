@@ -216,12 +216,16 @@ def validate_axe_a(
 def _infer_type(col: str) -> str | None:
     """Heuristique type depuis nom de colonne — fallback sans plan AL."""
     c = col.lower()
-    if any(k in c for k in ("date",)):                         return "Date"
-    if any(k in c for k in ("e-mail", "email")):               return "Email"
-    if any(k in c for k in ("bloqué", "bloque", "actif")):     return "Boolean"
-    if any(k in c for k in ("priorité", "priorite")):          return "Integer"
-    if any(k in c for k in ("prix", "coût", "cout", "montant",
-                              "poids", "taux", "% ", "%")):    return "Decimal"
+    if any(k in c for k in ("date",)):                              return "Date"
+    if any(k in c for k in ("e-mail", "email")):                    return "Email"
+    if any(k in c for k in ("bloqué", "bloque")):                   return "Boolean"
+    if any(k in c for k in ("priorité", "priorite")):               return "Integer"
+    # Décimaux — uniquement si le nom est explicitement un montant pur
+    # Exclure les noms composés ambigus ("prix ttc", "calcul prix ou marge")
+    if col.lower() in ("prix unitaire", "coût unitaire", "poids net", "poids brut",
+                       "coût standard", "dernier coût direct", "% remise",
+                       "% marge sur vente", "% acompte", "% coût indirect"):
+        return "Decimal"
     return None
 
 
