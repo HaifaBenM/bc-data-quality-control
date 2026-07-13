@@ -99,7 +99,7 @@ if role:
         )
         display_name = st.session_state.get("display_name", "")
         st.caption(f"👤 {display_name}" if display_name else "")
-        if st.button("🚪 Déconnexion", use_container_width=True, key="sidebar_logout"):
+        if st.button("🚪 Déconnexion", width='stretch', key="sidebar_logout"):
             st.session_state.clear()
             _load_profiles.clear()
             st.rerun()

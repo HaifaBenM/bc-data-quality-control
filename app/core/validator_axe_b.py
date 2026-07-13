@@ -8,351 +8,13 @@ Sources (par ordre de priorité) :
   3. Si aucune source → champ non vérifiable (Info, pas d'erreur bloquante)
 """
 import pandas as pd
-from app.db.metadata_db import get_reference_values, get_reference_values_by_table_id
+from app.db.metadata_db import get_reference_values_by_table_id
 from app.core.bc_order import sort_sheets_by_bc_order, get_bc_order_summary
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 # MAPPING : champ de données → table de référence
 # Clé = table_id BC, Valeur = {champ_données: config_référence}
-# ══════════════════════════════════════════════════════════════════════════════
-
-REFERENCE_MAP = {
-
-    # ── Table 18 — Clients ─────────────────────────────────────────────────────
-    "18": {
-        "Code conditions paiement": {
-            "patterns":  ["Conditions de paiement", "Condition paiement"],
-            "key":       "Code",
-            "label":     "Conditions de paiement",
-            "cache_key": "paymentTerms",
-        },
-        "Code devise": {
-            "patterns":  ["Devise", "4 Devise"],
-            "key":       "Code",
-            "label":     "Devises",
-            "cache_key": "currencies",
-        },
-        "Code pays/région": {
-            "patterns":  ["Pays", "9 Pays", "Paysrégion"],
-            "key":       "Code",
-            "label":     "Pays/Régions",
-            "cache_key": "countriesRegions",
-        },
-        "Code vendeur": {
-            "patterns":  ["Vendeur", "VendeurAcheteur", "13 Vendeur"],
-            "key":       "Code",
-            "label":     "Vendeurs/Acheteurs",
-            "cache_key": "salespeople",
-        },
-        "Code magasin": {
-            "patterns":  ["Magasin", "14 Magasin"],
-            "key":       "Code",
-            "label":     "Magasins",
-            "cache_key": "locations",
-        },
-        "Groupe compta. client": {
-            "patterns":  ["Groupe compta. client", "92 Groupe"],
-            "key":       "Code",
-            "label":     "Groupes compta. client",
-            "cache_key": None,
-        },
-        "Groupe compta. marché": {
-            "patterns":  ["Groupe compta. marché", "250 Groupe compta. marché"],
-            "key":       "Code",
-            "label":     "Groupes compta. marché",
-            "cache_key": None,
-        },
-        "Groupe compta. marché TVA": {
-            "patterns":  ["marché TVA", "323 Groupe", "TVA marché"],
-            "key":       "Code",
-            "label":     "Groupes compta. marché TVA",
-            "cache_key": None,
-        },
-        "Code mode de paiement": {
-            "patterns":  ["Mode de règlement", "289 Mode", "Mode paiement"],
-            "key":       "Code",
-            "label":     "Modes de règlement",
-            "cache_key": "paymentMethods",
-        },
-        "Code condition relance": {
-            "patterns":  ["Relance", "292 Condition"],
-            "key":       "Code",
-            "label":     "Conditions de relance",
-            "cache_key": None,
-        },
-        "Code transporteur": {
-            "patterns":  ["Transporteur", "291 Transporteur"],
-            "key":       "Code",
-            "label":     "Transporteurs",
-            "cache_key": None,
-        },
-        "Groupe prix client": {
-            "patterns":  ["Prix client", "6 Groupe prix"],
-            "key":       "Code",
-            "label":     "Groupes prix client",
-            "cache_key": None,
-        },
-        "Groupe remises client": {
-            "patterns":  ["Remise client", "7 Groupe remise"],
-            "key":       "Code",
-            "label":     "Groupes remises client",
-            "cache_key": None,
-        },
-        "Code langue": {
-            "patterns":  ["Langue", "8 Langue"],
-            "key":       "Code",
-            "label":     "Langues",
-            "cache_key": None,
-        },
-    },
-
-    # ── Table 23 — Fournisseurs ────────────────────────────────────────────────
-    "23": {
-        "Code conditions paiement": {
-            "patterns":  ["Conditions de paiement"],
-            "key":       "Code",
-            "label":     "Conditions de paiement",
-            "cache_key": "paymentTerms",
-        },
-        "Code devise": {
-            "patterns":  ["Devise"],
-            "key":       "Code",
-            "label":     "Devises",
-            "cache_key": "currencies",
-        },
-        "Code pays/région": {
-            "patterns":  ["Pays", "Paysrégion"],
-            "key":       "Code",
-            "label":     "Pays/Régions",
-            "cache_key": "countriesRegions",
-        },
-        "Groupe compta. fournisseur": {
-            "patterns":  ["Groupe compta. fournisseur", "93 Groupe"],
-            "key":       "Code",
-            "label":     "Groupes compta. fournisseur",
-            "cache_key": None,
-        },
-        "Groupe compta. marché": {
-            "patterns":  ["Groupe compta. marché", "250 Groupe"],
-            "key":       "Code",
-            "label":     "Groupes compta. marché",
-            "cache_key": None,
-        },
-        "Groupe compta. marché TVA": {
-            "patterns":  ["marché TVA", "323 Groupe"],
-            "key":       "Code",
-            "label":     "Groupes compta. marché TVA",
-            "cache_key": None,
-        },
-        "Code mode de paiement": {
-            "patterns":  ["Mode de règlement"],
-            "key":       "Code",
-            "label":     "Modes de règlement",
-            "cache_key": "paymentMethods",
-        },
-        "Code acheteur": {
-            "patterns":  ["Vendeur", "VendeurAcheteur"],
-            "key":       "Code",
-            "label":     "Acheteurs",
-            "cache_key": "salespeople",
-        },
-    },
-
-    # ── Table 27 — Articles ────────────────────────────────────────────────────
-    "27": {
-        # ── Unité de mesure ────────────────────────────────────────────────────
-        "Unité de base": {
-            "patterns":  ["Unité de mesure", "204 Unité", "Unités de mesure"],
-            "key":       "Code",
-            "label":     "Unités de mesure",
-            "cache_key": "unitOfMeasures",
-        },
-        # ── Groupes comptables ─────────────────────────────────────────────────
-        "Groupe compta. stock": {
-            "patterns":  ["Groupe compta. stock", "94 Groupe compta. stock"],
-            "key":       "Code",
-            "label":     "Groupes compta. stock",
-            "cache_key": None,
-        },
-        "Groupe compta. produit": {
-            "patterns":  ["Groupe compta. produit", "252 Groupe compta. produit"],
-            "key":       "Code",
-            "label":     "Groupes compta. produit",
-            "cache_key": None,
-        },
-        "Groupe compta. produit TVA": {
-            "patterns":  ["produit TVA", "325 Groupe compta. produit TVA"],
-            "key":       "Code",
-            "label":     "Groupes compta. produit TVA",
-            "cache_key": None,
-        },
-        "Gpe compta. marché TVA (prix)": {
-            "patterns":  ["marché TVA", "74 Gpe compta", "TVA prix"],
-            "key":       "Code",
-            "label":     "Groupes compta. marché TVA",
-            "cache_key": None,
-        },
-        # ── Références fournisseur ─────────────────────────────────────────────
-        "N° fournisseur": {
-            "patterns":  ["23 Fournisseur", "Fournisseur"],
-            "key":       "N°",
-            "label":     "Fournisseurs",
-            "cache_key": "vendors",
-        },
-        # ── Catégorie et remises ───────────────────────────────────────────────
-        "Code catégorie article": {
-            "patterns":  ["Catégorie article", "5722 Catégorie"],
-            "key":       "Code",
-            "label":     "Catégories d'articles",
-            "cache_key": "itemCategories",
-        },
-        "Groupe rem. article": {
-            "patterns":  ["Groupe remises article", "340 Groupe remises"],
-            "key":       "Code",
-            "label":     "Groupes remises article",
-            "cache_key": None,
-        },
-        # ── Pays/région ────────────────────────────────────────────────────────
-        "Code pays/région achat": {
-            "patterns":  ["Pays", "9 Pays", "Pays/région"],
-            "key":       "Code",
-            "label":     "Pays/Régions",
-            "cache_key": "countriesRegions",
-        },
-        "Code pays/région origine": {
-            "patterns":  ["Pays", "9 Pays", "Pays/région"],
-            "key":       "Code",
-            "label":     "Pays/Régions",
-            "cache_key": "countriesRegions",
-        },
-        # ── No. Series ─────────────────────────────────────────────────────────
-        "Souches de n°": {
-            "patterns":  ["Souches de n", "308 Souches"],
-            "key":       "Code",
-            "label":     "Souches de n°",
-            "cache_key": "noSeries",
-        },
-        # ── Taxes ──────────────────────────────────────────────────────────────
-        "Code groupe taxes": {
-            "patterns":  ["Groupe taxes", "322 Groupe taxes", "USA groupe taxes"],
-            "key":       "Code",
-            "label":     "USA Groupes taxes",
-            "cache_key": None,
-        },
-        # ── Modèle échelonnement ───────────────────────────────────────────────
-        "Code modèle échelonnement par défaut": {
-            "patterns":  ["Modèle éch", "1300 Modèle", "Deferral"],
-            "key":       "Code",
-            "label":     "Modèles d'échelonnement",
-            "cache_key": None,
-        },
-        # ── Traçabilité ────────────────────────────────────────────────────────
-        "Code traçabilité": {
-            "patterns":  ["Traçabilité", "6502 Traça"],
-            "key":       "Code",
-            "label":     "Codes traçabilité",
-            "cache_key": None,
-        },
-        # ── Mode d'achat ───────────────────────────────────────────────────────
-        "Code achat": {
-            "patterns":  ["5730 Code achat", "Code achat"],
-            "key":       "Code",
-            "label":     "Codes achat",
-            "cache_key": None,
-        },
-    },
-
-    # ── Table 15 — Plan comptable ──────────────────────────────────────────────
-    "15": {
-        "Groupe compta. marché": {
-            "patterns":  ["Groupe compta. marché", "250 Groupe"],
-            "key":       "Code",
-            "label":     "Groupes compta. marché",
-            "cache_key": None,
-        },
-        "Groupe compta. produit": {
-            "patterns":  ["Groupe compta. produit", "252 Groupe"],
-            "key":       "Code",
-            "label":     "Groupes compta. produit",
-            "cache_key": None,
-        },
-        "Groupe compta. marché TVA": {
-            "patterns":  ["marché TVA", "323 Groupe"],
-            "key":       "Code",
-            "label":     "Groupes compta. marché TVA",
-            "cache_key": None,
-        },
-        "Groupe compta. produit TVA": {
-            "patterns":  ["produit TVA", "325 Groupe"],
-            "key":       "Code",
-            "label":     "Groupes compta. produit TVA",
-            "cache_key": None,
-        },
-    },
-}
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# FONCTIONS UTILITAIRES
-# ══════════════════════════════════════════════════════════════════════════════
-
-def _normalize(value: str) -> str:
-    """Normalise une valeur pour comparaison : strip + espaces insécables."""
-    return (
-        str(value)
-        .strip()
-        .replace("\xa0", " ")   # espace insécable → espace normal
-        .replace("\u202f", " ") # espace fine insécable
-        .strip()
-    )
-
-
-def _find_ref_sheet(all_sheets: dict, patterns: list) -> str | None:
-    """
-    Trouve le nom de l'onglet de référence dans le fichier.
-    Cherche par correspondance partielle (case-insensitive).
-    """
-    for sheet_name in all_sheets.keys():
-        sheet_norm = sheet_name.lower().replace(" ", "").replace("-", "")
-        for pattern in patterns:
-            pat_norm = pattern.lower().replace(" ", "").replace("-", "")
-            if pat_norm in sheet_norm or sheet_norm in pat_norm:
-                return sheet_name
-    return None
-
-
-def _get_valid_codes(df: pd.DataFrame, key_field: str = "Code") -> set:
-    """
-    Extrait les codes valides depuis un DataFrame de référence.
-    Gère les espaces insécables et la casse.
-    """
-    # Trouver la colonne clé (peut avoir des espaces ou des variantes)
-    actual_key = None
-    for col in df.columns:
-        if _normalize(str(col)).lower() == key_field.lower():
-            actual_key = col
-            break
-
-    if actual_key is None and len(df.columns) > 0:
-        actual_key = df.columns[0]  # Fallback : première colonne
-
-    if actual_key is None:
-        return set()
-
-    codes = set()
-    for val in df[actual_key].dropna():
-        normalized = _normalize(str(val))
-        if normalized and normalized.lower() != "nan":
-            codes.add(normalized)
-            codes.add(normalized.upper())
-            codes.add(normalized.lower())
-
-    return codes
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# MOTEUR DE VALIDATION AXE B
 # ══════════════════════════════════════════════════════════════════════════════
 
 def validate_axe_b(
@@ -375,8 +37,7 @@ def validate_axe_b(
         valid_codes  = BC_cache(ref_table_id) ∪ simulation_context(ref_table_id)
         Si valeur absente → ANOMALIE MAJEURE
 
-    Fallback REFERENCE_MAP (si execution_plan absent ou refTableId=0) :
-      Utilise l'ancien mécanisme par patterns pour les tables connues.
+    Si execution_plan absent : INFO 'non vérifiable' (comportement honnête).
     """
     anomalies = []
     if df is None or df.empty:
@@ -474,99 +135,23 @@ def validate_axe_b(
 
         return anomalies
 
-    # ── Chemin 2 : fallback REFERENCE_MAP (execution_plan absent) ─────────────
-    field_refs = dict(REFERENCE_MAP.get(table_id, {}))
-    if not field_refs:
-        return anomalies
-
-    # Construction ref_codes_cache (logique originale préservée)
-    ref_codes_cache: dict[str, tuple[set, str, bool]] = {}
-    not_found_fields: set[str] = set()
-
-    for field_name, ref_config in field_refs.items():
-        if field_name not in df.columns:
-            continue
-
-        sim_codes = set()
-        if sim_context and metadata_loader:
-            try:
-                _ref_tid_fb = metadata_loader.get_ref_table_id(table_id_int, field_name)
-                if _ref_tid_fb:
-                    sim_codes = sim_context.get_values(_ref_tid_fb)
-            except Exception:
-                pass
-
-        # 1. Chercher dans le fichier
-        ref_sheet = _find_ref_sheet(all_sheets, ref_config["patterns"])
-        if ref_sheet:
-            ref_df   = all_sheets.get(ref_sheet)
-            f_codes  = _get_valid_codes(ref_df, ref_config["key"]) if ref_df is not None else set()
-            codes    = f_codes | sim_codes
-            ref_codes_cache[field_name] = (codes, f"onglet '{ref_sheet}'", True)
-            continue
-
-        # 2. Cache Supabase
-        if profile_code and ref_config.get("cache_key"):
-            cached = get_reference_values(profile_code, ref_config["cache_key"])
-            if cached or sim_codes:
-                codes = set(c for c in cached if c) | sim_codes
-                ref_codes_cache[field_name] = (codes, f"cache BC ({ref_config['label']})", True)
-                continue
-
-        # 3. Sim context seul
-        if sim_codes:
-            ref_codes_cache[field_name] = (sim_codes, "fichier (intra-package)", True)
-        else:
-            not_found_fields.add(field_name)
-            ref_codes_cache[field_name] = (set(), ref_config["label"], False)
-
-    # Anomalies INFO pour champs non vérifiables
-    for field_name in not_found_fields:
-        _, label, _ = ref_codes_cache.get(field_name, (set(), field_name, False))
-        anomalies.append({
-            "Ligne":              0,
-            "Onglet":             sheet_name,
-            "Champ":              field_name,
-            "Valeur":             "",
-            "Type d'anomalie":   "Code de référence non vérifiable",
-            "Sévérité":           "Info",
-            "Message":            (
-                f"Impossible de vérifier '{field_name}' : "
-                f"la table de référence '{label}' n'est pas dans le fichier "
-                f"et n'est pas dans le cache BC. Chargez la metadata BC."
-            ),
-            "Correction suggérée": "",
-            "Axe":               "B",
-        })
-
-    # Validation ligne par ligne
-    for row_idx, row in df.iterrows():
-        row_num = int(row_idx) + 4
-        for field_name, (valid_codes, source, found) in ref_codes_cache.items():
-            if field_name not in df.columns or not found:
-                continue
-            value = str(row.get(field_name, "") or "").strip()
-            if not value or value.lower() in ("nan", "none", ""):
-                continue
-            if value not in valid_codes:
-                examples = sorted(valid_codes)[:3] if valid_codes else []
-                anomalies.append({
-                    "Ligne":              row_num,
-                    "Onglet":             sheet_name,
-                    "Champ":              field_name,
-                    "Valeur":             value,
-                    "Type d'anomalie":   "Code de référence invalide",
-                    "Sévérité":           "Majeure",
-                    "Message":            (
-                        f"'{field_name}' = '{value}' n'existe pas "
-                        f"dans {source}."
-                        + (f" Exemples valides : {examples}" if examples else "")
-                    ),
-                    "Correction suggérée": examples[0] if examples else "",
-                    "Axe":               "B",
-                    "BC":                found,
-                })
-
+    # Pas d'execution_plan → impossible de déterminer les TableRelations
+    # Comportement honnête : INFO pour tous les champs de la table
+    anomalies.append({
+        "Ligne":              0,
+        "Onglet":             sheet_name,
+        "Champ":              "",
+        "Valeur":             "",
+        "Type d'anomalie":   "Validation références non disponible",
+        "Sévérité":           "Info",
+        "Message":            (
+            f"Table {table_id} : impossible de valider les références (Axe B) "
+            f"sans le plan d'exécution BC. "
+            f"Assurez-vous que le package est sélectionné et l'extension AL déployée."
+        ),
+        "Correction suggérée": "",
+        "Axe":               "B",
+    })
     return anomalies
 
 def validate_file_axe_b(
@@ -666,7 +251,7 @@ def validate_file_axe_b(
         ):
             try:
                 from app.core.trigger_simulator import TriggerSimulator
-                from app.db.metadata_db import get_reference_values, get_reference_values_by_table_id
+                from app.db.metadata_db import get_reference_values_by_table_id
                 if metadata_loader:
                     tsim = TriggerSimulator(sim_context, metadata_loader)
                     trigger_anom = tsim.simulate_table(

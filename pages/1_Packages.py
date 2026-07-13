@@ -111,7 +111,7 @@ df = pd.DataFrame([{
 } for p in displayed])
 
 event = st.dataframe(
-    df, use_container_width=True, hide_index=True,
+    df, width='stretch', hide_index=True,
     on_select="rerun", selection_mode="single-row",
     column_config={
         "Code":        st.column_config.TextColumn(width="small"),

@@ -91,4 +91,4 @@ else:
         } for s in sessions])
 
         with st.expander("📈 Données détaillées"):
-            st.dataframe(df_stats, use_container_width=True, hide_index=True)
+            st.dataframe(df_stats, width='stretch', hide_index=True)

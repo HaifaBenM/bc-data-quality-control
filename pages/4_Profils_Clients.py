@@ -120,12 +120,12 @@ with tab1:
                 st.markdown("<div style='padding-top:14px'>", unsafe_allow_html=True)
                 c1, c2, c3 = st.columns(3)
                 with c2:
-                    if st.button("✏️ Éditer", key=f"edit_{code}", use_container_width=True):
+                    if st.button("✏️ Éditer", key=f"edit_{code}", width='stretch'):
                         st.session_state.edit_profile = code
                         st.session_state.bc_test_result = {}
                         st.session_state.companies_list = {}
                 with c3:
-                    if st.button("🗑️", key=f"del_{code}", use_container_width=True):
+                    if st.button("🗑️", key=f"del_{code}", width='stretch'):
                         st.session_state.confirm_delete = code
                 st.markdown("</div>", unsafe_allow_html=True)
 
@@ -151,7 +151,7 @@ with tab1:
 
                     col_test, col_result = st.columns([2,5])
                     with col_test:
-                        if st.button("🔌 Tester la connexion", key=f"test_{code}", use_container_width=True):
+                        if st.button("🔌 Tester la connexion", key=f"test_{code}", width='stretch'):
                             missing = [f for f,v in [("Tenant ID",e_tenant),("Client ID",e_client_id),("Secret",e_secret)] if not str(v or "").strip()]
                             if missing:
                                 st.session_state.bc_test_result[code] = (False, f"Manquants : {', '.join(missing)}")
@@ -190,7 +190,7 @@ with tab1:
 
                     cs, cc, cm, _ = st.columns([2,2,3,3])
                     with cs:
-                        if st.button("💾 Enregistrer", key=f"save_{code}", type="primary", use_container_width=True):
+                        if st.button("💾 Enregistrer", key=f"save_{code}", type="primary", width='stretch'):
                             ok, err = update_profile(code, {
                                 "name": str(e_name or "").strip(), "sector": str(e_sector or "").strip(),
                                 "data_language": e_lang, "bc_url": str(e_url or "").strip(),
@@ -211,14 +211,14 @@ with tab1:
                             else:
                                 st.error(f"❌ {err}")
                     with cc:
-                        if st.button("Annuler", key=f"cancel_{code}", use_container_width=True):
+                        if st.button("Annuler", key=f"cancel_{code}", width='stretch'):
                             st.session_state.edit_profile  = None
                             st.session_state.bc_test_result = {}
                             st.session_state.companies_list = {}
                             st.rerun()
                     with cm:
                         can_load = bool(str(e_tenant or "").strip() and str(e_client_id or "").strip() and str(e_secret or "").strip() and sel_company_id)
-                        if st.button("📋 Charger metadata BC", key=f"meta_{code}", use_container_width=True, disabled=not can_load, help="Lit les champs et tables de référence depuis BC"):
+                        if st.button("📋 Charger metadata BC", key=f"meta_{code}", width='stretch', disabled=not can_load, help="Lit les champs et tables de référence depuis BC"):
                             charger_metadata(code, str(e_tenant).strip(), str(e_client_id).strip(), str(e_secret).strip(), str(e_env or "").strip(), sel_company_id)
 
                     # Statut cache
@@ -274,7 +274,7 @@ with tab2:
 
     ct, cr = st.columns([2,5])
     with ct:
-        if st.button("🔌 Tester", key="test_new", use_container_width=True):
+        if st.button("🔌 Tester", key="test_new", width='stretch'):
             missing = [f for f,v in [("Tenant",new_tenant),("Client ID",new_client_id),("Secret",new_secret)] if not str(v or "").strip()]
             if missing:
                 st.session_state.bc_test_result["new"] = (False, f"Manquants : {', '.join(missing)}")
@@ -343,7 +343,7 @@ with tab3:
             for u in all_users
         ]
         import pandas as pd
-        st.dataframe(pd.DataFrame(df_users), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(df_users), width='stretch', hide_index=True)
         st.markdown("---")
     else:
         st.info("Aucun utilisateur créé.")
