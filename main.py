@@ -30,19 +30,17 @@ _home_page = st.Page(
 )
 
 if role == "":
-    # Aucun rôle → accueil uniquement
     sections[""] = [_home_page]
 
 elif role == "consultant":
-    # Toutes les sections clients + accueil + configuration
     sections[""] = [_home_page]
     for p in profiles:
         code = p.get("code", "")
         name = p.get("name", code)
         sections[f"🏢 {name}"] = [
-            st.Page("pages/1_Packages.py",            title="Packages",             icon="📦", url_path=f"pkg_{code}"),
+            st.Page("pages/1_Packages.py",             title="Packages",             icon="📦", url_path=f"pkg_{code}"),
             st.Page("pages/2_Sessions_Integration.py", title="Sessions Intégration", icon="📁", url_path=f"ses_{code}"),
-            st.Page("pages/3_Dashboard.py",           title="Dashboard",            icon="📊", url_path=f"dash_{code}"),
+            st.Page("pages/3_Dashboard.py",            title="Dashboard",            icon="📊", url_path=f"dash_{code}"),
         ]
     sections["⚙️ Configuration"] = [
         st.Page(
@@ -55,7 +53,6 @@ elif role == "consultant":
     ]
 
 elif role == "client":
-    # Uniquement la section du client connecté
     client_code    = st.session_state.get("active_client", "")
     client_profile = next((p for p in profiles if p.get("code") == client_code), None)
 
@@ -64,9 +61,9 @@ elif role == "client":
     if client_profile:
         name = client_profile.get("name", client_code)
         sections[f"🏢 {name}"] = [
-            st.Page("pages/1_Packages.py",            title="Packages",             icon="📦", url_path=f"pkg_{client_code}"),
+            st.Page("pages/1_Packages.py",             title="Packages",             icon="📦", url_path=f"pkg_{client_code}"),
             st.Page("pages/2_Sessions_Integration.py", title="Sessions Intégration", icon="📁", url_path=f"ses_{client_code}"),
-            st.Page("pages/3_Dashboard.py",           title="Dashboard",            icon="📊", url_path=f"dash_{client_code}"),
+            st.Page("pages/3_Dashboard.py",            title="Dashboard",            icon="📊", url_path=f"dash_{client_code}"),
         ]
 
 # ── Injection active_client depuis l'URL ──────────────────────────────────────
@@ -99,7 +96,7 @@ if role:
         )
         display_name = st.session_state.get("display_name", "")
         st.caption(f"👤 {display_name}" if display_name else "")
-        if st.button("🚪 Déconnexion", width='stretch', key="sidebar_logout"):
+        if st.button("🚪 Déconnexion", use_container_width=True, key="sidebar_logout"):
             st.session_state.clear()
             _load_profiles.clear()
             st.rerun()
