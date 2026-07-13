@@ -334,7 +334,6 @@ with tab_main:
     st.markdown("---")
 
     # ── Étape 1 ──────────────────────────────────────────────────────────────
-    # ── Étape 1 ──────────────────────────────────────────────────────────────
     if st.session_state.step == 1:
         st.markdown('<div class="step-header">Étape 1 — Informations</div>', unsafe_allow_html=True)
         col1, col2 = st.columns(2)
@@ -525,25 +524,20 @@ with tab_main:
                             package_code = cfg.get("pkg_code", ""),
                         )
 
-                        # ── DEBUG — à supprimer après vérification ────────
+                     # ── DEBUG ────────────────────────────────────────
                         if _exec_plan.source == "default":
-                            st.warning("⚠️ Plan par défaut — extension AL non accessible ou package non sélectionné")
+                            st.warning("⚠️ Plan par défaut")
                         else:
                             total_ref = sum(
                                 1 for fields in _exec_plan.fields_ref.values()
                                 for rid in fields.values() if rid > 0
                             )
-                            total_ref_fid = sum(
-                                1 for fields in _exec_plan.fields_ref_field.values()
-                                for fid in fields.values() if fid > 0
-                            )
                             st.info(
-                                f"Plan BC — source: {_exec_plan.source} | "
-                                f"tables: {len(_exec_plan.tables)} | "
-                                f"champs avec refTableId: {total_ref} | "
-                                f"champs avec refFieldId: {total_ref_fid}"
+                                f"Plan BC — tables: {len(_exec_plan.tables)} | "
+                                f"champs avec refTableId: {total_ref}"
                             )
                         # ── FIN DEBUG ─────────────────────────────────────
+
 
                         _meta_loader = MetadataLoader(client_code, cfg.get("company_id", ""))
                         _sim_ctx     = SimulationContext()
