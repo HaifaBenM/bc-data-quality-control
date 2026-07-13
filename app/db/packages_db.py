@@ -1,21 +1,3 @@
-"""
-Opérations CRUD pour les packages de configuration BC.
-
-Table Supabase requise (SQL ci-dessous) :
-
-CREATE TABLE bc_packages (
-    id           UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    client_code  TEXT NOT NULL REFERENCES client_profiles(code) ON DELETE CASCADE,
-    code         TEXT NOT NULL,
-    nom_package  TEXT NOT NULL,
-    nb_tables    INTEGER DEFAULT 0,
-    nb_records   INTEGER DEFAULT 0,
-    nb_errors    INTEGER DEFAULT 0,
-    created_at   TIMESTAMPTZ DEFAULT now(),
-    updated_at   TIMESTAMPTZ DEFAULT now(),
-    UNIQUE(client_code, code)
-);
-"""
 from datetime import datetime, timezone
 from app.db.supabase_client import get_supabase_client
 
@@ -25,7 +7,6 @@ def _now() -> str:
 
 
 def get_packages(client_code: str) -> list:
-    """Retourne tous les packages d'un client, triés par code."""
     try:
         client = get_supabase_client()
         res = (
@@ -41,7 +22,6 @@ def get_packages(client_code: str) -> list:
 
 
 def create_package(data: dict) -> tuple[bool, str]:
-    """Crée un nouveau package. Retourne (True, id) ou (False, message_erreur)."""
     try:
         client = get_supabase_client()
         row = {
@@ -65,9 +45,8 @@ def create_package(data: dict) -> tuple[bool, str]:
 
 
 def update_package(pkg_id: str, data: dict) -> tuple[bool, str]:
-    """Met à jour un package existant."""
     try:
-        client = get_supabase_client()
+        client  = get_supabase_client()
         allowed = ("nom_package", "nb_tables", "nb_records", "nb_errors")
         payload = {k: v for k, v in data.items() if k in allowed}
         payload["updated_at"] = _now()
@@ -78,7 +57,6 @@ def update_package(pkg_id: str, data: dict) -> tuple[bool, str]:
 
 
 def delete_package(pkg_id: str) -> tuple[bool, str]:
-    """Supprime un package."""
     try:
         client = get_supabase_client()
         client.table("bc_packages").delete().eq("id", pkg_id).execute()
@@ -88,17 +66,15 @@ def delete_package(pkg_id: str) -> tuple[bool, str]:
 
 
 def get_package_by_id(pkg_id: str) -> dict:
-    """Retourne un package par son ID."""
     try:
         client = get_supabase_client()
-        res = client.table("bc_packages").select("*").eq("id", pkg_id).execute()
+        res    = client.table("bc_packages").select("*").eq("id", pkg_id).execute()
         return res.data[0] if res.data else {}
     except Exception:
         return {}
 
 
 def update_package_stats(pkg_id: str, nb_tables: int, nb_records: int, nb_errors: int) -> None:
-    """Met à jour les stats d'un package après une session d'intégration."""
     try:
         client = get_supabase_client()
         client.table("bc_packages").update({
@@ -109,42 +85,50 @@ def update_package_stats(pkg_id: str, nb_tables: int, nb_records: int, nb_errors
         }).eq("id", pkg_id).execute()
     except Exception:
         pass
+
+
 def get_template(profile_code: str, package_code: str) -> dict | None:
     try:
-        res = supabase.table("package_excel_templates") \
-            .select("original_b64, file_name") \
-            .eq("client_code", profile_code) \
-            .eq("package_code", package_code) \
-            .maybe_single() \
+        client = get_supabase_client()
+        res = (
+            client.table("package_excel_templates")
+            .select("original_b64, file_name")
+            .eq("client_code", profile_code)
+            .eq("package_code", package_code)
+            .maybe_single()
             .execute()
+        )
         return res.data
     except Exception:
         return None
 
+
 def save_template(profile_code: str, package_code: str, b64: str, file_name: str) -> tuple[bool, str]:
     try:
+        client   = get_supabase_client()
         existing = get_template(profile_code, package_code)
-        payload  = {
-            "client_code":   profile_code,
-            "package_code":  package_code,
-            "original_b64":  b64,
-            "file_name":     file_name,
-        }
         if existing:
-            supabase.table("package_excel_templates") \
+            client.table("package_excel_templates") \
                 .update({"original_b64": b64, "file_name": file_name}) \
                 .eq("client_code", profile_code) \
                 .eq("package_code", package_code) \
                 .execute()
         else:
-            supabase.table("package_excel_templates").insert(payload).execute()
+            client.table("package_excel_templates").insert({
+                "client_code":  profile_code,
+                "package_code": package_code,
+                "original_b64": b64,
+                "file_name":    file_name,
+            }).execute()
         return True, ""
     except Exception as e:
         return False, str(e)
 
+
 def delete_template(profile_code: str, package_code: str) -> tuple[bool, str]:
     try:
-        supabase.table("package_excel_templates") \
+        client = get_supabase_client()
+        client.table("package_excel_templates") \
             .delete() \
             .eq("client_code", profile_code) \
             .eq("package_code", package_code) \
