@@ -1,7 +1,7 @@
 """
 Validation Axe A — Contraintes BC standard.
 100% dynamique via ExecutionPlan (fieldType + fieldLength depuis extension AL).
-Fallback : contrôles universels (formule, doublon, longueur >250) si plan absent.
+Fallback : contrôles universels si plan absent.
 """
 import re
 import pandas as pd
@@ -15,12 +15,8 @@ DATE_FORMATS = [
 ]
 BOOL_TRUE  = {"oui", "yes", "true", "vrai", "1", "x", "✓"}
 BOOL_FALSE = {"non", "no", "false", "faux", "0", ""}
-_DEFAULT_TEXT_MAX = 250  # seuil générique si plan absent
+_DEFAULT_TEXT_MAX = 250
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-# VALIDATEURS ATOMIQUES
-# ══════════════════════════════════════════════════════════════════════════════
 
 def _is_empty(value) -> bool:
     if value is None:
@@ -60,36 +56,40 @@ def _validate_boolean(v: str) -> bool:
 def _validate_email(v: str) -> bool:
     return bool(re.match(r"^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$", v))
 
+def _infer_type(col: str) -> str | None:
+    """Heuristique minimale — uniquement Date et Email."""
+    c = col.lower()
+    if "date" in c:                        return "Date"
+    if "e-mail" in c or "email" in c:      return "Email"
+    return None
 
-# ══════════════════════════════════════════════════════════════════════════════
-# MOTEUR
-# ══════════════════════════════════════════════════════════════════════════════
+def _sanitize_py_type(py_type: str | None, str_val: str) -> str | None:
+    """
+    Corrige les incohérences type AL vs valeur réelle.
+    BC peut retourner Decimal pour des champs Option/Boolean.
+    """
+    if py_type != "Decimal":
+        return py_type
+    # Valeur booléenne → AL a mal typé ce champ
+    if str_val.lower() in ("false", "true", "oui", "non", "yes", "no"):
+        return None
+    # Valeur contenant des lettres → pas un Decimal
+    if any(c.isalpha() for c in str_val):
+        return None
+    return py_type
+
 
 def validate_axe_a(
-    df:             pd.DataFrame,
-    table_id:       str,
-    sheet_name:     str = "",
-    execution_plan  = None,
+    df:            pd.DataFrame,
+    table_id:      str,
+    sheet_name:    str = "",
+    execution_plan = None,
 ) -> list[dict]:
-    """
-    Valide un DataFrame BC — Axe A.
-
-    Avec execution_plan (source=bc_api) :
-      - type    : depuis FieldMeta.py_type (FldRef.Type mappé)
-      - longueur: depuis FieldMeta.max_length (FldRef.Length)
-      - req     : depuis FieldMeta.is_required (dict statique NotBlank)
-      - options : depuis FieldMeta.option_values (dict statique captions)
-
-    Sans execution_plan (fallback) :
-      - formules Excel + doublons + longueur >250 (universels)
-      - types inférés depuis le nom de colonne (heuristique, sévérité Mineure)
-    """
     anomalies  = []
     table_id_s = str(table_id)
     key_field  = execution_plan.get_key_field(int(table_id)) \
                  if execution_plan and table_id else "N°"
 
-    # Récupération des FieldMeta depuis le plan
     has_plan   = (
         execution_plan is not None
         and execution_plan.source == "bc_api"
@@ -111,9 +111,9 @@ def validate_axe_a(
             raw_val  = row.get(col)
             str_val  = _to_str(raw_val)
             is_empty = _is_empty(raw_val)
-            fm       = field_defs.get(str(col))  # FieldMeta | None
+            fm       = field_defs.get(str(col))
 
-            # ── 1. Formule Excel (universel) ──────────────────────────────────
+            # 1. Formule Excel
             if str_val.startswith("="):
                 anomalies.append(_anomaly(
                     line=line_num, field=col, value=str_val, sheet=sheet_name,
@@ -122,7 +122,7 @@ def validate_axe_a(
                 ))
                 continue
 
-            # ── 2. Champ obligatoire vide ─────────────────────────────────────
+            # 2. Champ obligatoire vide
             if fm and fm.is_required and is_empty:
                 anomalies.append(_anomaly(
                     line=line_num, field=col, value="", sheet=sheet_name,
@@ -134,7 +134,7 @@ def validate_axe_a(
             if is_empty:
                 continue
 
-            # ── 3. Longueur maximale ──────────────────────────────────────────
+            # 3. Longueur maximale
             if fm:
                 if fm.max_length and fm.py_type in ("Text", None) and len(str_val) > fm.max_length:
                     anomalies.append(_anomaly(
@@ -144,35 +144,36 @@ def validate_axe_a(
                         suggested_fix=str_val[:fm.max_length],
                     ))
             else:
-                # Fallback — seuil générique
                 if len(str_val) > _DEFAULT_TEXT_MAX:
                     anomalies.append(_anomaly(
                         line=line_num, field=col, value=str_val[:40] + "…", sheet=sheet_name,
                         error_type="Longueur maximale dépassée", severity="Mineure",
-                        message=f"'{col}' : {len(str_val)} car. dépasse {_DEFAULT_TEXT_MAX} (seuil Text BC générique).",
+                        message=f"'{col}' : {len(str_val)} car. dépasse {_DEFAULT_TEXT_MAX} (seuil générique).",
                         suggested_fix=str_val[:_DEFAULT_TEXT_MAX],
                     ))
 
-            # ── 4. Type de données ────────────────────────────────────────────
-            py_type = fm.py_type if fm else _infer_type(col)
-            severity_type = "Majeure" if fm else "Mineure"
+            # 4. Type de données
+            raw_py_type = fm.py_type if fm else _infer_type(col)
+            # Correction incohérences AL
+            py_type     = _sanitize_py_type(raw_py_type, str_val)
+            sev_type    = "Majeure" if fm else "Mineure"
 
             if py_type == "Integer" and not _validate_integer(str_val):
                 anomalies.append(_anomaly(
                     line=line_num, field=col, value=str_val, sheet=sheet_name,
-                    error_type="Type incorrect (entier attendu)", severity=severity_type,
+                    error_type="Type incorrect (entier attendu)", severity=sev_type,
                     message=f"'{col}' doit être un entier, valeur : '{str_val}'.",
                 ))
             elif py_type == "Decimal" and not _validate_decimal(str_val):
                 anomalies.append(_anomaly(
                     line=line_num, field=col, value=str_val, sheet=sheet_name,
-                    error_type="Type incorrect (décimal attendu)", severity=severity_type,
+                    error_type="Type incorrect (décimal attendu)", severity=sev_type,
                     message=f"'{col}' doit être un décimal, valeur : '{str_val}'. Séparateur : '.' ou ','.",
                 ))
             elif py_type == "Date" and not _validate_date(str_val):
                 anomalies.append(_anomaly(
                     line=line_num, field=col, value=str_val, sheet=sheet_name,
-                    error_type="Format de date incorrect", severity=severity_type,
+                    error_type="Format de date incorrect", severity=sev_type,
                     message=f"'{col}' : '{str_val}' n'est pas une date valide. Formats : JJ/MM/AAAA, AAAA-MM-JJ.",
                 ))
             elif py_type == "Boolean" and not _validate_boolean(str_val):
@@ -196,7 +197,7 @@ def validate_axe_a(
                         message=f"'{col}' : '{str_val}' non autorisé. Valeurs BC : {allowed}.",
                     ))
 
-        # ── 5. Doublons clé primaire (universel) ──────────────────────────────
+        # 5. Doublons clé primaire
         if key_field in df.columns:
             key_val = _to_str(row.get(key_field))
             if key_val:
@@ -204,20 +205,12 @@ def validate_axe_a(
                     anomalies.append(_anomaly(
                         line=line_num, field=key_field, value=key_val, sheet=sheet_name,
                         error_type="Doublon (clé primaire)", severity="Majeure",
-                        message=f"'{key_field}' = '{key_val}' dupliqué. "
-                                f"Déjà présent à la ligne {seen_keys[key_val]}.",
+                        message=f"'{key_field}' = '{key_val}' dupliqué. Déjà présent à la ligne {seen_keys[key_val]}.",
                     ))
                 else:
                     seen_keys[key_val] = line_num
 
     return anomalies
-
-
-def _infer_type(col: str) -> str | None:
-    c = col.lower()
-    if "date" in c:                       return "Date"
-    if "e-mail" in c or "email" in c:     return "Email"
-    return None
 
 
 def _anomaly(
@@ -238,16 +231,7 @@ def _anomaly(
     }
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# VALIDATION FICHIER COMPLET
-# ══════════════════════════════════════════════════════════════════════════════
-
 def validate_file_axe_a(parse_result: dict, execution_plan=None) -> dict:
-    """
-    Lance Axe A sur toutes les tables (data + ref).
-    execution_plan requis pour validation précise type/longueur.
-    Fallback universel si absent.
-    """
     result = {
         "total_anomalies": 0,
         "major":           0,
@@ -297,4 +281,5 @@ def get_anomalies_dataframe(anomalies: list) -> pd.DataFrame:
     if not anomalies:
         return pd.DataFrame()
     cols = ["Ligne","Onglet","Champ","Valeur","Type d'anomalie","Sévérité","Message","Correction suggérée","Axe"]
-    return pd.DataFrame(anomalies)[[c for c in cols if c in pd.DataFrame(anomalies).columns]]
+    df   = pd.DataFrame(anomalies)
+    return df[[c for c in cols if c in df.columns]]

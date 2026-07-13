@@ -160,11 +160,21 @@ def bc_badge(error_type: str) -> str:
     return '<span class="tag tag-plus" title="Détecté uniquement par notre outil">⭐ Plus</span>'
 
 
-def merge_results(axe_a: dict, axe_b: dict, axe_c: dict) -> dict:
+def merge_results(axe_a: dict, axe_b: dict, axe_c: dict, parse_result: dict = None) -> dict:
     merged     = {"by_sheet": {}, "all_anomalies": [], "ai_by_sheet": {}}
-    all_sheets = set()
+
+    # Toutes les sheets du fichier parsé — data + ref
+    all_sheets = []
+    if parse_result:
+        all_sheets = (
+            parse_result.get("data_tables", []) +
+            parse_result.get("ref_tables", [])
+        )
+    # Ajouter les sheets avec anomalies non couvertes
     for result in [axe_a, axe_b]:
-        all_sheets.update(result.get("by_sheet", {}).keys())
+        for sn in result.get("by_sheet", {}).keys():
+            if sn not in all_sheets:
+                all_sheets.append(sn)
 
     ai_map = {}
     if axe_c.get("available") and axe_c.get("by_sheet"):
@@ -596,7 +606,7 @@ with tab_main:
                         with st.spinner("🤖 Suggestions IA en cours..."):
                             axe_c = validate_file_axe_c(axe_a, axe_b, pr, api_key=api_key)
 
-                    merged = merge_results(axe_a, axe_b, axe_c)
+                    merged = merge_results(axe_a, axe_b, axe_c, parse_result=pr)
                     st.session_state.merged_result = merged
                     st.session_state.axe_c_result  = axe_c
 
