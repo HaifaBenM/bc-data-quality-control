@@ -244,55 +244,66 @@ def get_reference_values_by_table_id(
     ref_table_id: int,
     ref_field_id: int = 0,
 ) -> tuple[set[str], bool]:
-    """
-    Retourne (valid_codes, found) pour une table référencée.
-
-    Stratégie (dans l'ordre) :
-      1. Cache Supabase — (profile_code, company_id, entity_name)
-      2. Lazy load via extension AL tableValues — universel, toutes tables
-      3. Fallback BC API v2.0 — tables standard si refFieldId absent
-      4. set() vide + found=False — INFO "non vérifiable"
-    """
     if not ref_table_id:
         return set(), False
 
-    cache_key = _REF_TABLE_CACHE_KEYS.get(ref_table_id, f"table_{ref_table_id}")
+    cache_key   = _REF_TABLE_CACHE_KEYS.get(ref_table_id, f"table_{ref_table_id}")
+    entity_info = _TABLE_BC_ENTITY.get(ref_table_id)
 
+    # DEBUG — logguer chaque appel
+    import streamlit as st
+    if "axe_b_debug" not in st.session_state:
+        st.session_state["axe_b_debug"] = []
+    
     # 1. Cache Supabase
     if company_id:
         try:
             cached = get_reference_values(profile_code, company_id, cache_key)
             if cached:
+                st.session_state["axe_b_debug"].append(
+                    f"✅ Cache hit — table {ref_table_id} ({cache_key}) : {len(cached)} codes"
+                )
                 return set(str(c).strip() for c in cached if c), True
-        except Exception:
-            pass
+        except Exception as e:
+            st.session_state["axe_b_debug"].append(f"❌ Cache error table {ref_table_id}: {e}")
 
-    # 2. Lazy load via extension AL (universel)
+    # 2. Lazy load via AL
     if ref_field_id and profile_code and company_id:
         try:
-            codes = _fetch_via_al_extension(
-                profile_code, company_id, ref_table_id, ref_field_id
-            )
+            codes = _fetch_via_al_extension(profile_code, company_id, ref_table_id, ref_field_id)
             if codes:
                 _store_reference_cache(profile_code, company_id, cache_key, codes)
+                st.session_state["axe_b_debug"].append(
+                    f"✅ AL fetch — table {ref_table_id} : {len(codes)} codes"
+                )
                 return codes, True
-        except Exception:
-            pass
+            else:
+                st.session_state["axe_b_debug"].append(
+                    f"⚠️ AL fetch vide — table {ref_table_id} field {ref_field_id}"
+                )
+        except Exception as e:
+            st.session_state["axe_b_debug"].append(f"❌ AL error table {ref_table_id}: {e}")
 
-    # 3. Fallback BC API v2.0 (tables standard sans refFieldId)
-    entity_info = _TABLE_BC_ENTITY.get(ref_table_id)
+    # 3. Fallback BC API
     if entity_info and profile_code and company_id:
         try:
-            codes = _fetch_codes_from_bc_api(
-                profile_code, company_id, ref_table_id, entity_info
-            )
+            codes = _fetch_codes_from_bc_api(profile_code, company_id, ref_table_id, entity_info)
             if codes:
                 _store_reference_cache(profile_code, company_id, cache_key, codes)
+                st.session_state["axe_b_debug"].append(
+                    f"✅ BC API fallback — table {ref_table_id} : {len(codes)} codes"
+                )
                 return codes, True
-        except Exception:
-            pass
+            else:
+                st.session_state["axe_b_debug"].append(
+                    f"⚠️ BC API vide — table {ref_table_id}"
+                )
+        except Exception as e:
+            st.session_state["axe_b_debug"].append(f"❌ BC API error table {ref_table_id}: {e}")
 
-    # 4. Non vérifiable
+    st.session_state["axe_b_debug"].append(
+        f"❌ Non vérifiable — table {ref_table_id} (cache_key={cache_key}, ref_field_id={ref_field_id})"
+    )
     return set(), False
 
 

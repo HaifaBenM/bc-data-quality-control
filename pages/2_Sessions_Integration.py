@@ -639,7 +639,12 @@ with tab_main:
                 if d.get("sample"):
                     st.write("Sample AL:", d["sample"])
         # ── FIN DEBUG ─────────────────────────────────────────────────────────
-
+ # ── DEBUG AXE B ───────────────────────────────────────────────────
+        if "axe_b_debug" in st.session_state and st.session_state["axe_b_debug"]:
+            with st.expander("🔍 Debug Axe B"):
+                for msg in st.session_state["axe_b_debug"][:20]:
+                    st.write(msg)
+        # ── FIN DEBUG AXE B ───────────────────────────────────────────────
         total = cfg.get("total", 0)
         major = cfg.get("major", 0)
         minor = cfg.get("minor", 0)
