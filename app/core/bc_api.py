@@ -404,7 +404,32 @@ def get_package_fields_qc(
     resp = requests.get(url, headers=_headers(token), timeout=30)
     resp.raise_for_status()
     return resp.json().get("value", [])
-
+def get_table_values(
+    tenant_id:   str,
+    environment: str,
+    company_id:  str,
+    table_id:    int,
+    field_no:    int,
+    token:       str,
+) -> set[str]:
+    """
+    Retourne l'ensemble des codes valides pour (table_id, field_no)
+    via l'endpoint générique AL /tableValues (page 50106).
+    Champ BC : 'code' (Rec."Code Value").
+    Raises requests.HTTPError si l'appel échoue — laisse remonter
+    l'erreur réelle pour que l'appelant puisse la logger.
+    """
+    url = (
+        f"{_qc_base(tenant_id, environment, company_id)}/tableValues"
+        f"?$filter=tableId eq {table_id} and fieldNo eq {field_no}"
+    )
+    resp = requests.get(url, headers=_headers(token), timeout=30)
+    resp.raise_for_status()
+    values = resp.json().get("value", [])
+    return set(
+        str(v.get("code", "")).strip()
+        for v in values if v.get("code")
+    )
 
 def build_tables_data_for_export(
     tenant_id: str,
