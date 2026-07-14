@@ -8,10 +8,6 @@ from datetime import datetime, timezone, timedelta
 from app.db.supabase_client import get_supabase_client
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# CRUD CACHE
-# ══════════════════════════════════════════════════════════════════════════════
-
 def save_metadata(
     profile_code: str,
     company_id:   str,
@@ -181,7 +177,6 @@ def get_reference_values(
 # LOOKUP DYNAMIQUE — lazy load universel
 # ══════════════════════════════════════════════════════════════════════════════
 
-# Cache key Supabase par table ID — pour nommage cohérent
 _REF_TABLE_CACHE_KEYS: dict[int, str] = {
     3:    "paymentTerms",
     4:    "currencies",
@@ -212,8 +207,6 @@ _REF_TABLE_CACHE_KEYS: dict[int, str] = {
     6502: "itemTrackingCodes",
 }
 
-# Fallback BC API v2.0 pour tables standard
-# Utilisé uniquement si refFieldId absent (plan par défaut)
 _TABLE_BC_ENTITY: dict[int, tuple[str, str]] = {
     3:    ("paymentTerms",                 "code"),
     4:    ("currencies",                   "code"),
@@ -229,12 +222,12 @@ _TABLE_BC_ENTITY: dict[int, tuple[str, str]] = {
     91:   ("customerPostingGroups",        "code"),
     92:   ("vendorPostingGroups",          "code"),
     94:   ("inventoryPostingGroups",       "code"),
-    204:  ("unitsOfMeasure",              "code"),
-    251:  ("generalProductPostingGroups", "code"),
-    289:  ("paymentMethods",              "code"),
-    325:  ("vatProductPostingGroups",     "code"),
-    340:  ("itemDiscountGroups",          "code"),
-    5722: ("itemCategories",              "code"),
+    204:  ("unitsOfMeasure",               "code"),
+    251:  ("generalProductPostingGroups",  "code"),
+    289:  ("paymentMethods",               "code"),
+    325:  ("vatProductPostingGroups",      "code"),
+    340:  ("itemDiscountGroups",           "code"),
+    5722: ("itemCategories",               "code"),
 }
 
 
@@ -244,54 +237,74 @@ def get_reference_values_by_table_id(
     ref_table_id: int,
     ref_field_id: int = 0,
 ) -> tuple[set[str], bool]:
+    """
+    Retourne (valid_codes, found) pour une table référencée.
+
+    Stratégie :
+      1. Cache Supabase
+      2. Lazy load via AL tableValues — refFieldId ou fallback field 1
+      3. Fallback BC API v2.0
+      4. set() vide + found=False → INFO
+    """
     if not ref_table_id:
         return set(), False
 
     cache_key   = _REF_TABLE_CACHE_KEYS.get(ref_table_id, f"table_{ref_table_id}")
     entity_info = _TABLE_BC_ENTITY.get(ref_table_id)
 
-    # DEBUG — logguer chaque appel
+    # ── DEBUG ─────────────────────────────────────────────────────────────────
     import streamlit as st
     if "axe_b_debug" not in st.session_state:
         st.session_state["axe_b_debug"] = []
-    
+
     # 1. Cache Supabase
     if company_id:
         try:
             cached = get_reference_values(profile_code, company_id, cache_key)
             if cached:
                 st.session_state["axe_b_debug"].append(
-                    f"✅ Cache hit — table {ref_table_id} ({cache_key}) : {len(cached)} codes"
+                    f"✅ Cache — table {ref_table_id} ({cache_key}) : {len(cached)} codes"
                 )
                 return set(str(c).strip() for c in cached if c), True
         except Exception as e:
-            st.session_state["axe_b_debug"].append(f"❌ Cache error table {ref_table_id}: {e}")
+            st.session_state["axe_b_debug"].append(
+                f"❌ Cache error table {ref_table_id}: {e}"
+            )
 
-    # 2. Lazy load via AL
-    if ref_field_id and profile_code and company_id:
+    # 2. Lazy load via AL tableValues
+    # Si refFieldId=0 (GetRelationFieldId() a échoué), fallback sur field 1
+    # La PK BC standard est toujours au field 1 (Code ou N°)
+    _field_no = ref_field_id if ref_field_id > 0 else 1
+    if profile_code and company_id:
         try:
-            codes = _fetch_via_al_extension(profile_code, company_id, ref_table_id, ref_field_id)
+            codes = _fetch_via_al_extension(
+                profile_code, company_id, ref_table_id, _field_no
+            )
             if codes:
                 _store_reference_cache(profile_code, company_id, cache_key, codes)
                 st.session_state["axe_b_debug"].append(
-                    f"✅ AL fetch — table {ref_table_id} : {len(codes)} codes"
+                    f"✅ AL fetch — table {ref_table_id} field {_field_no} : {len(codes)} codes"
                 )
                 return codes, True
             else:
                 st.session_state["axe_b_debug"].append(
-                    f"⚠️ AL fetch vide — table {ref_table_id} field {ref_field_id}"
+                    f"⚠️ AL fetch vide — table {ref_table_id} field {_field_no}"
                 )
         except Exception as e:
-            st.session_state["axe_b_debug"].append(f"❌ AL error table {ref_table_id}: {e}")
+            st.session_state["axe_b_debug"].append(
+                f"❌ AL error table {ref_table_id}: {e}"
+            )
 
-    # 3. Fallback BC API
+    # 3. Fallback BC API v2.0
     if entity_info and profile_code and company_id:
         try:
-            codes = _fetch_codes_from_bc_api(profile_code, company_id, ref_table_id, entity_info)
+            codes = _fetch_codes_from_bc_api(
+                profile_code, company_id, ref_table_id, entity_info
+            )
             if codes:
                 _store_reference_cache(profile_code, company_id, cache_key, codes)
                 st.session_state["axe_b_debug"].append(
-                    f"✅ BC API fallback — table {ref_table_id} : {len(codes)} codes"
+                    f"✅ BC API — table {ref_table_id} : {len(codes)} codes"
                 )
                 return codes, True
             else:
@@ -299,10 +312,13 @@ def get_reference_values_by_table_id(
                     f"⚠️ BC API vide — table {ref_table_id}"
                 )
         except Exception as e:
-            st.session_state["axe_b_debug"].append(f"❌ BC API error table {ref_table_id}: {e}")
+            st.session_state["axe_b_debug"].append(
+                f"❌ BC API error table {ref_table_id}: {e}"
+            )
 
     st.session_state["axe_b_debug"].append(
-        f"❌ Non vérifiable — table {ref_table_id} (cache_key={cache_key}, ref_field_id={ref_field_id})"
+        f"❌ Non vérifiable — table {ref_table_id} "
+        f"(cache_key={cache_key}, ref_field_id={ref_field_id})"
     )
     return set(), False
 
@@ -313,7 +329,7 @@ def _fetch_via_al_extension(
     table_id:     int,
     field_no:     int,
 ) -> set[str]:
-    """Fetch via endpoint générique AL — couvre toutes les tables BC."""
+    """Fetch via endpoint générique AL tableValues — toutes tables BC."""
     try:
         from app.db.profiles_db import get_profile_by_code
         from app.core.bc_api import get_access_token, get_table_values
