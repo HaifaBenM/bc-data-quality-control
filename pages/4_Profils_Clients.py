@@ -58,21 +58,29 @@ def charger_metadata(code, tenant_id, client_id, client_secret, environment, com
     if meta["success"]:
         entities = meta["entities"]
         for i, (name, data) in enumerate(entities.items()):
-            pct = 10 + int((i / max(len(entities),1)) * 40)
+            pct = 10 + int((i / max(len(entities), 1)) * 40)
             progress.progress(pct, text=f"Entité : {name}")
-            ok, _ = save_metadata(code, name, "data", data.get("fields", []))
-            if ok: total += 1
+            ok, _ = save_metadata(
+                code, company_id, name, "data", data.get("fields", [])
+            )
+            if ok:
+                total += 1
 
     progress.progress(55, text="Chargement tables de référence...")
-    ref_data = load_all_reference_data(tenant_id, client_id, client_secret, environment, company_id)
+    ref_data = load_all_reference_data(
+        tenant_id, client_id, client_secret, environment, company_id
+    )
     for i, (path, info) in enumerate(ref_data.items()):
-        pct = 55 + int((i / max(len(ref_data),1)) * 40)
+        pct = 55 + int((i / max(len(ref_data), 1)) * 40)
         progress.progress(pct, text=f"Référence : {info['label']}")
-        ok, _ = save_reference_data(code, path, info["label"], info["data"], info["count"])
-        if ok: total += 1
+        ok, _ = save_reference_data(
+            code, company_id, path, info["label"], info["data"], info["count"]
+        )
+        if ok:
+            total += 1
 
     progress.progress(100, text="Terminé !")
-    cache = get_cache_summary(code)
+    cache = get_cache_summary(code, company_id)
     st.success(
         f"✅ Metadata chargée — "
         f"{cache['data']} entités · "
@@ -93,23 +101,31 @@ with tab1:
         st.markdown("---")
 
         for profile in profiles:
-            code   = profile.get("code","")
-            has_bc = bool(profile.get("bc_tenant_id") and profile.get("bc_client_id") and profile.get("bc_client_secret"))
-            cache  = get_cache_summary(code)
+            code   = profile.get("code", "")
+            has_bc = bool(
+                profile.get("bc_tenant_id")
+                and profile.get("bc_client_id")
+                and profile.get("bc_client_secret")
+            )
 
             col_info, col_actions = st.columns([7, 3])
             with col_info:
                 s_badge      = f'<span class="badge badge-sector">{profile.get("sector","")}</span>' if profile.get("sector") else ""
                 b_badge      = '<span class="badge badge-bc-ok">🔌 BC configuré</span>' if has_bc else '<span class="badge badge-bc-none">⚙️ BC non configuré</span>'
-                m_badge      = ""
-                company_name = profile.get("bc_company_name","")
-                bc_info      = f'<span style="font-size:11px;color:#94A3B8">{profile.get("bc_url","")}{" · "+profile.get("bc_environment","") if profile.get("bc_environment") else ""}{" · 🏢 "+company_name if company_name else ""}</span>' if profile.get("bc_url") else ""
+                company_name = profile.get("bc_company_name", "")
+                bc_info      = (
+                    f'<span style="font-size:11px;color:#94A3B8">'
+                    f'{profile.get("bc_url","")}'
+                    f'{" · " + profile.get("bc_environment","") if profile.get("bc_environment") else ""}'
+                    f'{" · 🏢 " + company_name if company_name else ""}'
+                    f'</span>'
+                ) if profile.get("bc_url") else ""
                 st.markdown(
                     f'<div class="profile-card">'
                     f'<p class="profile-name">{profile.get("name","")}</p>'
                     f'<p class="profile-code">Code : {code}</p>'
-                    f'<div style="margin-top:8px">{s_badge}{b_badge}{m_badge}</div>'
-                    f'{"<div style=margin-top:4px>"+bc_info+"</div>" if bc_info else ""}'
+                    f'<div style="margin-top:8px">{s_badge}{b_badge}</div>'
+                    f'{"<div style=margin-top:4px>" + bc_info + "</div>" if bc_info else ""}'
                     f'</div>',
                     unsafe_allow_html=True
                 )
@@ -119,9 +135,9 @@ with tab1:
                 c1, c2, c3 = st.columns(3)
                 with c2:
                     if st.button("✏️ Éditer", key=f"edit_{code}", use_container_width=True):
-                        st.session_state.edit_profile    = code
-                        st.session_state.bc_test_result  = {}
-                        st.session_state.companies_list  = {}
+                        st.session_state.edit_profile   = code
+                        st.session_state.bc_test_result = {}
+                        st.session_state.companies_list = {}
                 with c3:
                     if st.button("🗑️", key=f"del_{code}", use_container_width=True):
                         st.session_state.confirm_delete = code
@@ -134,32 +150,73 @@ with tab1:
                         e_name   = st.text_input("Nom client",   value=profile.get("name",""),   key=f"e_name_{code}")
                         e_sector = st.text_input("Secteur",       value=profile.get("sector",""), key=f"e_sector_{code}")
                         langs    = ["Français","Anglais","Arabe","Autre"]
-                        cur_lang = profile.get("data_language","Français")
-                        e_lang   = st.selectbox("Langue", langs, index=langs.index(cur_lang) if cur_lang in langs else 0, key=f"e_lang_{code}")
+                        cur_lang = profile.get("data_language", "Français")
+                        e_lang   = st.selectbox(
+                            "Langue", langs,
+                            index=langs.index(cur_lang) if cur_lang in langs else 0,
+                            key=f"e_lang_{code}"
+                        )
                     with ec2:
-                        e_url = st.text_input("URL BC",           value=profile.get("bc_url",""),         placeholder="https://abc.businesscentral.dynamics.com", key=f"e_url_{code}")
-                        e_env = st.text_input("Environnement BC", value=profile.get("bc_environment",""), placeholder="Production, Sandbox",                       key=f"e_env_{code}")
+                        e_url = st.text_input(
+                            "URL BC", value=profile.get("bc_url",""),
+                            placeholder="https://abc.businesscentral.dynamics.com",
+                            key=f"e_url_{code}"
+                        )
+                        e_env = st.text_input(
+                            "Environnement BC", value=profile.get("bc_environment",""),
+                            placeholder="Production, Sandbox",
+                            key=f"e_env_{code}"
+                        )
 
                     st.markdown('<div class="section-bc"><p class="section-bc-title">🔌 Credentials BC</p>', unsafe_allow_html=True)
                     st.caption("Ces 3 informations sont spécifiques à ce client.")
                     bc1, bc2, bc3 = st.columns(3)
-                    with bc1: e_tenant    = st.text_input("Tenant ID",     value=profile.get("bc_tenant_id",""),     placeholder="xxxx-xxxx-xxxx", type="password", key=f"e_tenant_{code}",  help="BC : Aide → Signaler un problème → ID abonné Entra")
-                    with bc2: e_client_id = st.text_input("Client ID",     value=profile.get("bc_client_id",""),     placeholder="xxxx-xxxx-xxxx", type="password", key=f"e_cid_{code}")
-                    with bc3: e_secret    = st.text_input("Client Secret", value=profile.get("bc_client_secret",""), placeholder="Valeur secret",  type="password", key=f"e_secret_{code}")
+                    with bc1:
+                        e_tenant = st.text_input(
+                            "Tenant ID", value=profile.get("bc_tenant_id",""),
+                            placeholder="xxxx-xxxx-xxxx", type="password",
+                            key=f"e_tenant_{code}",
+                            help="BC : Aide → Signaler un problème → ID abonné Entra"
+                        )
+                    with bc2:
+                        e_client_id = st.text_input(
+                            "Client ID", value=profile.get("bc_client_id",""),
+                            placeholder="xxxx-xxxx-xxxx", type="password",
+                            key=f"e_cid_{code}"
+                        )
+                    with bc3:
+                        e_secret = st.text_input(
+                            "Client Secret", value=profile.get("bc_client_secret",""),
+                            placeholder="Valeur secret", type="password",
+                            key=f"e_secret_{code}"
+                        )
 
                     col_test, col_result = st.columns([2, 5])
                     with col_test:
                         if st.button("🔌 Tester la connexion", key=f"test_{code}", use_container_width=True):
-                            missing = [f for f,v in [("Tenant ID",e_tenant),("Client ID",e_client_id),("Secret",e_secret)] if not str(v or "").strip()]
+                            missing = [
+                                f for f, v in [
+                                    ("Tenant ID", e_tenant),
+                                    ("Client ID", e_client_id),
+                                    ("Secret",    e_secret),
+                                ]
+                                if not str(v or "").strip()
+                            ]
                             if missing:
                                 st.session_state.bc_test_result[code] = (False, f"Manquants : {', '.join(missing)}")
-                                st.session_state.companies_list[code] = []
+                                st.session_state.companies_list[code]  = []
                             else:
                                 with st.spinner("Test..."):
-                                    ok_t, msg_t = test_bc_connection(str(e_tenant).strip(), str(e_client_id).strip(), str(e_secret).strip(), str(e_env or "").strip())
+                                    ok_t, msg_t = test_bc_connection(
+                                        str(e_tenant).strip(), str(e_client_id).strip(),
+                                        str(e_secret).strip(), str(e_env or "").strip()
+                                    )
                                 st.session_state.bc_test_result[code] = (ok_t, msg_t)
                                 if ok_t:
-                                    st.session_state.companies_list[code] = get_bc_companies(str(e_tenant).strip(), str(e_client_id).strip(), str(e_secret).strip(), str(e_env or "").strip())
+                                    st.session_state.companies_list[code] = get_bc_companies(
+                                        str(e_tenant).strip(), str(e_client_id).strip(),
+                                        str(e_secret).strip(), str(e_env or "").strip()
+                                    )
                             st.rerun()
                     with col_result:
                         res = st.session_state.bc_test_result.get(code)
@@ -167,9 +224,10 @@ with tab1:
                             if res[0]: st.success(f"✅ {res[1]}")
                             else:      st.error(f"❌ {res[1]}")
 
+                    # Sélection société
                     companies        = st.session_state.companies_list.get(code, [])
-                    sel_company_name = profile.get("bc_company_name","")
-                    sel_company_id   = profile.get("bc_company_id","")
+                    sel_company_name = profile.get("bc_company_name", "")
+                    sel_company_id   = profile.get("bc_company_id",   "")
 
                     if companies:
                         st.markdown("---")
@@ -178,12 +236,15 @@ with tab1:
                         names            = list(company_map.keys())
                         default_idx      = names.index(sel_company_name) if sel_company_name in names else 0
                         sel_company_name = st.selectbox("Société BC", names, index=default_idx, key=f"csel_{code}")
-                        sel_company_id   = company_map.get(sel_company_name,"")
+                        sel_company_id   = company_map.get(sel_company_name, "")
                     elif sel_company_name:
                         st.info(f"🏢 Société actuelle : **{sel_company_name}** — Testez la connexion pour changer.")
 
                     st.markdown("</div>", unsafe_allow_html=True)
-                    e_notes = st.text_area("Notes", value=profile.get("notes",""), height=68, key=f"e_notes_{code}")
+                    e_notes = st.text_area(
+                        "Notes", value=profile.get("notes",""),
+                        height=68, key=f"e_notes_{code}"
+                    )
 
                     cs, cc, cm, _ = st.columns([2, 2, 3, 3])
                     with cs:
@@ -216,18 +277,33 @@ with tab1:
                             st.session_state.companies_list = {}
                             st.rerun()
                     with cm:
-                        can_load = bool(str(e_tenant or "").strip() and str(e_client_id or "").strip() and str(e_secret or "").strip() and sel_company_id)
-                        if st.button("📋 Charger metadata BC", key=f"meta_{code}", use_container_width=True, disabled=not can_load, help="Lit les champs et tables de référence depuis BC"):
-                            charger_metadata(code, str(e_tenant).strip(), str(e_client_id).strip(), str(e_secret).strip(), str(e_env or "").strip(), sel_company_id)
+                        can_load = bool(
+                            str(e_tenant or "").strip()
+                            and str(e_client_id or "").strip()
+                            and str(e_secret or "").strip()
+                            and sel_company_id
+                        )
+                        if st.button(
+                            "📋 Charger metadata BC", key=f"meta_{code}",
+                            use_container_width=True, disabled=not can_load,
+                            help="Lit les champs et tables de référence depuis BC"
+                        ):
+                            charger_metadata(
+                                code,
+                                str(e_tenant).strip(), str(e_client_id).strip(),
+                                str(e_secret).strip(), str(e_env or "").strip(),
+                                sel_company_id
+                            )
 
-                    cache_now = get_cache_summary(code)
+                    # Statut cache — cloisonné par company_id
+                    cache_now = get_cache_summary(code, sel_company_id)
                     if cache_now["total"] > 0:
                         col_cs, col_cb, _ = st.columns([3, 2, 5])
                         with col_cs:
                             st.success(f"✅ Metadata BC chargée — {cache_now['last_update']}")
                         with col_cb:
                             if st.button("🗑️ Vider le cache", key=f"clear_meta_{code}"):
-                                ok, _ = delete_cache(code)
+                                ok, _ = delete_cache(code, sel_company_id)
                                 if ok: st.rerun()
 
             if st.session_state.confirm_delete == code:
@@ -255,31 +331,45 @@ with tab2:
     st.markdown("### Créer un nouveau profil client")
     nc1, nc2 = st.columns(2)
     with nc1:
-        new_code   = st.text_input("Code client *", placeholder="CLT-ABC-001", key="new_code")
+        new_code   = st.text_input("Code client *", placeholder="CLT-ABC-001",          key="new_code")
         new_name   = st.text_input("Nom client *",  placeholder="ABC Distribution SARL", key="new_name")
-        new_sector = st.text_input("Secteur",        placeholder="Distribution B2B", key="new_sector")
-        new_lang   = st.selectbox("Langue", ["Français","Anglais","Arabe","Autre"], key="new_lang")
+        new_sector = st.text_input("Secteur",        placeholder="Distribution B2B",      key="new_sector")
+        new_lang   = st.selectbox("Langue", ["Français","Anglais","Arabe","Autre"],       key="new_lang")
     with nc2:
-        new_url   = st.text_input("URL BC",           placeholder="https://abc.businesscentral.dynamics.com", key="new_url")
+        new_url   = st.text_input(
+            "URL BC", placeholder="https://abc.businesscentral.dynamics.com", key="new_url"
+        )
         new_env   = st.text_input("Environnement BC", placeholder="Production, Sandbox", key="new_env")
         new_notes = st.text_area("Notes", height=68, key="new_notes")
 
     st.markdown("---")
     st.markdown('<div class="section-bc"><p class="section-bc-title">🔌 Credentials BC (optionnel)</p>', unsafe_allow_html=True)
     nb1, nb2, nb3 = st.columns(3)
-    with nb1: new_tenant    = st.text_input("Tenant ID",     placeholder="xxxx-xxxx", type="password", key="new_tenant",    help="BC : Aide → Signaler un problème")
-    with nb2: new_client_id = st.text_input("Client ID",     placeholder="xxxx-xxxx", type="password", key="new_client_id")
-    with nb3: new_secret    = st.text_input("Client Secret", placeholder="Valeur",    type="password", key="new_secret")
+    with nb1:
+        new_tenant = st.text_input(
+            "Tenant ID", placeholder="xxxx-xxxx", type="password",
+            key="new_tenant", help="BC : Aide → Signaler un problème"
+        )
+    with nb2:
+        new_client_id = st.text_input("Client ID", placeholder="xxxx-xxxx", type="password", key="new_client_id")
+    with nb3:
+        new_secret = st.text_input("Client Secret", placeholder="Valeur", type="password", key="new_secret")
 
     ct, cr = st.columns([2, 5])
     with ct:
         if st.button("🔌 Tester", key="test_new", use_container_width=True):
-            missing = [f for f,v in [("Tenant",new_tenant),("Client ID",new_client_id),("Secret",new_secret)] if not str(v or "").strip()]
+            missing = [
+                f for f, v in [("Tenant", new_tenant), ("Client ID", new_client_id), ("Secret", new_secret)]
+                if not str(v or "").strip()
+            ]
             if missing:
                 st.session_state.bc_test_result["new"] = (False, f"Manquants : {', '.join(missing)}")
             else:
                 with st.spinner("Test..."):
-                    ok_t, msg_t = test_bc_connection(str(new_tenant).strip(), str(new_client_id).strip(), str(new_secret).strip(), str(new_env or "").strip())
+                    ok_t, msg_t = test_bc_connection(
+                        str(new_tenant).strip(), str(new_client_id).strip(),
+                        str(new_secret).strip(), str(new_env or "").strip()
+                    )
                 st.session_state.bc_test_result["new"] = (ok_t, msg_t)
             st.rerun()
     with cr:
@@ -294,9 +384,9 @@ with tab2:
         errors = []
         if not new_code or not new_code.strip(): errors.append("Code obligatoire.")
         if not new_name or not new_name.strip(): errors.append("Nom obligatoire.")
-        if errors:
-            for e in errors: st.error(e)
-        else:
+        for e in errors:
+            st.error(e)
+        if not errors:
             ok, err = create_profile({
                 "code":             new_code.strip().upper(),
                 "name":             new_name.strip(),
@@ -337,7 +427,7 @@ with tab3:
                 "Rôle":          u.get("role", ""),
                 "Profil client": u.get("profile_code", "") or "—",
                 "Actif":         "✅" if u.get("active", True) else "❌",
-                "Créé le":       (u.get("created_at", "")[:10] if u.get("created_at") else ""),
+                "Créé le":       u.get("created_at", "")[:10] if u.get("created_at") else "",
             }
             for u in all_users
         ]
@@ -351,9 +441,9 @@ with tab3:
 
     u1, u2 = st.columns(2)
     with u1:
-        new_username = st.text_input("Username *",                    placeholder="aquachiara", key="u_username")
-        new_pwd      = st.text_input("Mot de passe *",                type="password",           key="u_pwd")
-        new_pwd_conf = st.text_input("Confirmer le mot de passe *",   type="password",           key="u_pwd2")
+        new_username = st.text_input("Username *",                  placeholder="aquachiara", key="u_username")
+        new_pwd      = st.text_input("Mot de passe *",              type="password",           key="u_pwd")
+        new_pwd_conf = st.text_input("Confirmer le mot de passe *", type="password",           key="u_pwd2")
     with u2:
         new_display = st.text_input("Nom affiché *", placeholder="Aquachiara", key="u_display")
         new_role    = st.radio("Rôle", ["client", "consultant"], horizontal=True, key="u_role")
