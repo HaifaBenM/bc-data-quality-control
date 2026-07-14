@@ -341,6 +341,14 @@ def _fetch_via_al_extension(
             return set(), "credentials incomplets"
 
         token = get_access_token(tid, cid, cs)
+
+        # DEBUG TEMPORAIRE — trace les paramètres réels envoyés à l'endpoint AL
+        st.session_state.setdefault("axe_b_debug", []).append(
+            f"🔎 Appel réel — tid={tid[:8]}... env={env} "
+            f"company_id={company_id} table={table_id} field={field_no} "
+            f"profile_code={profile_code}"
+        )
+
         result = get_table_values(tid, env, company_id, table_id, field_no, token)
         return result, None
     except Exception as e:
