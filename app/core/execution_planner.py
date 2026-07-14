@@ -121,7 +121,7 @@ def build_default_plan(package_code: str = "") -> ExecutionPlan:
 
 
 def _build_field_meta(table_id: int, pf: dict) -> FieldMeta | None:
-    field_name = pf.get("fieldName", "") or pf.get("fieldInternalName", "")
+    field_name = pf.get("fieldCaption", "") or pf.get("fieldInternalName", "")
     if not field_name:
         return None
 
@@ -190,7 +190,7 @@ def build_plan_from_bc(
                 _debug_sample = [
                     {
                         "table":      tid,
-                        "field":      pf.get("fieldName", ""),
+                        "field":      pf.get("fieldCaption", ""),
                         "refTableId": pf.get("refTableId"),
                         "refFieldId": pf.get("refFieldId"),
                         "fieldType":  pf.get("fieldType"),
@@ -200,18 +200,18 @@ def build_plan_from_bc(
             # ── FIN DEBUG ─────────────────────────────────────────────────────
 
             plan.fields[tid] = {
-                pf.get("fieldName", ""): bool(pf.get("validateField", True))
-                for pf in pkg_fields if pf.get("fieldName")
+                pf.get("fieldCaption", ""): bool(pf.get("validateField", True))
+                for pf in pkg_fields if pf.get("fieldCaption")
             }
 
             plan.fields_ref[tid] = {
-                pf.get("fieldName", ""): int(pf.get("refTableId") or 0)
-                for pf in pkg_fields if pf.get("fieldName")
+                pf.get("fieldCaption", ""): int(pf.get("refTableId") or 0)
+                for pf in pkg_fields if pf.get("fieldCaption")
             }
 
             plan.fields_ref_field[tid] = {
-                pf.get("fieldName", ""): int(pf.get("refFieldId") or 0)
-                for pf in pkg_fields if pf.get("fieldName")
+                pf.get("fieldCaption", ""): int(pf.get("refFieldId") or 0)
+                for pf in pkg_fields if pf.get("fieldCaption")
             }
 
             meta_map: dict[str, FieldMeta] = {}
