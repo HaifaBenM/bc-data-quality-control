@@ -195,7 +195,7 @@ def build_plan_from_bc(
                         "refFieldId": pf.get("refFieldId"),
                         "fieldType":  pf.get("fieldType"),
                     }
-                    for pf in pkg_fields[:5]
+                   for pf in pkg_fields if pf.get("fieldCaption") in ("Code pays/région", "Code emplacement par défaut") or tid != 14
                 ]
             # ── FIN DEBUG ─────────────────────────────────────────────────────
 
