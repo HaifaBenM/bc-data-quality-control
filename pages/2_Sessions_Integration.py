@@ -601,7 +601,7 @@ with tab_main:
                             _tid_int = int(_meta.get("table_id", ""))
                         except (ValueError, TypeError):
                             continue
-                        if _tid_int != 7354:
+                        if _tid_int != 14:
                             continue
                         _plan_keys  = set(_exec_plan.fields_ref.get(_tid_int, {}).keys())
                         _excel_cols = set(pr["sheets"].get(_sn, pd.DataFrame()).columns)
@@ -670,7 +670,7 @@ with tab_main:
         # ── FIN DEBUG AXE B ───────────────────────────────────────────────
          # ── DEBUG NOMS DE COLONNES ────────────────────────────────────────
         if st.session_state.get("_debug_cols"):
-            with st.expander("🔍 Debug noms de colonnes (table 7354)"):
+            with st.expander("🔍 Debug noms de colonnes (table 14)"):
                 for d in st.session_state["_debug_cols"]:
                     st.write(f"**Onglet : {d['sheet']} (table {d['table_id']})**")
                     st.write("Clés execution_plan (AL) :", d["plan_keys"])
