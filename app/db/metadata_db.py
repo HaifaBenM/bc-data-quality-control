@@ -270,6 +270,12 @@ def get_reference_values_by_table_id(
                 f"❌ Cache error table {ref_table_id}: {e}"
             )
 
+    # Trace si au moins UN appel a techniquement réussi (HTTP 200 / pas d'exception),
+    # même si le résultat est vide. Ça distingue "table vide" (found=True, valider
+    # quand même — toute valeur non vide devient une anomalie) de "source inaccessible"
+    # (found=False — vraiment non vérifiable, pas de faux positifs).
+    source_reachable = False
+
     # 2. Lazy load via AL tableValues
     _field_no = ref_field_id if ref_field_id > 0 else 1
     if profile_code and company_id:
@@ -287,6 +293,7 @@ def get_reference_values_by_table_id(
                 f"❌ AL error table {ref_table_id} field {_field_no}: {al_error}"
             )
         else:
+            source_reachable = True
             st.session_state["axe_b_debug"].append(
                 f"⚠️ AL fetch vide (0 résultat, sans erreur) — table {ref_table_id} field {_field_no}"
             )
@@ -304,6 +311,7 @@ def get_reference_values_by_table_id(
                 )
                 return codes, True
             else:
+                source_reachable = True
                 st.session_state["axe_b_debug"].append(
                     f"⚠️ BC API vide — table {ref_table_id}"
                 )
@@ -311,6 +319,17 @@ def get_reference_values_by_table_id(
             st.session_state["axe_b_debug"].append(
                 f"❌ BC API error table {ref_table_id}: {e}"
             )
+
+    if source_reachable:
+        # Table interrogée avec succès mais réellement vide côté BC (société de test
+        # non peuplée, par ex.) → found=True avec 0 codes valides. Le validateur
+        # traitera alors toute valeur non vide dans ce champ comme une anomalie,
+        # exactement comme le ferait BC nativement sur une relation vers table vide.
+        st.session_state["axe_b_debug"].append(
+            f"✅ Table {ref_table_id} vide (confirmé) — toute valeur non vide sera invalide"
+        )
+        _store_reference_cache(profile_code, company_id, cache_key, set())
+        return set(), True
 
     st.session_state["axe_b_debug"].append(
         f"❌ Non vérifiable — table {ref_table_id} "
@@ -340,15 +359,7 @@ def _fetch_via_al_extension(
         if not all([tid, cid, cs, env, company_id]):
             return set(), "credentials incomplets"
 
-        token = get_access_token(tid, cid, cs)
-
-        # DEBUG TEMPORAIRE — trace les paramètres réels envoyés à l'endpoint AL
-        st.session_state.setdefault("axe_b_debug", []).append(
-            f"🔎 Appel réel — tid={tid[:8]}... env={env} "
-            f"company_id={company_id} table={table_id} field={field_no} "
-            f"profile_code={profile_code}"
-        )
-
+        token  = get_access_token(tid, cid, cs)
         result = get_table_values(tid, env, company_id, table_id, field_no, token)
         return result, None
     except Exception as e:
@@ -361,43 +372,45 @@ def _fetch_codes_from_bc_api(
     ref_table_id: int,
     entity_info:  tuple[str, str],
 ) -> set[str]:
-    """Fetch via BC API v2.0 standard — fallback tables connues."""
-    try:
-        from app.db.profiles_db import get_profile_by_code
-        from app.core.bc_api import get_access_token
-        import requests as _req
+    """
+    Fetch via BC API v2.0 standard — fallback tables connues.
+    Ne catch plus les exceptions ici : elles remontent à l'appelant
+    (get_reference_values_by_table_id) qui doit distinguer un échec
+    technique réel d'un résultat vide légitime.
+    """
+    from app.db.profiles_db import get_profile_by_code
+    from app.core.bc_api import get_access_token
+    import requests as _req
 
-        p = get_profile_by_code(profile_code)
-        if not p:
-            return set()
+    p = get_profile_by_code(profile_code)
+    if not p:
+        raise ValueError("profil introuvable")
 
-        tid = p.get("bc_tenant_id",    "").strip()
-        cid = p.get("bc_client_id",    "").strip()
-        cs  = p.get("bc_client_secret","").strip()
-        env = p.get("bc_environment",  "").strip()
-        if not all([tid, cid, cs, env, company_id]):
-            return set()
+    tid = p.get("bc_tenant_id",    "").strip()
+    cid = p.get("bc_client_id",    "").strip()
+    cs  = p.get("bc_client_secret","").strip()
+    env = p.get("bc_environment",  "").strip()
+    if not all([tid, cid, cs, env, company_id]):
+        raise ValueError("credentials incomplets")
 
-        token          = get_access_token(tid, cid, cs)
-        entity, code_f = entity_info
-        url = (
-            f"https://api.businesscentral.dynamics.com/v2.0/{tid}/{env}"
-            f"/api/v2.0/companies({company_id})/{entity}"
-            f"?$select={code_f}&$top=5000"
-        )
-        resp = _req.get(
-            url,
-            headers={"Authorization": f"Bearer {token}"},
-            timeout=20,
-        )
-        resp.raise_for_status()
-        values = resp.json().get("value", [])
-        return set(
-            str(v.get(code_f, "")).strip()
-            for v in values if v.get(code_f)
-        )
-    except Exception:
-        return set()
+    token          = get_access_token(tid, cid, cs)
+    entity, code_f = entity_info
+    url = (
+        f"https://api.businesscentral.dynamics.com/v2.0/{tid}/{env}"
+        f"/api/v2.0/companies({company_id})/{entity}"
+        f"?$select={code_f}&$top=5000"
+    )
+    resp = _req.get(
+        url,
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=20,
+    )
+    resp.raise_for_status()
+    values = resp.json().get("value", [])
+    return set(
+        str(v.get(code_f, "")).strip()
+        for v in values if v.get(code_f)
+    )
 
 
 def _store_reference_cache(
