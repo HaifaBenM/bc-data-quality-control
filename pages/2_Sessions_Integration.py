@@ -593,7 +593,26 @@ with tab_main:
                             metadata_loader = _meta_loader,
                             execution_plan  = _exec_plan,
                         )
+  # ── DEBUG noms de colonnes ────────────────────────────────
+                    st.write("### 🔍 Debug noms de colonnes")
+                    for _sn in pr.get("data_tables", []) + pr.get("ref_tables", []):
+                        _meta = pr.get("metadata", {}).get(_sn, {})
+                        try:
+                            _tid_int = int(_meta.get("table_id", ""))
+                        except (ValueError, TypeError):
+                            continue
+                        if _tid_int != 7354:
+                            continue
+                        _plan_keys  = set(_exec_plan.fields_ref.get(_tid_int, {}).keys())
+                        _excel_cols = set(pr["sheets"].get(_sn, pd.DataFrame()).columns)
+                        st.write(f"**Onglet : {_sn} (table {_tid_int})**")
+                        st.write("Clés execution_plan (AL) :", sorted(_plan_keys))
+                        st.write("Colonnes Excel (fichier) :", sorted(_excel_cols))
+                        st.write("Dans Excel mais PAS dans le plan AL :", sorted(_excel_cols - _plan_keys))
+                        st.write("Dans le plan AL mais PAS dans Excel :", sorted(_plan_keys - _excel_cols))
+                    # ── FIN DEBUG ──────────────────────────────────────────────
 
+                    axe_c = {"available": False, "total_suggestions": 0, "auto_corrected": 0, "by_sheet": {}}
                     axe_c = {"available": False, "total_suggestions": 0, "auto_corrected": 0, "by_sheet": {}}
                     if api_key:
                         with st.spinner("🤖 Suggestions IA en cours..."):
