@@ -4,6 +4,7 @@ Cache cloisonné par (profile_code, company_id, entity_name).
 TTL : 24 heures. Lazy load automatique depuis BC API si cache absent.
 """
 import json
+import streamlit as st
 from datetime import datetime, timezone, timedelta
 from app.db.supabase_client import get_supabase_client
 
@@ -252,8 +253,6 @@ def get_reference_values_by_table_id(
     cache_key   = _REF_TABLE_CACHE_KEYS.get(ref_table_id, f"table_{ref_table_id}")
     entity_info = _TABLE_BC_ENTITY.get(ref_table_id)
 
-    # ── DEBUG ─────────────────────────────────────────────────────────────────
-    import streamlit as st
     if "axe_b_debug" not in st.session_state:
         st.session_state["axe_b_debug"] = []
 
@@ -272,27 +271,24 @@ def get_reference_values_by_table_id(
             )
 
     # 2. Lazy load via AL tableValues
-    # Si refFieldId=0 (GetRelationFieldId() a échoué), fallback sur field 1
-    # La PK BC standard est toujours au field 1 (Code ou N°)
     _field_no = ref_field_id if ref_field_id > 0 else 1
     if profile_code and company_id:
-        try:
-            codes = _fetch_via_al_extension(
-                profile_code, company_id, ref_table_id, _field_no
-            )
-            if codes:
-                _store_reference_cache(profile_code, company_id, cache_key, codes)
-                st.session_state["axe_b_debug"].append(
-                    f"✅ AL fetch — table {ref_table_id} field {_field_no} : {len(codes)} codes"
-                )
-                return codes, True
-            else:
-                st.session_state["axe_b_debug"].append(
-                    f"⚠️ AL fetch vide — table {ref_table_id} field {_field_no}"
-                )
-        except Exception as e:
+        codes, al_error = _fetch_via_al_extension(
+            profile_code, company_id, ref_table_id, _field_no
+        )
+        if codes:
+            _store_reference_cache(profile_code, company_id, cache_key, codes)
             st.session_state["axe_b_debug"].append(
-                f"❌ AL error table {ref_table_id}: {e}"
+                f"✅ AL fetch — table {ref_table_id} field {_field_no} : {len(codes)} codes"
+            )
+            return codes, True
+        elif al_error:
+            st.session_state["axe_b_debug"].append(
+                f"❌ AL error table {ref_table_id} field {_field_no}: {al_error}"
+            )
+        else:
+            st.session_state["axe_b_debug"].append(
+                f"⚠️ AL fetch vide (0 résultat, sans erreur) — table {ref_table_id} field {_field_no}"
             )
 
     # 3. Fallback BC API v2.0
@@ -322,33 +318,33 @@ def get_reference_values_by_table_id(
     )
     return set(), False
 
-
 def _fetch_via_al_extension(
     profile_code: str,
     company_id:   str,
     table_id:     int,
     field_no:     int,
-) -> set[str]:
-    """Fetch via endpoint générique AL tableValues — toutes tables BC."""
+) -> tuple[set[str], str | None]:
+    """Fetch via endpoint générique AL tableValues. Retourne (values, error_msg)."""
     try:
         from app.db.profiles_db import get_profile_by_code
         from app.core.bc_api import get_access_token, get_table_values
 
         p = get_profile_by_code(profile_code)
         if not p:
-            return set()
+            return set(), "profil introuvable"
 
         tid = p.get("bc_tenant_id",    "").strip()
         cid = p.get("bc_client_id",    "").strip()
         cs  = p.get("bc_client_secret","").strip()
         env = p.get("bc_environment",  "").strip()
         if not all([tid, cid, cs, env, company_id]):
-            return set()
+            return set(), "credentials incomplets"
 
         token = get_access_token(tid, cid, cs)
-        return get_table_values(tid, env, company_id, table_id, field_no, token)
-    except Exception:
-        return set()
+        result = get_table_values(tid, env, company_id, table_id, field_no, token)
+        return result, None
+    except Exception as e:
+        return set(), f"{type(e).__name__} — {str(e)}"
 
 
 def _fetch_codes_from_bc_api(
