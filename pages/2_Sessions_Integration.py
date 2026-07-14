@@ -593,8 +593,8 @@ with tab_main:
                             metadata_loader = _meta_loader,
                             execution_plan  = _exec_plan,
                         )
-  # ── DEBUG noms de colonnes ────────────────────────────────
-                    st.write("### 🔍 Debug noms de colonnes")
+  # ── DEBUG noms # ── DEBUG noms de colonnes ────────────────────────────────
+                    _debug_cols = []
                     for _sn in pr.get("data_tables", []) + pr.get("ref_tables", []):
                         _meta = pr.get("metadata", {}).get(_sn, {})
                         try:
@@ -605,11 +605,15 @@ with tab_main:
                             continue
                         _plan_keys  = set(_exec_plan.fields_ref.get(_tid_int, {}).keys())
                         _excel_cols = set(pr["sheets"].get(_sn, pd.DataFrame()).columns)
-                        st.write(f"**Onglet : {_sn} (table {_tid_int})**")
-                        st.write("Clés execution_plan (AL) :", sorted(_plan_keys))
-                        st.write("Colonnes Excel (fichier) :", sorted(_excel_cols))
-                        st.write("Dans Excel mais PAS dans le plan AL :", sorted(_excel_cols - _plan_keys))
-                        st.write("Dans le plan AL mais PAS dans Excel :", sorted(_plan_keys - _excel_cols))
+                        _debug_cols.append({
+                            "sheet":        _sn,
+                            "table_id":     _tid_int,
+                            "plan_keys":    sorted(_plan_keys),
+                            "excel_cols":   sorted(_excel_cols),
+                            "only_excel":   sorted(_excel_cols - _plan_keys),
+                            "only_plan":    sorted(_plan_keys - _excel_cols),
+                        })
+                    st.session_state["_debug_cols"] = _debug_cols
                     # ── FIN DEBUG ──────────────────────────────────────────────
 
                     axe_c = {"available": False, "total_suggestions": 0, "auto_corrected": 0, "by_sheet": {}}
@@ -664,6 +668,16 @@ with tab_main:
                 for msg in st.session_state["axe_b_debug"][:20]:
                     st.write(msg)
         # ── FIN DEBUG AXE B ───────────────────────────────────────────────
+         # ── DEBUG NOMS DE COLONNES ────────────────────────────────────────
+        if st.session_state.get("_debug_cols"):
+            with st.expander("🔍 Debug noms de colonnes (table 7354)"):
+                for d in st.session_state["_debug_cols"]:
+                    st.write(f"**Onglet : {d['sheet']} (table {d['table_id']})**")
+                    st.write("Clés execution_plan (AL) :", d["plan_keys"])
+                    st.write("Colonnes Excel (fichier) :", d["excel_cols"])
+                    st.write("Dans Excel mais PAS dans le plan AL :", d["only_excel"])
+                    st.write("Dans le plan AL mais PAS dans Excel :", d["only_plan"])
+        # ── FIN DEBUG NOMS DE COLONNES ────────────────────────────────────
         total = cfg.get("total", 0)
         major = cfg.get("major", 0)
         minor = cfg.get("minor", 0)
