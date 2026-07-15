@@ -9,13 +9,19 @@ _AL_TYPE_MAP: dict[str, str] = {
     "Decimal":   "Decimal",
     "Boolean":   "Boolean",
     "Date":      "Date",
-    "Time":      "Text",
-    "DateTime":  "Text",
+    # Time/DateTime/GUID : FldRef.Length() renvoie une taille de stockage
+    # binaire AL (4/8/16), pas un nombre de caractères. Les mapper vers "Text"
+    # déclenchait à tort le check de longueur Axe A (ex: GUID 38 car. > "max"
+    # 16 alors que BC lui-même ne signale aucune erreur sur ces champs).
+    # Type distinct volontaire pour ne matcher ni le check longueur
+    # (py_type in ("Text", None)) ni aucun des elif de validation de type.
+    "Time":      "Time",
+    "DateTime":  "DateTime",
+    "GUID":      "Guid",
     "Option":    "Option",
     "BigInteger":"Integer",
     "Blob":      None,
     "RecordID":  None,
-    "GUID":      "Text",
 }
 
 _OPTION_VALUES: dict[str, dict[str, list[str]]] = {
@@ -40,8 +46,15 @@ _OPTION_VALUES: dict[str, dict[str, list[str]]] = {
 _REQUIRED_FIELDS: dict[str, list[str]] = {
     "18": ["N°", "Nom", "Groupe compta. client", "Groupe compta. marché"],
     "23": ["N°", "Nom", "Groupe compta. fournisseur", "Groupe compta. marché"],
+    # "Crédit carbone par unité" ajouté suite à comparaison avec erreurs BC réelles
+    # (PKG003-Stock) : BC lève systématiquement "Crédit GHG doit avoir une valeur...
+    # Il ne peut pas être vide ou nul" sur tous les articles testés. À confirmer si
+    # c'est un Mandatory standard du champ ou une validation custom (OnInsert/OnValidate) —
+    # si custom, ce n'est pas structurellement garanti que ce soit TOUJOURS requis
+    # pour tous les articles (ex: Type = Service pourrait ne pas l'exiger).
     "27": ["N°", "Description", "Unité de mesure de base",
-           "Groupe compta. stock", "Groupe compta. produit"],
+           "Groupe compta. stock", "Groupe compta. produit",
+           "Crédit carbone par unité"],
     "15": ["N°", "Nom", "Type compte"],
     "3":  ["Code"],
     "4":  ["Code"],
