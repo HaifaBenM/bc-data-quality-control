@@ -136,7 +136,14 @@ def validate_axe_a(
 
             # 3. Longueur maximale
             if fm:
-                if fm.max_length and fm.py_type in ("Text", None) and len(str_val) > fm.max_length:
+                # py_type == "Text" uniquement : un type AL non reconnu par
+                # _AL_TYPE_MAP (ex: MediaSet pour Image) retombe sur py_type=None
+                # via dict.get() — l'inclure ici (ancien check : py_type in
+                # ("Text", None)) appliquait à tort fieldLength (parfois une
+                # taille de stockage binaire, pas un nb de caractères) à des
+                # champs qui n'ont rien à voir avec du texte (ex: Image → 38
+                # car. > "max" 16 alors que BC ne signale rien sur ce champ).
+                if fm.max_length and fm.py_type == "Text" and len(str_val) > fm.max_length:
                     anomalies.append(_anomaly(
                         line=line_num, field=col, value=str_val, sheet=sheet_name,
                         error_type="Longueur maximale dépassée", severity="Majeure",
