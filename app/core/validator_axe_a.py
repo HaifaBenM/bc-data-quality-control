@@ -57,8 +57,18 @@ def _validate_email(v: str) -> bool:
     return bool(re.match(r"^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$", v))
 
 def _infer_type(col: str) -> str | None:
-    """Heuristique minimale — uniquement Date et Email."""
+    """Heuristique minimale — uniquement Date/DateTime et Email. Utilisée
+    seulement quand le champ n'est pas dans les métadonnées AL (champ
+    système non exposé par PageAPI.PackageFields, ex: SystemModifiedAt)."""
     c = col.lower()
+    # "Date-heure ..." / "... datetime ..." : DateTime, pas Date — sinon un
+    # timestamp ISO avec millisecondes/Z ("2026-01-05T12:00:46.45Z") est
+    # comparé au format JJ/MM/AAAA et rejeté à tort (aucune erreur BC réelle
+    # sur ce type de champ système).
+    if "date-heure" in c or "date heure" in c or "datetime" in c:
+        return "DateTime"
+    if "date" in c and "heure" in c:
+        return "DateTime"
     if "date" in c:                        return "Date"
     if "e-mail" in c or "email" in c:      return "Email"
     return None
