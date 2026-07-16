@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+from datetime import datetime
 from app.core.file_parser import parse_uploaded_file, get_file_summary
 from app.core.structure_validator import validate_file_structure
 from app.core.validator_axe_a import validate_file_axe_a
@@ -149,6 +150,13 @@ BC_DETECTED = {
     "Type incorrect (décimal attendu)",
     "Type incorrect (booléen attendu)",
     "Format de date incorrect",
+    # Confirmé empiriquement le 16/07/2026 sur PKG003-Stock : 35/35 anomalies
+    # "Code de référence invalide" restantes après nettoyage des faux positifs
+    # GUID nul matchent exactement les erreurs BC réelles. Avant ce fix, cette
+    # catégorie — la plus fréquente dans les erreurs BC réelles — était
+    # étiquetée à tort "détecté uniquement par notre outil".
+    "Code de référence invalide",
+    "Champ obligatoire vide",
 }
 
 
@@ -433,6 +441,7 @@ with tab_main:
                     sel_pkg_code, sel_pkg_name = "", ""
 
         with col2:
+            date_controle = st.date_input("📅 Date de contrôle", value=datetime.now().date())
             notes     = st.text_area("Notes", height=68, key=f"step1_notes_{active_client}")
             gemini_ok = is_gemini_available()
             st.markdown("🤖 **Suggestions IA :** " + ("✅ Activées" if gemini_ok else "⚠️ Non configurées"))
@@ -453,6 +462,7 @@ with tab_main:
                         "pkg_code":     sel_pkg_code,
                         "pkg_name":     sel_pkg_name,
                         "notes":        notes,
+                        "date_controle":date_controle.isoformat(),
                         "file_name":    "",
                         "company_id":   sel_company_id,
                         "company_name": sel_company_name,
@@ -744,6 +754,9 @@ with tab_main:
                         "profile_code":    cfg["client_code"],
                         "file_name":       cfg.get("file_name", ""),
                         "notes":           cfg.get("notes", ""),
+                        "date_controle":   cfg.get("date_controle", ""),
+                        "company_id":      cfg.get("company_id", ""),
+                        "company_name":    cfg.get("company_name", ""),
                         "status":          "Analyse terminée" if major > 0 else "Terminée",
                         "total_anomalies": total,
                         "major_anomalies": major,

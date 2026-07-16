@@ -127,12 +127,31 @@ def validate_axe_a(
                 ))
                 continue
 
-            # 2. Champ obligatoire vide
+            # 2. Champ obligatoire vide (bloque l'import BC)
             if fm and fm.is_required and is_empty:
                 anomalies.append(_anomaly(
                     line=line_num, field=col, value="", sheet=sheet_name,
                     error_type="Champ obligatoire vide", severity="Majeure",
                     message=f"'{col}' est obligatoire et ne peut pas être vide.",
+                ))
+                continue
+
+            # 2bis. Champ requis pour la comptabilisation, pas pour l'import
+            # (n'existe pas en Mandatory=true au niveau table — vérifié
+            # uniquement par Gen. Posting Setup / Inventory Posting Setup au
+            # moment d'une écriture de vente/achat/stock). L'import BC réussit
+            # avec ce champ vide, mais l'article restera inutilisable en
+            # comptabilisation tant qu'il n'est pas renseigné.
+            if fm and fm.is_posting_required and is_empty:
+                anomalies.append(_anomaly(
+                    line=line_num, field=col, value="", sheet=sheet_name,
+                    error_type="Champ requis pour comptabilisation", severity="Mineure",
+                    message=(
+                        f"'{col}' est vide — l'import réussira, mais cet article "
+                        f"ne pourra pas être utilisé en vente/achat/stock tant que "
+                        f"ce champ n'est pas renseigné (vérifié par BC au moment "
+                        f"de la comptabilisation, pas à l'import)."
+                    ),
                 ))
                 continue
 

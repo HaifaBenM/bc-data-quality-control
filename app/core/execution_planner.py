@@ -46,19 +46,29 @@ _OPTION_VALUES: dict[str, dict[str, list[str]]] = {
 _REQUIRED_FIELDS: dict[str, list[str]] = {
     "18": ["N°", "Nom", "Groupe compta. client", "Groupe compta. marché"],
     "23": ["N°", "Nom", "Groupe compta. fournisseur", "Groupe compta. marché"],
-    # "Crédit carbone par unité" ajouté suite à comparaison avec erreurs BC réelles
-    # (PKG003-Stock) : BC lève systématiquement "Crédit GHG doit avoir une valeur...
-    # Il ne peut pas être vide ou nul" sur tous les articles testés. À confirmer si
-    # c'est un Mandatory standard du champ ou une validation custom (OnInsert/OnValidate) —
-    # si custom, ce n'est pas structurellement garanti que ce soit TOUJOURS requis
-    # pour tous les articles (ex: Type = Service pourrait ne pas l'exiger).
-    "27": ["N°", "Description", "Unité de mesure de base",
-           "Groupe compta. stock", "Groupe compta. produit",
-           "Crédit carbone par unité"],
+    # "Crédit carbone par unité" confirmé via comparaison erreurs BC réelles
+    # (PKG003-Stock, session du 16/07/2026) : BC lève "Crédit GHG doit avoir
+    # une valeur..." et légende l'erreur sur ce champ précis (pas "Crédit GHG"
+    # le Boolean) sur 5/5 occurrences testées (items 1017, 1019, ACC001-3).
+    "27": ["N°", "Unité de mesure de base", "Crédit carbone par unité"],
     "15": ["N°", "Nom", "Type compte"],
     "3":  ["Code"],
     "4":  ["Code"],
     "9":  ["Code"],
+}
+
+# Champs qui ne bloquent PAS l'import BC (pas de Mandatory=true déclenché par
+# un Configuration Package) mais qui sont requis au moment de la
+# comptabilisation (posting) — Gen. Posting Setup / Inventory Posting Setup
+# vérifient la combinaison de groupes comptables uniquement lors d'une
+# écriture de vente/achat/stock, pas à l'insertion de l'article. Confirmé
+# empiriquement : items 1017/1019 importés par BC sans erreur malgré ces
+# 3 champs vides (session du 16/07/2026, PKG003-Stock, 45 erreurs BC réelles
+# ne mentionnent aucun de ces 3 champs). Anomalie Mineure/avisoire, pas
+# bloquante — l'article existera mais sera inutilisable en comptabilisation
+# tant que ces champs ne sont pas renseignés.
+_POSTING_REQUIRED_FIELDS: dict[str, list[str]] = {
+    "27": ["Description", "Groupe compta. stock", "Groupe compta. produit"],
 }
 
 _KEY_FIELD: dict[str, str] = {
@@ -74,7 +84,8 @@ class FieldMeta:
     al_type:       str
     py_type:       str | None
     max_length:    int
-    is_required:   bool = False
+    is_required:         bool = False
+    is_posting_required: bool = False
     option_values: list[str] = field(default_factory=list)
 
 
@@ -143,6 +154,7 @@ def _build_field_meta(table_id: int, pf: dict) -> FieldMeta | None:
     max_length = int(pf.get("fieldLength") or 0)
     tid_str    = str(table_id)
     is_req     = field_name in _REQUIRED_FIELDS.get(tid_str, [])
+    is_post_req= field_name in _POSTING_REQUIRED_FIELDS.get(tid_str, [])
     opts       = _OPTION_VALUES.get(tid_str, {}).get(field_name, [])
 
     return FieldMeta(
@@ -151,6 +163,7 @@ def _build_field_meta(table_id: int, pf: dict) -> FieldMeta | None:
         py_type=py_type,
         max_length=max_length,
         is_required=is_req,
+        is_posting_required=is_post_req,
         option_values=opts,
     )
 
