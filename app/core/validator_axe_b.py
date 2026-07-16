@@ -76,16 +76,44 @@ def validate_axe_b(
                 })
                 continue
 
+            # Table No. Series (ID 308) : quand ce champ ne résout à aucun code
+            # valide (vide OU valeur invalide), BC échoue AUSSI en aval sur la
+            # résolution automatique du numéro de série et lève une seconde
+            # erreur distincte "Souches de n° n'existe pas. Code=''" — en plus
+            # de l'erreur "Code de référence invalide" classique si la valeur
+            # est non-vide. Confirmé empiriquement le 16/07/2026 sur dump BC
+            # complet : 5/5 items (1017, 1019, ACC001, ACC002, ACC003).
+            NO_SERIES_TABLE_ID = 308
+
             # Valider chaque ligne
             for row_idx, row in df.iterrows():
                 value = str(row.get(col, "") or "").strip()
-                if not value or value.lower() in ("nan", "none", ""):
-                    continue
-                # GUID nul ({00000000-0000-0000-0000-000000000000}) = équivalent
-                # d'un champ vide pour BC (pas de valeur assignée). BC ne lève
-                # aucune erreur "code de référence invalide" dessus — le traiter
-                # comme vide, pas comme une référence invalide.
-                if value == "{00000000-0000-0000-0000-000000000000}":
+                is_val_empty = not value or value.lower() in ("nan", "none", "")
+                is_zero_guid = value == "{00000000-0000-0000-0000-000000000000}"
+
+                if ref_tid == NO_SERIES_TABLE_ID:
+                    resolved = (
+                        not is_val_empty and not is_zero_guid
+                        and value in valid_codes
+                    )
+                    if not resolved:
+                        anomalies.append({
+                            "Ligne":               int(row_idx) + 4,
+                            "Onglet":              sheet_name,
+                            "Champ":               col,
+                            "Valeur":              "",
+                            "Type d'anomalie":     "Souches de n° non résolvable",
+                            "Sévérité":            "Majeure",
+                            "Message":             (
+                                "Souches de n° n'existe pas. Champs et valeurs "
+                                "d'identification : Code=''"
+                            ),
+                            "Correction suggérée": "",
+                            "Axe":                 "B",
+                            "BC":                  True,
+                        })
+
+                if is_val_empty or is_zero_guid:
                     continue
 
                 if value not in valid_codes:

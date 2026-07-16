@@ -157,6 +157,9 @@ BC_DETECTED = {
     # étiquetée à tort "détecté uniquement par notre outil".
     "Code de référence invalide",
     "Champ obligatoire vide",
+    # Confirmé le 16/07/2026 sur dump BC complet (5/5 items)
+    "Souches de n° non résolvable",
+    "Champ obligatoire (non-zéro) vide",
 }
 
 
