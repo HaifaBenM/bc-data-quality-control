@@ -81,6 +81,12 @@ def validate_axe_b(
                 value = str(row.get(col, "") or "").strip()
                 if not value or value.lower() in ("nan", "none", ""):
                     continue
+                # GUID nul ({00000000-0000-0000-0000-000000000000}) = équivalent
+                # d'un champ vide pour BC (pas de valeur assignée). BC ne lève
+                # aucune erreur "code de référence invalide" dessus — le traiter
+                # comme vide, pas comme une référence invalide.
+                if value == "{00000000-0000-0000-0000-000000000000}":
+                    continue
 
                 if value not in valid_codes:
                     examples = sorted(valid_codes)[:3] if valid_codes else []

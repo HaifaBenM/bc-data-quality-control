@@ -105,7 +105,12 @@ def validate_axe_a(
     seen_keys: dict[str, int] = {}
 
     for row_idx, row in df.iterrows():
-        line_num = int(row_idx) + 1
+        # +4 et non +1 : aligné sur validator_axe_b.py (même convention que le
+        # numéro de ligne Excel réel — 3 lignes sautées avant les données :
+        # métadonnées package, ligne vide, en-têtes). Avant ce fix, Axe A et
+        # Axe B numérotaient la même ligne physique différemment (décalage de 3),
+        # ce qui rendait le rapport d'anomalies incohérent pour l'utilisateur.
+        line_num = int(row_idx) + 4
 
         for col in df.columns:
             raw_val  = row.get(col)
