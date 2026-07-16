@@ -71,6 +71,18 @@ _POSTING_REQUIRED_FIELDS: dict[str, list[str]] = {
     "27": ["Description", "Groupe compta. stock", "Groupe compta. produit"],
 }
 
+# Champs numériques qui doivent être non-vides ET non-zéro (distinct de
+# is_required : "0" n'est pas une valeur vide au sens générique, il faut un
+# check dédié). Confirmé empiriquement le 16/07/2026 : BC lève "Crédit GHG
+# doit avoir une valeur..." sur Article: N°=X pour tout article avec
+# 'Crédit carbone par unité' = 0, sur 5/5 occurrences testées (1017, 1019,
+# ACC001-3). BC légende l'erreur sur ce champ précis (pas le Boolean
+# "Crédit GHG"). Non confirmé si conditionnel selon Type (Stock/Service/Hors
+# stock) — comportement observé uniquement sur des articles Type=Stock.
+_NONZERO_REQUIRED_FIELDS: dict[str, list[str]] = {
+    "27": ["Crédit carbone par unité"],
+}
+
 _KEY_FIELD: dict[str, str] = {
     "18": "N°", "23": "N°", "27": "N°", "15": "N°", "5050": "N°",
     "3":  "Code", "4": "Code", "9": "Code", "10": "Code", "204": "Code",
@@ -86,6 +98,7 @@ class FieldMeta:
     max_length:    int
     is_required:         bool = False
     is_posting_required: bool = False
+    is_nonzero_required: bool = False
     option_values: list[str] = field(default_factory=list)
 
 
@@ -133,6 +146,10 @@ class ExecutionPlan:
     def get_key_field(self, table_id: int) -> str:
         return _KEY_FIELD.get(str(table_id), _KEY_FIELD["default"])
 
+    def get_table_name(self, table_id: int) -> str:
+        t = self.tables.get(table_id)
+        return t.table_name if t else f"Table {table_id}"
+
     def get_tables_ordered(self) -> list[TablePlan]:
         return sorted(
             self.tables.values(),
@@ -155,6 +172,7 @@ def _build_field_meta(table_id: int, pf: dict) -> FieldMeta | None:
     tid_str    = str(table_id)
     is_req     = field_name in _REQUIRED_FIELDS.get(tid_str, [])
     is_post_req= field_name in _POSTING_REQUIRED_FIELDS.get(tid_str, [])
+    is_nz_req  = field_name in _NONZERO_REQUIRED_FIELDS.get(tid_str, [])
     opts       = _OPTION_VALUES.get(tid_str, {}).get(field_name, [])
 
     return FieldMeta(
@@ -164,6 +182,7 @@ def _build_field_meta(table_id: int, pf: dict) -> FieldMeta | None:
         max_length=max_length,
         is_required=is_req,
         is_posting_required=is_post_req,
+        is_nonzero_required=is_nz_req,
         option_values=opts,
     )
 

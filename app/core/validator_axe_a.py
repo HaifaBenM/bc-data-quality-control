@@ -155,6 +155,31 @@ def validate_axe_a(
                 ))
                 continue
 
+            # 2ter. Champ non-vide mais devant être non-zéro (ex: Crédit carbone
+            # par unité). Distinct de is_required : "0" n'est pas une valeur
+            # vide au sens générique (_is_empty), il faut un check dédié.
+            if fm and fm.is_nonzero_required and not is_empty:
+                is_zero = False
+                try:
+                    is_zero = float(str_val.replace(",", ".")) == 0
+                except ValueError:
+                    pass
+                if is_zero:
+                    table_name = (
+                        execution_plan.get_table_name(int(table_id))
+                        if execution_plan and table_id else table_id_s
+                    )
+                    key_val = _to_str(row.get(key_field, "")) if key_field in df.columns else ""
+                    anomalies.append(_anomaly(
+                        line=line_num, field=col, value=str_val, sheet=sheet_name,
+                        error_type="Champ obligatoire (non-zéro) vide", severity="Majeure",
+                        message=(
+                            f"Crédit GHG doit avoir une valeur dans {table_name}: "
+                            f"{key_field}={key_val}. Il ne peut pas être vide ou nul."
+                        ),
+                    ))
+                    continue
+
             if is_empty:
                 continue
 
