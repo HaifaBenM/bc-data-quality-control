@@ -26,7 +26,7 @@ def validate_axe_b(
       ref_table_id = execution_plan.get_ref_table_id(table_id, field_name)
       ref_field_id = execution_plan.get_ref_field_id(table_id, field_name)
       valid_codes  = lazy_load(ref_table_id, ref_field_id) ∪ sim_context(ref_table_id)
-
+print(f"DEBUG col={col} ref_tid={ref_tid} ref_fid={ref_field_id}")
     Lazy load : cache Supabase → extension AL tableValues → BC API v2.0 fallback.
     """
     anomalies = []
