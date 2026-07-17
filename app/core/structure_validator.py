@@ -25,11 +25,16 @@ def validate_file_structure(parse_result: dict) -> dict:
     sheets      = parse_result.get("sheets", {})
     total_rows  = parse_result.get("total_rows", {})
 
-    # Vérification 1 : au moins une table de données
-    if not data_tables:
+    # Vérification 1 : au moins une table reconnue (donnée OU référence).
+    # DATA_TABLES est une liste figée non exhaustive (ex: table 13
+    # Vendeur/Acheteur, 288 Compte bancaire fournisseur classées "référence"
+    # par défaut) — Axe A/B valident déjà data_tables ET ref_tables
+    # indifféremment, donc bloquer ici sur data_tables seul empêchait à tort
+    # des fichiers valides de progresser.
+    if not data_tables and not ref_tables:
         result["is_valid"] = False
         result["blocking_errors"].append(
-            "Aucune table de données BC détectée dans ce fichier. "
+            "Aucune table BC reconnue dans ce fichier. "
             "Vérifiez que le fichier est bien un export de Package de "
             "Configuration BC (Clients, Fournisseurs, Articles...)."
         )

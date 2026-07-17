@@ -519,9 +519,16 @@ with tab_main:
                         st.session_state.step = 1
                         st.rerun()
                 with cv:
+                    # Ne bloque que si le fichier n'a strictement aucun onglet
+                    # reconnu (ni donnée ni référence) — pas si le fichier ne
+                    # contient que des tables absentes de DATA_TABLES (liste
+                    # figée, non exhaustive : ex. tables 13, 288 classées
+                    # "référence" par défaut alors qu'un client peut vouloir
+                    # les faire passer par l'analyse comme des données).
+                    has_any_table = bool(pr.get("data_tables")) or bool(pr.get("ref_tables"))
                     if st.button(
                         "🔍 Vérifier la structure →", type="primary",
-                        use_container_width=True, disabled=not s.get("data_tables")
+                        use_container_width=True, disabled=not has_any_table
                     ):
                         with st.spinner("..."):
                             val = validate_file_structure(pr)
