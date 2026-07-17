@@ -731,7 +731,7 @@ with tab_main:
 
         if pr:
             with st.expander("👀 Données source"):
-                for sn in pr.get("data_tables", []):
+                for sn in pr.get("data_tables", []) + pr.get("ref_tables", []):
                     df = pr["sheets"].get(sn)
                     if df is not None and not df.empty:
                         meta = pr.get("metadata", {}).get(sn, {})

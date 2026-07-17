@@ -40,8 +40,10 @@ def validate_file_structure(parse_result: dict) -> dict:
         )
         return result
 
-    # Vérification 2 : tables de données
-    for sheet in data_tables:
+    # Vérification 2 : tables avec données (donnée + référence — la
+    # classification DATA_TABLES est cosmétique, pas fonctionnelle, cf.
+    # Vérification 1 ci-dessus)
+    for sheet in data_tables + ref_tables:
         rows = total_rows.get(sheet, 0)
         meta = metadata.get(sheet, {})
         label = meta.get("label", sheet)
