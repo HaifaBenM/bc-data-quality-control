@@ -253,22 +253,14 @@ def get_reference_values_by_table_id(
     cache_key   = _REF_TABLE_CACHE_KEYS.get(ref_table_id, f"table_{ref_table_id}")
     entity_info = _TABLE_BC_ENTITY.get(ref_table_id)
 
-    if "axe_b_debug" not in st.session_state:
-        st.session_state["axe_b_debug"] = []
-
     # 1. Cache Supabase
     if company_id:
         try:
             cached = get_reference_values(profile_code, company_id, cache_key)
             if cached:
-                st.session_state["axe_b_debug"].append(
-                    f"✅ Cache — table {ref_table_id} ({cache_key}) : {len(cached)} codes"
-                )
                 return set(str(c).strip() for c in cached if c), True
-        except Exception as e:
-            st.session_state["axe_b_debug"].append(
-                f"❌ Cache error table {ref_table_id}: {e}"
-            )
+        except Exception:
+            pass
 
     # Trace si au moins UN appel a techniquement réussi (HTTP 200 / pas d'exception),
     # même si le résultat est vide. Ça distingue "table vide" (found=True, valider
@@ -284,19 +276,9 @@ def get_reference_values_by_table_id(
         )
         if codes:
             _store_reference_cache(profile_code, company_id, cache_key, codes)
-            st.session_state["axe_b_debug"].append(
-                f"✅ AL fetch — table {ref_table_id} field {_field_no} : {len(codes)} codes"
-            )
             return codes, True
-        elif al_error:
-            st.session_state["axe_b_debug"].append(
-                f"❌ AL error table {ref_table_id} field {_field_no}: {al_error}"
-            )
-        else:
+        elif not al_error:
             source_reachable = True
-            st.session_state["axe_b_debug"].append(
-                f"⚠️ AL fetch vide (0 résultat, sans erreur) — table {ref_table_id} field {_field_no}"
-            )
 
     # 3. Fallback BC API v2.0
     if entity_info and profile_code and company_id:
@@ -306,35 +288,20 @@ def get_reference_values_by_table_id(
             )
             if codes:
                 _store_reference_cache(profile_code, company_id, cache_key, codes)
-                st.session_state["axe_b_debug"].append(
-                    f"✅ BC API — table {ref_table_id} : {len(codes)} codes"
-                )
                 return codes, True
             else:
                 source_reachable = True
-                st.session_state["axe_b_debug"].append(
-                    f"⚠️ BC API vide — table {ref_table_id}"
-                )
-        except Exception as e:
-            st.session_state["axe_b_debug"].append(
-                f"❌ BC API error table {ref_table_id}: {e}"
-            )
+        except Exception:
+            pass
 
     if source_reachable:
         # Table interrogée avec succès mais réellement vide côté BC (société de test
         # non peuplée, par ex.) → found=True avec 0 codes valides. Le validateur
         # traitera alors toute valeur non vide dans ce champ comme une anomalie,
         # exactement comme le ferait BC nativement sur une relation vers table vide.
-        st.session_state["axe_b_debug"].append(
-            f"✅ Table {ref_table_id} vide (confirmé) — toute valeur non vide sera invalide"
-        )
         _store_reference_cache(profile_code, company_id, cache_key, set())
         return set(), True
 
-    st.session_state["axe_b_debug"].append(
-        f"❌ Non vérifiable — table {ref_table_id} "
-        f"(cache_key={cache_key}, ref_field_id={ref_field_id})"
-    )
     return set(), False
 
 def _fetch_via_al_extension(

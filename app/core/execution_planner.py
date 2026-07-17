@@ -55,6 +55,15 @@ _REQUIRED_FIELDS: dict[str, list[str]] = {
     "3":  ["Code"],
     "4":  ["Code"],
     "9":  ["Code"],
+    # Table 13 = Vendeur/Acheteur (Salesperson/Purchaser). Le champ clé
+    # obligatoire est "Code" (colonne A du fichier réel PKG001-Achat).
+    # "Commercial" est un champ Boolean distinct (flag salesperson/purchaser),
+    # pas le champ clé — confirmé sur PKG001_Achat.xlsx : "Code" vide sur les
+    # 34 lignes correspondant exactement aux 34 erreurs BC, "Commercial"
+    # contient 'false'/'true' partout où "Code" est renseigné. Fix précédent
+    # (16/07/2026, session PKG001) ciblait "Commercial" à tort sur la seule
+    # base de la légende de champ BC, qui était trompeuse ici.
+    "13": ["Code"],
 }
 
 # Champs qui ne bloquent PAS l'import BC (pas de Mandatory=true déclenché par
@@ -187,10 +196,6 @@ def _build_field_meta(table_id: int, pf: dict) -> FieldMeta | None:
     )
 
 
-# Log debug global — rempli pendant build_plan_from_bc
-_debug_sample: list = []
-
-
 def build_plan_from_bc(
     tenant_id:    str,
     environment:  str,
@@ -199,9 +204,6 @@ def build_plan_from_bc(
     token:        str,
 ) -> ExecutionPlan:
     from app.core.bc_api import get_package_tables_qc, get_package_fields_qc
-
-    global _debug_sample
-    _debug_sample = []
 
     plan = ExecutionPlan(package_code=package_code, source="bc_api")
 
@@ -229,20 +231,6 @@ def build_plan_from_bc(
             pkg_fields = get_package_fields_qc(
                 tenant_id, environment, company_id, package_code, tid, token
             )
-
-            # ── DEBUG — stocker un échantillon pour affichage ─────────────────
-            if not _debug_sample and pkg_fields:
-                _debug_sample = [
-                    {
-                        "table":      tid,
-                        "field":      pf.get("fieldCaption", ""),
-                        "refTableId": pf.get("refTableId"),
-                        "refFieldId": pf.get("refFieldId"),
-                        "fieldType":  pf.get("fieldType"),
-                    }
-                   for pf in pkg_fields if pf.get("fieldCaption") in ("Code pays/région", "Code emplacement par défaut") or tid != 14
-                ]
-            # ── FIN DEBUG ─────────────────────────────────────────────────────
 
             plan.fields[tid] = {
                 pf.get("fieldCaption", ""): bool(pf.get("validateField", True))
