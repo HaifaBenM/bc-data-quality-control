@@ -1,3 +1,4 @@
+import base64
 import streamlit as st
 import pandas as pd
 from datetime import datetime
@@ -10,6 +11,8 @@ from app.core.auth import require_role
 from app.core.execution_planner import get_execution_plan
 from app.core.simulation_context import SimulationContext
 from app.core.metadata_loader import MetadataLoader
+from app.core.correction_generator import apply_corrections
+from app.core.correction_classifier import build_prerequisites_report
 from app.db.profiles_db import get_profile_by_code
 from app.core.bc_api import get_access_token, get_companies, get_packages_qc
 from app.db.sessions_db import (
@@ -40,6 +43,11 @@ st.markdown("""
     background: #EFF6FF; border-left: 4px solid #3B82F6;
     padding: .6rem 1rem; border-radius: 6px;
     margin: .25rem 0; font-size: .85rem; line-height: 1.5;
+}
+.card-prereq {
+    background: #F3E8FF; border-left: 4px solid #7C3AED;
+    padding: .6rem 1rem; border-radius: 6px;
+    margin: .35rem 0; font-size: .88rem; line-height: 1.5;
 }
 .card-data {
     background: #EEF4FD; border-left: 4px solid #2E6FBF;
@@ -79,6 +87,7 @@ st.markdown("""
 .tag-minor { background: #FAEEDA; color: #854F0B; }
 .tag-ai    { background: #F3E8FF; color: #7C3AED; }
 .tag-auto  { background: #E1F5EE; color: #0F6E56; }
+.tag-prereq{ background: #F3E8FF; color: #7C3AED; }
 .conf-bar  { background: #E2E8F0; border-radius: 3px; height: 5px; margin: 4px 0; }
 </style>
 """, unsafe_allow_html=True)
@@ -201,6 +210,13 @@ def merge_results(axe_a: dict, axe_b: dict, axe_c: dict, parse_result: dict = No
         for result in [axe_a, axe_b]:
             for a in result.get("by_sheet", {}).get(sn, []):
                 clean = {k: v for k, v in a.items() if k != "Axe"}
+                # Classification par défaut pour les anomalies Axe A (champ
+                # obligatoire vide, longueur, type...) : toujours corrigibles
+                # directement dans le fichier. Les anomalies Axe B de type
+                # référence ont déjà leur propre classification explicite
+                # (VALEUR_CORRIGIBLE ou PREALABLE_BC_REQUIS) — setdefault ne
+                # l'écrase pas.
+                clean.setdefault("Classification", "VALEUR_CORRIGIBLE")
                 key   = (sn, a.get("Ligne", 0), a.get("Champ", ""))
                 if key in ai_map:
                     ia = ai_map[key]
@@ -292,7 +308,7 @@ def display_unified_results(merged: dict, axe_c: dict, pr: dict = None):
                 ]
 
                 if filtered:
-                    cols_to_show = ["Ligne", "Champ", "Valeur", "Type d'anomalie", "Sévérité", "Message", "Correction suggérée"]
+                    cols_to_show = ["Ligne", "Champ", "Valeur", "Type d'anomalie", "Sévérité", "Classification", "Message", "Correction suggérée"]
                     df_show      = pd.DataFrame([{c: a.get(c, "") for c in cols_to_show} for a in filtered])
 
                     def color_row(row):
@@ -312,6 +328,10 @@ def display_unified_results(merged: dict, axe_c: dict, pr: dict = None):
                             css   = "card-major" if a.get("Sévérité") == "Majeure" else "card-minor"
                             fix   = f" → <b>{a['Correction suggérée']}</b>" if a.get("Correction suggérée") else ""
                             err_t = a.get("Type d'anomalie", "")
+                            prereq_tag = (
+                                '<span class="tag tag-prereq" title="Nécessite la création d\'une donnée en BC avant import">🟣 Prérequis BC</span>'
+                                if a.get("Classification") == "PREALABLE_BC_REQUIS" else ""
+                            )
                             ia_block = ""
                             if a.get("suggestion_ia"):
                                 conf     = a.get("confiance_ia", 0)
@@ -331,7 +351,7 @@ def display_unified_results(merged: dict, axe_c: dict, pr: dict = None):
                                 f'<b>Ligne {a.get("Ligne", "")}</b> · <b>{a.get("Champ", "")}</b> · '
                                 f'<span class="tag tag-{"major" if a.get("Sévérité") == "Majeure" else "minor"}">{a.get("Sévérité", "")}</span>'
                                 f'<span class="tag" style="background:#E2E8F0;color:#1B3A6B">{err_t}</span>'
-                                f'{bc_badge(err_t)}'
+                                f'{bc_badge(err_t)}{prereq_tag}'
                                 f'<br>{a.get("Message", "")}{fix}'
                                 f'{ia_block}</div>',
                                 unsafe_allow_html=True
@@ -350,9 +370,148 @@ def display_unified_results(merged: dict, axe_c: dict, pr: dict = None):
                     )
 
 
+def display_correction_workflow(merged: dict, cfg: dict):
+    """
+    Étape de correction : sépare les anomalies corrigibles dans le fichier
+    (VALEUR_CORRIGIBLE) des prérequis à créer côté BC (PREALABLE_BC_REQUIS),
+    laisse le consultant valider/éditer les corrections, génère un fichier
+    corrigé (mapping XML préservé) et un rapport de prérequis distinct.
+
+    ⚠️ Le fichier généré n'a pas été validé par un import BC réel — à tester
+    avant de le présenter comme "100% intégrable" en démo.
+    """
+    all_anomalies = merged.get("all_anomalies", [])
+    real          = [a for a in all_anomalies if a.get("Ligne", 0) > 0]
+
+    # Tout ce qui est classé VALEUR_CORRIGIBLE va dans le tableau éditable,
+    # QU'IL Y AIT ou non une suggestion automatique déjà calculée. La plupart
+    # des anomalies Axe A ("Champ obligatoire vide", "Type incorrect...")
+    # n'ont pas de suggestion précalculée -- c'est précisément là que le
+    # consultant doit pouvoir saisir la bonne valeur lui-même. Filtrer sur
+    # "Correction suggérée" non vide (version précédente) excluait la quasi-
+    # totalité des anomalies réelles du tableau, d'où : aucune ligne à
+    # cocher, aucun fichier généré.
+    corrigibles = [a for a in real if a.get("Classification") == "VALEUR_CORRIGIBLE"]
+    prereqs = build_prerequisites_report(real)
+
+    st.markdown("---")
+    st.markdown('<div class="step-header">🔧 Correction & génération du fichier</div>', unsafe_allow_html=True)
+
+    if prereqs:
+        st.markdown(
+            f'<div class="card-prereq">🟣 <b>{len(prereqs)} donnée(s) manquante(s) côté BC</b> — '
+            f'ces codes n\'existent dans aucune table référencée. Ils doivent être créés dans BC '
+            f'AVANT import ; aucune valeur saisie dans le fichier ne les rendra valides.</div>',
+            unsafe_allow_html=True
+        )
+        with st.expander(f"🟣 Prérequis BC à créer ({len(prereqs)})", expanded=True):
+            st.dataframe(pd.DataFrame(prereqs), use_container_width=True, hide_index=True)
+            prereq_csv = pd.DataFrame(prereqs).to_csv(index=False).encode("utf-8")
+            st.download_button(
+                "⬇️ Télécharger la checklist prérequis BC (CSV)",
+                data=prereq_csv,
+                file_name=f"prerequis_bc_{cfg.get('session_name', 'session')}.csv",
+                mime="text/csv",
+                key="dl_prereq_csv",
+            )
+
+    if not corrigibles:
+        st.info("Aucune correction directement applicable au fichier pour le moment.")
+        st.session_state["prerequisites_report"] = prereqs
+        return
+
+    st.markdown(
+        f"**✏️ {len(corrigibles)} anomalie(s) corrigible(s) dans le fichier — "
+        f"éditez « Nouvelle valeur » et cochez « Appliquer » pour chaque ligne à intégrer :**"
+    )
+    edit_rows = [
+        {
+            # Coché par défaut UNIQUEMENT si on a déjà une suggestion fiable
+            # (ex: code de référence proche trouvé). Sinon décoché : le
+            # consultant doit taper une valeur avant de pouvoir l'appliquer,
+            # jamais une case vide poussée par défaut dans le fichier généré.
+            "Appliquer":       bool(str(a.get("Correction suggérée", "")).strip()),
+            "Onglet":          a.get("Onglet", ""),
+            "Ligne":           a.get("Ligne", 0),
+            "Champ":           a.get("Champ", ""),
+            "Valeur actuelle": a.get("Valeur", ""),
+            "Nouvelle valeur": a.get("Correction suggérée", ""),
+        }
+        for a in corrigibles
+    ]
+    edited = st.data_editor(
+        pd.DataFrame(edit_rows),
+        use_container_width=True,
+        hide_index=True,
+        disabled=["Onglet", "Ligne", "Champ", "Valeur actuelle"],
+        column_config={
+            "Appliquer": st.column_config.CheckboxColumn(
+                help="Cocher pour inclure cette ligne dans le fichier généré"
+            ),
+            "Nouvelle valeur": st.column_config.TextColumn(
+                help="Modifiable — tapez la valeur correcte pour cette cellule"
+            ),
+        },
+        key="corrections_editor",
+    )
+
+    cgen1, cgen2 = st.columns([2, 6])
+    with cgen1:
+        gen_clicked = st.button("🔧 Générer le fichier corrigé", type="primary", use_container_width=True)
+
+    if gen_clicked:
+        original_bytes = st.session_state.get("original_file_bytes")
+        if not original_bytes:
+            st.error("❌ Fichier original introuvable en mémoire — remontez à l'étape 2.")
+        else:
+            selected = edited[
+                (edited["Appliquer"] == True)
+                & (edited["Nouvelle valeur"].astype(str).str.strip() != "")
+            ]
+            if selected.empty:
+                st.warning(
+                    "Aucune ligne cochée avec une valeur non vide — rien à générer. "
+                    "Coche « Appliquer » et vérifie que « Nouvelle valeur » n'est pas vide."
+                )
+            else:
+                corrections = [
+                    {
+                        "sheet":       row["Onglet"],
+                        "excel_row":   int(row["Ligne"]),
+                        "column_name": row["Champ"],
+                        "new_value":   row["Nouvelle valeur"],
+                    }
+                    for _, row in selected.iterrows()
+                ]
+                try:
+                    generated_bytes = apply_corrections(original_bytes, corrections)
+                    st.session_state["generated_file_bytes"] = generated_bytes
+                    st.session_state["generated_file_name"]  = (
+                        f"CORRIGE_{cfg.get('file_name', 'fichier.xlsx')}"
+                    )
+                    st.session_state["prerequisites_report"] = prereqs
+                    st.success(
+                        f"✅ Fichier généré avec {len(corrections)} correction(s) appliquée(s). "
+                        f"⚠️ Non testé contre un import BC réel — à valider avant démo."
+                    )
+                except Exception as e:
+                    st.error(f"❌ Erreur lors de la génération : {e}")
+
+    if st.session_state.get("generated_file_bytes"):
+        st.download_button(
+            "⬇️ Télécharger le fichier corrigé",
+            data=st.session_state["generated_file_bytes"],
+            file_name=st.session_state.get("generated_file_name", "fichier_corrige.xlsx"),
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="dl_generated_file",
+        )
+
+
 def reset_session():
     for k in ["step", "config", "parse_result", "validation",
-              "merged_result", "axe_c_result", "saved_session_id", "_debug_plan"]:
+              "merged_result", "axe_c_result", "saved_session_id",
+              "original_file_bytes", "generated_file_bytes",
+              "generated_file_name", "prerequisites_report"]:
         st.session_state[k] = (1 if k == "step" else {} if k == "config" else None)
 
 
@@ -368,6 +527,8 @@ with tab_main:
     for key, default in [
         ("step", 1), ("config", {}), ("parse_result", None), ("validation", None),
         ("merged_result", None), ("axe_c_result", None), ("saved_session_id", None),
+        ("original_file_bytes", None), ("generated_file_bytes", None),
+        ("generated_file_name", None), ("prerequisites_report", None),
     ]:
         if key not in st.session_state:
             st.session_state[key] = default
@@ -493,6 +654,10 @@ with tab_main:
         uploaded = st.file_uploader("Glissez-déposez ou cliquez", type=["xlsx", "xls"], key="upl_s")
         if uploaded:
             st.session_state.config["file_name"] = uploaded.name
+            # Conservé en mémoire (pas encore en base) pour la génération du
+            # fichier corrigé à l'étape 4 — édition XML directe sur les
+            # octets d'origine, cf. correction_generator.py.
+            st.session_state["original_file_bytes"] = uploaded.getvalue()
             with st.spinner("🔍 Lecture..."):
                 pr = parse_uploaded_file(uploaded)
                 st.session_state.parse_result = pr
@@ -598,23 +763,6 @@ with tab_main:
                         _sim_ctx     = SimulationContext()
                         axe_a        = validate_file_axe_a(pr, execution_plan=_exec_plan)
 
-                        # ── DEBUG persistant ──────────────────────────────
-                        try:
-                            from app.core.execution_planner import _debug_sample
-                            total_ref = sum(
-                                1 for fields in _exec_plan.fields_ref.values()
-                                for rid in fields.values() if rid > 0
-                            )
-                            st.session_state["_debug_plan"] = {
-                                "source":    _exec_plan.source,
-                                "tables":    len(_exec_plan.tables),
-                                "total_ref": total_ref,
-                                "sample":    list(_debug_sample),
-                            }
-                        except Exception:
-                            pass
-                        # ── FIN DEBUG ─────────────────────────────────────
-
                     with st.spinner("⏳ Vérification des références..."):
                         axe_b = validate_file_axe_b(
                             pr,
@@ -624,30 +772,7 @@ with tab_main:
                             metadata_loader = _meta_loader,
                             execution_plan  = _exec_plan,
                         )
-  # ── DEBUG noms # ── DEBUG noms de colonnes ────────────────────────────────
-                    _debug_cols = []
-                    for _sn in pr.get("data_tables", []) + pr.get("ref_tables", []):
-                        _meta = pr.get("metadata", {}).get(_sn, {})
-                        try:
-                            _tid_int = int(_meta.get("table_id", ""))
-                        except (ValueError, TypeError):
-                            continue
-                        if _tid_int != 14:
-                            continue
-                        _plan_keys  = set(_exec_plan.fields_ref.get(_tid_int, {}).keys())
-                        _excel_cols = set(pr["sheets"].get(_sn, pd.DataFrame()).columns)
-                        _debug_cols.append({
-                            "sheet":        _sn,
-                            "table_id":     _tid_int,
-                            "plan_keys":    sorted(_plan_keys),
-                            "excel_cols":   sorted(_excel_cols),
-                            "only_excel":   sorted(_excel_cols - _plan_keys),
-                            "only_plan":    sorted(_plan_keys - _excel_cols),
-                        })
-                    st.session_state["_debug_cols"] = _debug_cols
-                    # ── FIN DEBUG ──────────────────────────────────────────────
 
-                    axe_c = {"available": False, "total_suggestions": 0, "auto_corrected": 0, "by_sheet": {}}
                     axe_c = {"available": False, "total_suggestions": 0, "auto_corrected": 0, "by_sheet": {}}
                     if api_key:
                         with st.spinner("🤖 Suggestions IA en cours..."):
@@ -664,7 +789,10 @@ with tab_main:
                     st.session_state.config["minor"] = sum(1 for a in real if a.get("Sévérité") == "Mineure")
                     st.session_state.config["lines"] = axe_a.get("lines_analyzed", 0)
 
-                    st.session_state.saved_session_id = None
+                    st.session_state.saved_session_id     = None
+                    st.session_state.generated_file_bytes = None
+                    st.session_state.generated_file_name  = None
+                    st.session_state.prerequisites_report = None
                     st.session_state.step = 4
                     st.rerun()
             else:
@@ -680,35 +808,6 @@ with tab_main:
         st.markdown('<div class="step-header">Étape 4 — Résultats de l\'analyse qualité</div>', unsafe_allow_html=True)
         st.caption(f"Session : **{cfg['session_name']}** · Client : **{cfg['client_name']}** · **{cfg.get('file_name', '')}**")
 
-        # ── DEBUG persistant affiché étape 4 ─────────────────────────────────
-        if "_debug_plan" in st.session_state:
-            d = st.session_state["_debug_plan"]
-            if d.get("source") == "default":
-                st.warning("⚠️ Plan par défaut — extension AL non accessible")
-            else:
-                st.info(
-                    f"Plan BC — tables: {d.get('tables')} | "
-                    f"champs avec refTableId: {d.get('total_ref')}"
-                )
-                if d.get("sample"):
-                    st.write("Sample AL:", d["sample"])
-        # ── FIN DEBUG ─────────────────────────────────────────────────────────
- # ── DEBUG AXE B ───────────────────────────────────────────────────
-        if "axe_b_debug" in st.session_state and st.session_state["axe_b_debug"]:
-            with st.expander("🔍 Debug Axe B"):
-                for msg in st.session_state["axe_b_debug"][:20]:
-                    st.write(msg)
-        # ── FIN DEBUG AXE B ───────────────────────────────────────────────
-         # ── DEBUG NOMS DE COLONNES ────────────────────────────────────────
-        if st.session_state.get("_debug_cols"):
-            with st.expander("🔍 Debug noms de colonnes (table 14)"):
-                for d in st.session_state["_debug_cols"]:
-                    st.write(f"**Onglet : {d['sheet']} (table {d['table_id']})**")
-                    st.write("Clés execution_plan (AL) :", d["plan_keys"])
-                    st.write("Colonnes Excel (fichier) :", d["excel_cols"])
-                    st.write("Dans Excel mais PAS dans le plan AL :", d["only_excel"])
-                    st.write("Dans le plan AL mais PAS dans Excel :", d["only_plan"])
-        # ── FIN DEBUG NOMS DE COLONNES ────────────────────────────────────
         total = cfg.get("total", 0)
         major = cfg.get("major", 0)
         minor = cfg.get("minor", 0)
@@ -739,6 +838,7 @@ with tab_main:
         st.markdown("---")
 
         display_unified_results(merged, axe_c, pr)
+        display_correction_workflow(merged, cfg)
 
         st.markdown("---")
         cb, cr, cs, cst = st.columns([2, 2, 3, 3])
@@ -761,6 +861,8 @@ with tab_main:
                 )
             else:
                 if st.button("💾 Sauvegarder la session", type="primary", use_container_width=True):
+                    original_bytes  = st.session_state.get("original_file_bytes")
+                    generated_bytes = st.session_state.get("generated_file_bytes")
                     ok, res = save_session({
                         "session_name":    cfg["session_name"],
                         "profile_code":    cfg["client_code"],
@@ -773,6 +875,16 @@ with tab_main:
                         "total_anomalies": total,
                         "major_anomalies": major,
                         "minor_anomalies": minor,
+                        "original_file_b64": (
+                            base64.b64encode(original_bytes).decode("ascii")
+                            if original_bytes else ""
+                        ),
+                        "generated_file_b64": (
+                            base64.b64encode(generated_bytes).decode("ascii")
+                            if generated_bytes else ""
+                        ),
+                        "generated_file_name": st.session_state.get("generated_file_name", ""),
+                        "prerequisites_report": st.session_state.get("prerequisites_report") or [],
                     })
                     if ok:
                         st.session_state.saved_session_id = res
@@ -814,6 +926,8 @@ with tab_ses:
             crd    = s.get("created_at", "")[:16].replace("T", " ") if s.get("created_at") else ""
             upd    = s.get("updated_at", "")[:16].replace("T", " ") if s.get("updated_at") else ""
             fn     = s.get("file_name", "")
+            gen_fn = s.get("generated_file_name", "")
+            prereq_list = s.get("prerequisites_report") or []
             an_s   = (
                 f'<span style="color:#993C1D">🔴 {maj_a} majeures</span> · '
                 f'<span style="color:#854F0B">🟠 {min_a} mineures</span>'
@@ -830,9 +944,41 @@ with tab_ses:
                     f'<span style="color:{sc};font-weight:500">{si} {status}</span></p>'
                     f'<p class="session-meta">{an_s}</p>'
                     f'<p class="session-meta">{"📄 " + fn + " · " if fn else ""}🕐 {crd}'
-                    f'{"  ·  ✏️ " + upd if upd != crd else ""}</p></div>',
+                    f'{"  ·  ✏️ " + upd if upd != crd else ""}</p>'
+                    f'{"<p class=" + chr(34) + "session-meta" + chr(34) + ">📦 Fichier généré : " + gen_fn + "</p>" if gen_fn else ""}'
+                    f'{"<p class=" + chr(34) + "session-meta" + chr(34) + ">🟣 " + str(len(prereq_list)) + " prérequis BC</p>" if prereq_list else ""}'
+                    f'</div>',
                     unsafe_allow_html=True
                 )
+
+                # Téléchargements : fichier chargé, fichier généré, rapport prérequis.
+                orig_b64 = s.get("original_file_b64", "")
+                gen_b64  = s.get("generated_file_b64", "")
+                dcol1, dcol2, dcol3 = st.columns(3)
+                with dcol1:
+                    if orig_b64:
+                        st.download_button(
+                            "⬇️ Fichier chargé", data=base64.b64decode(orig_b64),
+                            file_name=fn or "fichier_charge.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            key=f"dl_orig_{sid}", use_container_width=True,
+                        )
+                with dcol2:
+                    if gen_b64:
+                        st.download_button(
+                            "⬇️ Fichier corrigé", data=base64.b64decode(gen_b64),
+                            file_name=gen_fn or "fichier_corrige.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            key=f"dl_gen_{sid}", use_container_width=True,
+                        )
+                with dcol3:
+                    if prereq_list:
+                        prereq_csv = pd.DataFrame(prereq_list).to_csv(index=False).encode("utf-8")
+                        st.download_button(
+                            "⬇️ Prérequis BC", data=prereq_csv,
+                            file_name=f"prerequis_bc_{sid}.csv", mime="text/csv",
+                            key=f"dl_prereq_{sid}", use_container_width=True,
+                        )
             with ca:
                 st.markdown("<div style='padding-top:14px'>", unsafe_allow_html=True)
                 ce, cd = st.columns(2)
