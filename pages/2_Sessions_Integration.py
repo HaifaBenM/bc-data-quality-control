@@ -352,7 +352,7 @@ def display_unified_results(merged: dict, axe_c: dict, pr: dict = None):
 
 def reset_session():
     for k in ["step", "config", "parse_result", "validation",
-              "merged_result", "axe_c_result", "saved_session_id"]:
+              "merged_result", "axe_c_result", "saved_session_id", "_debug_plan"]:
         st.session_state[k] = (1 if k == "step" else {} if k == "config" else None)
 
 
@@ -598,6 +598,23 @@ with tab_main:
                         _sim_ctx     = SimulationContext()
                         axe_a        = validate_file_axe_a(pr, execution_plan=_exec_plan)
 
+                        # ── DEBUG persistant ──────────────────────────────
+                        try:
+                            from app.core.execution_planner import _debug_sample
+                            total_ref = sum(
+                                1 for fields in _exec_plan.fields_ref.values()
+                                for rid in fields.values() if rid > 0
+                            )
+                            st.session_state["_debug_plan"] = {
+                                "source":    _exec_plan.source,
+                                "tables":    len(_exec_plan.tables),
+                                "total_ref": total_ref,
+                                "sample":    list(_debug_sample),
+                            }
+                        except Exception:
+                            pass
+                        # ── FIN DEBUG ─────────────────────────────────────
+
                     with st.spinner("⏳ Vérification des références..."):
                         axe_b = validate_file_axe_b(
                             pr,
@@ -607,6 +624,28 @@ with tab_main:
                             metadata_loader = _meta_loader,
                             execution_plan  = _exec_plan,
                         )
+  # ── DEBUG noms # ── DEBUG noms de colonnes ────────────────────────────────
+                    _debug_cols = []
+                    for _sn in pr.get("data_tables", []) + pr.get("ref_tables", []):
+                        _meta = pr.get("metadata", {}).get(_sn, {})
+                        try:
+                            _tid_int = int(_meta.get("table_id", ""))
+                        except (ValueError, TypeError):
+                            continue
+                        if _tid_int != 14:
+                            continue
+                        _plan_keys  = set(_exec_plan.fields_ref.get(_tid_int, {}).keys())
+                        _excel_cols = set(pr["sheets"].get(_sn, pd.DataFrame()).columns)
+                        _debug_cols.append({
+                            "sheet":        _sn,
+                            "table_id":     _tid_int,
+                            "plan_keys":    sorted(_plan_keys),
+                            "excel_cols":   sorted(_excel_cols),
+                            "only_excel":   sorted(_excel_cols - _plan_keys),
+                            "only_plan":    sorted(_plan_keys - _excel_cols),
+                        })
+                    st.session_state["_debug_cols"] = _debug_cols
+                    # ── FIN DEBUG ──────────────────────────────────────────────
 
                     axe_c = {"available": False, "total_suggestions": 0, "auto_corrected": 0, "by_sheet": {}}
                     axe_c = {"available": False, "total_suggestions": 0, "auto_corrected": 0, "by_sheet": {}}
@@ -641,6 +680,35 @@ with tab_main:
         st.markdown('<div class="step-header">Étape 4 — Résultats de l\'analyse qualité</div>', unsafe_allow_html=True)
         st.caption(f"Session : **{cfg['session_name']}** · Client : **{cfg['client_name']}** · **{cfg.get('file_name', '')}**")
 
+        # ── DEBUG persistant affiché étape 4 ─────────────────────────────────
+        if "_debug_plan" in st.session_state:
+            d = st.session_state["_debug_plan"]
+            if d.get("source") == "default":
+                st.warning("⚠️ Plan par défaut — extension AL non accessible")
+            else:
+                st.info(
+                    f"Plan BC — tables: {d.get('tables')} | "
+                    f"champs avec refTableId: {d.get('total_ref')}"
+                )
+                if d.get("sample"):
+                    st.write("Sample AL:", d["sample"])
+        # ── FIN DEBUG ─────────────────────────────────────────────────────────
+ # ── DEBUG AXE B ───────────────────────────────────────────────────
+        if "axe_b_debug" in st.session_state and st.session_state["axe_b_debug"]:
+            with st.expander("🔍 Debug Axe B"):
+                for msg in st.session_state["axe_b_debug"][:20]:
+                    st.write(msg)
+        # ── FIN DEBUG AXE B ───────────────────────────────────────────────
+         # ── DEBUG NOMS DE COLONNES ────────────────────────────────────────
+        if st.session_state.get("_debug_cols"):
+            with st.expander("🔍 Debug noms de colonnes (table 14)"):
+                for d in st.session_state["_debug_cols"]:
+                    st.write(f"**Onglet : {d['sheet']} (table {d['table_id']})**")
+                    st.write("Clés execution_plan (AL) :", d["plan_keys"])
+                    st.write("Colonnes Excel (fichier) :", d["excel_cols"])
+                    st.write("Dans Excel mais PAS dans le plan AL :", d["only_excel"])
+                    st.write("Dans le plan AL mais PAS dans Excel :", d["only_plan"])
+        # ── FIN DEBUG NOMS DE COLONNES ────────────────────────────────────
         total = cfg.get("total", 0)
         major = cfg.get("major", 0)
         minor = cfg.get("minor", 0)

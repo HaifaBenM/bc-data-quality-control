@@ -1,5 +1,16 @@
 """
 Opérations CRUD pour les sessions de contrôle qualité dans Supabase.
+
+⚠️ Nécessite l'ajout de 4 colonnes sur la table qc_sessions avant déploiement :
+   ALTER TABLE qc_sessions ADD COLUMN original_file_b64 text;
+   ALTER TABLE qc_sessions ADD COLUMN generated_file_b64 text;
+   ALTER TABLE qc_sessions ADD COLUMN generated_file_name text;
+   ALTER TABLE qc_sessions ADD COLUMN prerequisites_report jsonb;
+
+   Stockage en base64 dans une colonne text — acceptable pour des fichiers
+   de taille démo. Si les fichiers clients deviennent volumineux (plusieurs
+   Mo), migrer vers Supabase Storage (bucket + URL en base) plutôt que de
+   continuer à grossir la table qc_sessions.
 """
 import uuid
 from datetime import datetime, timezone
@@ -50,21 +61,31 @@ def save_session(data: dict) -> tuple[bool, str]:
         session_id = generate_session_id(data.get("profile_code", "SES"))
         now        = _now()
         row = {
-            "id":              session_id,
-            "name":            data.get("session_name", ""),
-            "profile_code":    data.get("profile_code", ""),
-            "file_name":       data.get("file_name", ""),
-            "status":          data.get("status", "Analyse terminée"),
-            "iteration":       data.get("iteration", 1),
-            "total_anomalies": data.get("total_anomalies", 0),
-            "major_anomalies": data.get("major_anomalies", 0),
-            "minor_anomalies": data.get("minor_anomalies", 0),
-            "notes":           data.get("notes", ""),
-            "date_controle":   data.get("date_controle", ""),
-            "company_id":      data.get("company_id", ""),
-            "company_name":    data.get("company_name", ""),
-            "created_at":      now,
-            "updated_at":      now,
+            "id":                    session_id,
+            "name":                  data.get("session_name", ""),
+            "profile_code":          data.get("profile_code", ""),
+            "file_name":             data.get("file_name", ""),
+            "status":                data.get("status", "Analyse terminée"),
+            "iteration":             data.get("iteration", 1),
+            "total_anomalies":       data.get("total_anomalies", 0),
+            "major_anomalies":       data.get("major_anomalies", 0),
+            "minor_anomalies":       data.get("minor_anomalies", 0),
+            "notes":                 data.get("notes", ""),
+            "date_controle":         data.get("date_controle", ""),
+            "company_id":            data.get("company_id", ""),
+            "company_name":          data.get("company_name", ""),
+            # Fichier chargé par le client — permet de le retélécharger
+            # depuis "Mes sessions" sans redemander l'upload.
+            "original_file_b64":     data.get("original_file_b64", ""),
+            # Fichier corrigé généré (corrections VALEUR_CORRIGIBLE validées
+            # par le consultant appliquées, mapping XML préservé).
+            "generated_file_b64":    data.get("generated_file_b64", ""),
+            "generated_file_name":   data.get("generated_file_name", ""),
+            # Checklist des données maîtresses à créer côté BC avant import
+            # (anomalies PREALABLE_BC_REQUIS) — distinct du fichier corrigé.
+            "prerequisites_report":  data.get("prerequisites_report", []),
+            "created_at":            now,
+            "updated_at":            now,
         }
         client.table("qc_sessions").insert(row).execute()
         return True, session_id
@@ -75,12 +96,17 @@ def save_session(data: dict) -> tuple[bool, str]:
 def update_session(session_id: str, data: dict) -> tuple[bool, str]:
     """
     Met à jour les champs modifiables d'une session.
-    Champs modifiables : name, status, notes.
+    Champs modifiables : name, status, notes, et — quand une nouvelle
+    génération de fichier corrigé est faite après coup — generated_file_b64,
+    generated_file_name, prerequisites_report.
     """
     try:
         client = get_supabase_client()
-        payload = {k: v for k, v in data.items()
-                   if k in ("name", "status", "notes")}
+        editable = (
+            "name", "status", "notes",
+            "generated_file_b64", "generated_file_name", "prerequisites_report",
+        )
+        payload = {k: v for k, v in data.items() if k in editable}
         payload["updated_at"] = _now()
         client.table("qc_sessions").update(payload).eq("id", session_id).execute()
         return True, ""

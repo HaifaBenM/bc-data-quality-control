@@ -6,6 +6,7 @@ Lazy load automatique depuis BC API si cache absent.
 import pandas as pd
 from app.db.metadata_db import get_reference_values_by_table_id
 from app.core.bc_order import sort_sheets_by_bc_order, get_bc_order_summary
+from app.core.correction_classifier import classify_reference_anomaly
 
 
 def validate_axe_b(
@@ -26,8 +27,15 @@ def validate_axe_b(
       ref_table_id = execution_plan.get_ref_table_id(table_id, field_name)
       ref_field_id = execution_plan.get_ref_field_id(table_id, field_name)
       valid_codes  = lazy_load(ref_table_id, ref_field_id) ∪ sim_context(ref_table_id)
-print(f"DEBUG col={col} ref_tid={ref_tid} ref_fid={ref_field_id}")
+
     Lazy load : cache Supabase → extension AL tableValues → BC API v2.0 fallback.
+
+    Chaque "Code de référence invalide" est en plus classifié :
+      - VALEUR_CORRIGIBLE   : un code valide proche existe (faute de frappe
+        probable) -> corrigible dans le fichier généré.
+      - PREALABLE_BC_REQUIS : aucun code valide ne s'en rapproche -> le code
+        n'existe pas côté BC, aucune correction de fichier n'est possible
+        tant que la donnée maîtresse n'est pas créée dans BC.
     """
     anomalies = []
     if df is None or df.empty:
@@ -109,6 +117,13 @@ print(f"DEBUG col={col} ref_tid={ref_tid} ref_fid={ref_field_id}")
                                 "d'identification : Code=''"
                             ),
                             "Correction suggérée": "",
+                            # Rien à corriger dans le fichier : soit la souche
+                            # de n° n'existe pas côté BC (créer table 308),
+                            # soit c'est une conséquence de la valeur vide/GUID
+                            # nul déjà couverte par "Code de référence invalide"
+                            # ci-dessous — pas une anomalie corrigible en soi.
+                            "Classification":      "PREALABLE_BC_REQUIS",
+                            "Table référencée":    ref_tid,
                             "Axe":                 "B",
                             "BC":                  True,
                         })
@@ -118,6 +133,25 @@ print(f"DEBUG col={col} ref_tid={ref_tid} ref_fid={ref_field_id}")
 
                 if value not in valid_codes:
                     examples = sorted(valid_codes)[:3] if valid_codes else []
+                    cls = classify_reference_anomaly(value, valid_codes)
+
+                    if cls["classification"] == "VALEUR_CORRIGIBLE":
+                        best_code, best_score = cls["suggestions"][0]
+                        message = (
+                            f"'{col}' = '{value}' n'existe pas dans la table référencée "
+                            f"(ID {ref_tid}). Code proche trouvé : '{best_code}' "
+                            f"(similarité {int(best_score * 100)}%) — probable faute de saisie."
+                        )
+                        corr_suggeree = best_code
+                    else:
+                        message = (
+                            f"'{col}' = '{value}' n'existe dans aucune table référencée BC "
+                            f"(ID {ref_tid}). Aucune valeur saisie ici ne sera valide tant que "
+                            f"ce code n'est pas créé côté BC."
+                            + (f" Exemples de codes valides existants : {examples}" if examples else "")
+                        )
+                        corr_suggeree = ""
+
                     anomalies.append({
                         "Ligne":               int(row_idx) + 4,
                         "Onglet":              sheet_name,
@@ -125,12 +159,10 @@ print(f"DEBUG col={col} ref_tid={ref_tid} ref_fid={ref_field_id}")
                         "Valeur":              value,
                         "Type d'anomalie":     "Code de référence invalide",
                         "Sévérité":            "Majeure",
-                        "Message":             (
-                            f"'{col}' = '{value}' n'existe pas dans "
-                            f"la table référencée (ID {ref_tid})."
-                            + (f" Exemples valides : {examples}" if examples else "")
-                        ),
-                        "Correction suggérée": examples[0] if examples else "",
+                        "Message":             message,
+                        "Correction suggérée": corr_suggeree,
+                        "Classification":      cls["classification"],
+                        "Table référencée":    ref_tid,
                         "Axe":                 "B",
                         "BC":                  bool(valid_codes and found),
                     })
