@@ -13,9 +13,34 @@ DATE_FORMATS = [
     "%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y",
     "%d.%m.%Y", "%m/%d/%Y", "%Y%m%d",
 ]
+# ISO 8601 (avec/sans millisecondes, avec/sans 'Z') + quelques formats
+# DateTime BC courants. Les champs système type SystemModifiedAt exportent
+# en ISO 8601 UTC ("2026-01-05T12:00:46.45Z") — distinct de Date pur.
+DATETIME_FORMATS = [
+    "%Y-%m-%dT%H:%M:%S.%fZ", "%Y-%m-%dT%H:%M:%SZ",
+    "%Y-%m-%dT%H:%M:%S.%f",  "%Y-%m-%dT%H:%M:%S",
+    "%d/%m/%Y %H:%M:%S", "%Y-%m-%d %H:%M:%S",
+]
 BOOL_TRUE  = {"oui", "yes", "true", "vrai", "1", "x", "✓"}
 BOOL_FALSE = {"non", "no", "false", "faux", "0", ""}
 _DEFAULT_TEXT_MAX = 250
+
+
+def _validate_datetime(v: str) -> bool:
+    v = v.strip()
+    # Tolère un nombre variable de décimales de milliseconde
+    # ("...46.45Z" a 2 chiffres, "...46.683Z" en a 3) — normaliser avant
+    # strptime plutôt que multiplier les formats.
+    m = re.match(r"^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})\.(\d+)(Z?)$", v)
+    if m:
+        v = f"{m.group(1)}.{m.group(2)[:6].ljust(6, '0')}{m.group(3)}"
+    for fmt in DATETIME_FORMATS:
+        try:
+            datetime.strptime(v, fmt)
+            return True
+        except ValueError:
+            continue
+    return False
 
 
 def _is_empty(value) -> bool:
@@ -241,6 +266,12 @@ def validate_axe_a(
                     line=line_num, field=col, value=str_val, sheet=sheet_name,
                     error_type="Format de date incorrect", severity=sev_type,
                     message=f"'{col}' : '{str_val}' n'est pas une date valide. Formats : JJ/MM/AAAA, AAAA-MM-JJ.",
+                ))
+            elif py_type == "DateTime" and not _validate_datetime(str_val):
+                anomalies.append(_anomaly(
+                    line=line_num, field=col, value=str_val, sheet=sheet_name,
+                    error_type="Format de date-heure incorrect", severity=sev_type,
+                    message=f"'{col}' : '{str_val}' n'est pas une date-heure valide. Format attendu : AAAA-MM-JJTHH:MM:SS(.ms)Z.",
                 ))
             elif py_type == "Boolean" and not _validate_boolean(str_val):
                 anomalies.append(_anomaly(
