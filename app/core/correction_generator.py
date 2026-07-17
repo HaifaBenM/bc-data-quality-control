@@ -1,23 +1,27 @@
 """
 Génération du fichier Excel corrigé.
 
-⚠️ PAS TESTÉ CONTRE UN IMPORT BC RÉEL — à valider avant démo.
+⚠️ Toujours pas testé contre un import BC réel — à valider avant démo.
 
-Approche volontairement différente de pandas/openpyxl.to_excel() : ces
-librairies reconstruisent le classeur et perdent les parties XML propres à
-BC (xmlMaps.xml, customXml) — c'est la cause déjà identifiée du blocage sur
-le test Emplacement (mapping XML invalide sur les fichiers reconstruits).
+Historique : une première version éditait les cellules via un parse +
+ET.tostring() complet de la feuille modifiée. Bug confirmé le 17/07/2026 :
+xml.etree.ElementTree ne préserve pas fidèlement les préfixes de namespace
+non explicitement enregistrés (notamment x14ac: sur les attributs
+<row ... x14ac:dyDescent="0.25">, quasi systématiques dans les fichiers
+Excel réels). En renommant ces préfixes à la sérialisation, Excel considère
+la feuille corrompue et la vide au moment de la réparation automatique à
+l'ouverture — exactement le symptôme observé : l'onglet modifié se
+retrouvait totalement vide après génération, alors que les autres onglets
+(non touchés, recopiés tels quels) restaient intacts.
 
-Ici, on édite uniquement la valeur des cellules concernées directement dans
-le XML du classeur (xl/worksheets/sheetN.xml), et on recopie TOUTES les
-autres parties du zip xlsx à l'identique, octet pour octet — y compris
-xmlMaps.xml et customXml.
+Fix : plus aucun aller-retour de sérialisation sur la feuille entière. Le
+XML est édité en texte brut, en ne remplaçant que l'exacte sous-chaîne
+`<c r="...">...</c>` de chaque cellule concernée. Tout le reste du XML
+(déclarations de namespace, attributs x14ac/mc/xr, mise en forme, lignes
+non modifiées) reste strictement identique, octet pour octet.
 
-Convention de structure confirmée sur les fichiers BC de ce projet :
-  ligne 1 = métadonnées package, ligne 2 = vide, ligne 3 = en-têtes,
-  ligne 4+ = données. D'où le "+4" déjà utilisé dans validator_axe_a.py /
-  validator_axe_b.py pour numéroter les lignes — même convention réutilisée
-  ici (le "Ligne" d'une anomalie EST le numéro de ligne Excel réel).
+ElementTree n'est utilisé qu'en LECTURE SEULE (pour repérer la ligne
+d'en-têtes et mapper nom de colonne -> lettre Excel) — jamais réinjecté.
 """
 from __future__ import annotations
 import io
@@ -27,7 +31,6 @@ from xml.etree import ElementTree as ET
 
 _NS_MAIN = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 _NS_REL  = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
-ET.register_namespace("", _NS_MAIN)
 
 HEADER_ROW = 3  # confirmé : ligne des en-têtes de colonnes
 
@@ -81,7 +84,7 @@ def _cell_text(c, shared_strings: list[str]) -> str:
 
 
 def _build_header_map(root, shared_strings: list[str]) -> dict[str, str]:
-    """Colonne (nom d'en-tête) -> lettre Excel, lue sur HEADER_ROW."""
+    """Colonne (nom d'en-tête) -> lettre Excel, lue sur HEADER_ROW. Lecture seule."""
     header_map: dict[str, str] = {}
     sheet_data = root.find(_q("sheetData"))
     if sheet_data is None:
@@ -101,15 +104,59 @@ def _build_header_map(root, shared_strings: list[str]) -> dict[str, str]:
     return header_map
 
 
+def _xml_escape(value: str) -> str:
+    return (
+        str(value)
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
+
+
+def _extract_attr(tag_text: str, attr: str) -> str | None:
+    m = re.search(rf'\b{attr}="([^"]*)"', tag_text)
+    return m.group(1) if m else None
+
+
+def _find_row_span(xml_text: str, row_number: int) -> tuple[int, int] | None:
+    """(start, end) de la balise <row r="N" ...>...</row> (ou auto-fermante) dans xml_text."""
+    m = re.search(rf'<row\b[^>]*\br="{row_number}"[^>]*>', xml_text)
+    if m and not m.group(0).endswith("/>"):
+        m_close = re.search(r"</row>", xml_text[m.end():])
+        if not m_close:
+            return None
+        return (m.start(), m.end() + m_close.end())
+    m_self = re.search(rf'<row\b[^>]*\br="{row_number}"[^>]*/>', xml_text)
+    if m_self:
+        return (m_self.start(), m_self.end())
+    return None
+
+
+def _replace_cell_in_row(row_xml: str, cell_ref: str, new_value: str) -> str:
+    """Remplace la cellule cell_ref dans le fragment row_xml par une inline string, en gardant son style (s=)."""
+    esc_ref = re.escape(cell_ref)
+
+    m = re.search(rf'<c\b[^>]*\br="{esc_ref}"[^>]*>.*?</c>', row_xml, re.DOTALL)
+    if not m:
+        m = re.search(rf'<c\b[^>]*\br="{esc_ref}"[^>]*/>', row_xml)
+    if not m:
+        return row_xml  # cellule introuvable — on laisse la ligne intacte plutôt que deviner
+
+    style  = _extract_attr(m.group(0), "s")
+    s_attr = f' s="{style}"' if style else ""
+    new_cell = f'<c r="{cell_ref}"{s_attr} t="inlineStr"><is><t xml:space="preserve">{_xml_escape(new_value)}</t></is></c>'
+    return row_xml[:m.start()] + new_cell + row_xml[m.end():]
+
+
 def apply_corrections(original_bytes: bytes, corrections: list[dict]) -> bytes:
     """
     corrections : [{"sheet": str, "excel_row": int, "column_name": str, "new_value": str}, ...]
 
-    Modifie uniquement les cellules concernées, en les convertissant en
-    inline string (t="inlineStr") — ce qui évite de toucher à la table
-    sharedStrings.xml partagée par toutes les autres cellules non modifiées.
-    Toutes les parties du zip non touchées (dont xmlMaps.xml, customXml/*)
-    sont recopiées à l'identique.
+    Édition en texte brut : seule la sous-chaîne exacte de chaque cellule
+    concernée est remplacée. Tout le reste du XML de la feuille (namespaces,
+    mise en forme, lignes non touchées) reste identique, octet pour octet.
+    Les autres parties du zip (dont xmlMaps.xml, customXml/*) sont recopiées
+    à l'identique.
     """
     src    = zipfile.ZipFile(io.BytesIO(original_bytes), "r")
     shared = _shared_strings(src)
@@ -118,49 +165,41 @@ def apply_corrections(original_bytes: bytes, corrections: list[dict]) -> bytes:
     for corr in corrections:
         by_sheet.setdefault(corr["sheet"], []).append(corr)
 
-    modified_xml: dict[str, bytes] = {}
+    modified_bytes: dict[str, bytes] = {}
 
     for sheet_name, corr_list in by_sheet.items():
         sheet_path = _sheet_xml_path(src, sheet_name)
         if not sheet_path or sheet_path not in src.namelist():
             continue
 
-        root       = ET.fromstring(src.read(sheet_path))
-        header_map = _build_header_map(root, shared)
-        sheet_data = root.find(_q("sheetData"))
-        if sheet_data is None:
-            continue
+        raw_bytes = src.read(sheet_path)
+        # Lecture seule (jamais réinjecté) : sert uniquement à mapper nom de
+        # colonne -> lettre Excel.
+        header_map = _build_header_map(ET.fromstring(raw_bytes), shared)
 
-        row_map = {row.get("r"): row for row in sheet_data.findall(_q("row"))}
+        xml_text = raw_bytes.decode("utf-8")
 
         for corr in corr_list:
             col_letter = header_map.get(corr["column_name"])
             if not col_letter:
-                continue  # en-tête introuvable — on ne touche pas au fichier plutôt que de deviner
-
-            excel_row = str(corr["excel_row"])
-            cell_ref  = f"{col_letter}{excel_row}"
-            row_el    = row_map.get(excel_row)
-            if row_el is None:
                 continue
 
-            cell_el = next((c for c in row_el.findall(_q("c")) if c.get("r") == cell_ref), None)
-            if cell_el is None:
+            cell_ref = f"{col_letter}{corr['excel_row']}"
+            span = _find_row_span(xml_text, corr["excel_row"])
+            if not span:
                 continue
 
-            for child in list(cell_el):
-                cell_el.remove(child)
-            cell_el.set("t", "inlineStr")
-            is_el = ET.SubElement(cell_el, _q("is"))
-            t_el  = ET.SubElement(is_el, _q("t"))
-            t_el.text = str(corr["new_value"])
+            start, end  = span
+            row_xml     = xml_text[start:end]
+            new_row_xml = _replace_cell_in_row(row_xml, cell_ref, str(corr["new_value"]))
+            xml_text    = xml_text[:start] + new_row_xml + xml_text[end:]
 
-        modified_xml[sheet_path] = ET.tostring(root, xml_declaration=True, encoding="UTF-8")
+        modified_bytes[sheet_path] = xml_text.encode("utf-8")
 
     out_buf = io.BytesIO()
     with zipfile.ZipFile(out_buf, "w", zipfile.ZIP_DEFLATED) as dst:
         for item in src.infolist():
-            data = modified_xml.get(item.filename, src.read(item.filename))
+            data = modified_bytes.get(item.filename, src.read(item.filename))
             dst.writestr(item, data)
 
     src.close()
