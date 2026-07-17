@@ -148,5 +148,11 @@ def get_file_summary(parse_result: dict) -> dict:
         "nb_ref_tables":   len(parse_result.get("ref_tables", [])),
         "nb_total":        len(parse_result["sheet_names"]),
         "data_tables":     data_info,
-        "total_data_rows": sum(total_rows.get(s, 0) for s in data_tables),
+        # Compte les lignes sur data_tables ET ref_tables — la classification
+        # DATA_TABLES est une liste figée non exhaustive (cf. tables 13, 288),
+        # ne pas y limiter le total affiché à l'utilisateur.
+        "total_data_rows": sum(
+            total_rows.get(s, 0)
+            for s in data_tables + parse_result.get("ref_tables", [])
+        ),
     }
