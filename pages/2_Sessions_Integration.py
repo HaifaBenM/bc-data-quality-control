@@ -894,7 +894,7 @@ with tab_main:
                         st.error(f"❌ {res}")
         with cst:
             if major == 0:
-                st.success("✅ Prêt pour Sprint 7")
+                st.success("✅ Aucune anomalie majeure")
             else:
                 st.warning(f"⚠️ {major} anomalie(s) majeure(s)")
 
