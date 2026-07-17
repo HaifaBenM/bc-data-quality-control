@@ -219,7 +219,7 @@ def merge_results(axe_a: dict, axe_b: dict, axe_c: dict, parse_result: dict = No
     return merged
 
 
-def display_unified_results(merged: dict, axe_c: dict):
+def display_unified_results(merged: dict, axe_c: dict, pr: dict = None):
     all_anomalies = merged.get("all_anomalies", [])
     real          = [a for a in all_anomalies if a.get("Ligne", 0) > 0]
     info          = [a for a in all_anomalies if a.get("Ligne", 0) == 0]
@@ -251,6 +251,17 @@ def display_unified_results(merged: dict, axe_c: dict):
             anomalies      = by_sheet.get(sn, [])
             real_anomalies = [a for a in anomalies if a.get("Ligne", 0) > 0]
             info_anomalies = [a for a in anomalies if a.get("Ligne", 0) == 0]
+
+            # Données source SCOPÉES à cet onglet uniquement — affichées
+            # avant le early-return "aucune anomalie" pour rester visibles
+            # même sur un onglet propre.
+            if pr:
+                df_sn = pr.get("sheets", {}).get(sn)
+                if df_sn is not None and not df_sn.empty:
+                    with st.expander(f"👀 Données source — {sn}"):
+                        meta_sn = pr.get("metadata", {}).get(sn, {})
+                        st.markdown(f"**{sn}** — {meta_sn.get('label', '')} · {len(df_sn)} lignes")
+                        st.dataframe(df_sn.head(10), use_container_width=True, hide_index=True)
 
             if not real_anomalies and not info_anomalies:
                 st.success("✅ Aucune anomalie.")
@@ -727,16 +738,7 @@ with tab_main:
             st.markdown('<span class="tag tag-plus">⭐ Plus</span> Valeur ajoutée de notre outil', unsafe_allow_html=True)
         st.markdown("---")
 
-        display_unified_results(merged, axe_c)
-
-        if pr:
-            with st.expander("👀 Données source"):
-                for sn in pr.get("data_tables", []) + pr.get("ref_tables", []):
-                    df = pr["sheets"].get(sn)
-                    if df is not None and not df.empty:
-                        meta = pr.get("metadata", {}).get(sn, {})
-                        st.markdown(f"**{sn}** — {meta.get('label', '')} · {len(df)} lignes")
-                        st.dataframe(df.head(10), use_container_width=True, hide_index=True)
+        display_unified_results(merged, axe_c, pr)
 
         st.markdown("---")
         cb, cr, cs, cst = st.columns([2, 2, 3, 3])
