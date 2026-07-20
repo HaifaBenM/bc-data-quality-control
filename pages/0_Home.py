@@ -67,8 +67,8 @@ if role:
 st.markdown(f"""
 <div class="login-card">
     <div class="login-logo">
-        <div style="font-size:3.5rem"><img src="data:image/x-icon;base64,{_icon_b64()}" style="height:3.5rem;width:3.5rem;vertical-align:middle;"></div>
-        <h1>BC Data Quality Control</h1>
+        <div style="font-size:2.5rem"><img src="data:image/x-icon;base64,{_icon_b64()}" style="height:2.5rem;width:2.5rem;vertical-align:middle;"></div>
+        <h1>Contrôle Qualité des Imports Business Central</h1>
         <p>Microsoft Dynamics 365 Business Central · Talan</p>
     </div>
 </div>
@@ -109,6 +109,6 @@ if submitted:
 
 st.markdown(
     "<p style='text-align:center;color:#CBD5E1;font-size:.75rem;margin-top:2rem'>"
-    "BC Data Quality Control — Talan</p>",
+    "Contrôle Qualité des Imports Business Central — Talan</p>",
     unsafe_allow_html=True,
 )

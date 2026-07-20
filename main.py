@@ -3,8 +3,8 @@ import streamlit as st
 from app.db.profiles_db import get_all_profiles
 
 st.set_page_config(
-    page_title="BC Data Quality Control",
-    page_icon="🔍",
+    page_title="Contrôle Qualité des Imports Business Central — Talan",
+    page_icon="image/d365businesscentral-1.ico",
     layout="wide",
     initial_sidebar_state="expanded",
 )
