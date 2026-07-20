@@ -1,5 +1,12 @@
+import base64
 import streamlit as st
 from app.core.auth import login, get_role, get_display_name, logout
+
+
+@st.cache_data
+def _icon_b64() -> str:
+    with open("image/d365businesscentral-1.ico", "rb") as f:
+        return base64.b64encode(f.read()).decode()
 
 
 st.markdown("""
@@ -57,10 +64,10 @@ if role:
     st.stop()
 
 # ── Formulaire de connexion ───────────────────────────────────────────────────
-st.markdown("""
+st.markdown(f"""
 <div class="login-card">
     <div class="login-logo">
-        <div style="font-size:2.5rem">🔍</div>
+        <div style="font-size:2.5rem"><img src="data:image/x-icon;base64,{_icon_b64()}" style="height:2.5rem;width:2.5rem;vertical-align:middle;"></div>
         <h1>BC Data Quality Control</h1>
         <p>Microsoft Dynamics 365 Business Central · Talan</p>
     </div>
