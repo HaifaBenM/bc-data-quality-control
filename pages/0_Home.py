@@ -67,7 +67,7 @@ if role:
 st.markdown(f"""
 <div class="login-card">
     <div class="login-logo">
-        <div style="font-size:2.5rem"><img src="data:image/x-icon;base64,{_icon_b64()}" style="height:2.5rem;width:2.5rem;vertical-align:middle;"></div>
+        <div style="font-size:4rem"><img src="data:image/x-icon;base64,{_icon_b64()}" style="height:4rem;width:4rem;vertical-align:middle;"></div>
         <h1>Contrôle Qualité des Imports Business Central</h1>
         <p>Microsoft Dynamics 365 Business Central · Talan</p>
     </div>
