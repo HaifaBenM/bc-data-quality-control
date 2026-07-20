@@ -614,7 +614,7 @@ with tab_main:
                     sel_pkg_code, sel_pkg_name = "", ""
 
         with col2:
-            date_controle = st.date_input("📅 Date de contrôle", value=datetime.now().date())
+            date_controle = st.date_input("📅 Date de contrôle", value=datetime.now().date(), format="DD/MM/YYYY")
             notes     = st.text_area("Notes", height=68, key=f"step1_notes_{active_client}")
             gemini_ok = is_gemini_available()
             st.markdown("🤖 **Suggestions IA :** " + ("✅ Activées" if gemini_ok else "⚠️ Non configurées"))
