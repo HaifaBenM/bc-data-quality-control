@@ -9,6 +9,8 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+st.logo("image/talan-logo.png", size="large")  # ⚠️ chemin à corriger — voir note ci-dessous
+
 
 @st.cache_data(ttl=60)
 def _load_profiles() -> list:
