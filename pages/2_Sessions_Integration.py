@@ -392,7 +392,9 @@ def display_correction_workflow(merged: dict, cfg: dict):
     # totalité des anomalies réelles du tableau, d'où : aucune ligne à
     # cocher, aucun fichier généré.
     corrigibles = [a for a in real if a.get("Classification") == "VALEUR_CORRIGIBLE"]
-    prereqs = build_prerequisites_report(real)
+    prereqs = build_prerequisites_report(
+        real, profile_code=cfg.get("client_code", ""), company_id=cfg.get("company_id", "")
+    )
 
     st.markdown("---")
     st.markdown('<div class="step-header">🔧 Correction & génération du fichier</div>', unsafe_allow_html=True)

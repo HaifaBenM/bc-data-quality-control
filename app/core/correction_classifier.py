@@ -60,15 +60,20 @@ def classify_reference_anomaly(value: str, valid_codes: set[str]) -> dict:
     return {"classification": "PREALABLE_BC_REQUIS", "suggestions": []}
 
 
-def build_prerequisites_report(anomalies: list[dict]) -> list[dict]:
+def build_prerequisites_report(
+    anomalies: list[dict], profile_code: str = "", company_id: str = "",
+) -> list[dict]:
     """
     Extrait les anomalies PREALABLE_BC_REQUIS et les regroupe par
     (table référencée, valeur manquante) pour produire une checklist de
     données maîtresses à créer côté BC avant import — distincte du fichier
     corrigé (ce ne sont PAS des corrections de valeur).
 
-    Inclut le nom lisible de la table BC (via master_data_config), pas
-    seulement son ID numérique.
+    Nom de table : interroge BC dynamiquement en priorité (cache Supabase +
+    endpoint AL Table Caption API) si profile_code/company_id sont fournis ;
+    ne retombe sur le dictionnaire statique master_data_config que si
+    l'appel BC échoue ou si les identifiants ne sont pas fournis (usage sans
+    contexte BC, ex: tests).
     """
     from app.core.master_data_config import get_table_label
 
@@ -79,9 +84,19 @@ def build_prerequisites_report(anomalies: list[dict]) -> list[dict]:
         table_id = str(a.get("Table référencée", ""))
         key = (table_id, a.get("Valeur", ""))
         if key not in grouped:
+            table_name = None
+            if profile_code and company_id and table_id:
+                try:
+                    from app.db.metadata_db import get_table_caption_cached
+                    table_name = get_table_caption_cached(profile_code, company_id, table_id)
+                except Exception:
+                    table_name = None  # BC injoignable — on retombe sur le statique juste en dessous
+            if not table_name:
+                table_name = get_table_label(table_id)
+
             grouped[key] = {
                 "Table référencée BC": table_id,
-                "Nom table BC":        get_table_label(table_id),
+                "Nom table BC":        table_name,
                 "Code manquant":       a.get("Valeur", ""),
                 "Champs concernés":    set(),
                 "Occurrences":         0,
