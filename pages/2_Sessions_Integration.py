@@ -12,7 +12,7 @@ from app.core.execution_planner import get_execution_plan
 from app.core.simulation_context import SimulationContext
 from app.core.metadata_loader import MetadataLoader
 from app.core.correction_generator import apply_corrections
-from app.core.correction_classifier import build_prerequisites_report
+from app.core.correction_classifier import build_prerequisites_report, build_prerequisites_excel
 from app.db.profiles_db import get_profile_by_code
 from app.core.bc_api import get_access_token, get_companies, get_packages_qc
 from app.db.sessions_db import (
@@ -406,13 +406,12 @@ def display_correction_workflow(merged: dict, cfg: dict):
         )
         with st.expander(f"🟣 Prérequis BC à créer ({len(prereqs)})", expanded=True):
             st.dataframe(pd.DataFrame(prereqs), use_container_width=True, hide_index=True)
-            prereq_csv = pd.DataFrame(prereqs).to_csv(index=False).encode("utf-8")
             st.download_button(
-                "⬇️ Télécharger la checklist prérequis BC (CSV)",
-                data=prereq_csv,
-                file_name=f"prerequis_bc_{cfg.get('session_name', 'session')}.csv",
-                mime="text/csv",
-                key="dl_prereq_csv",
+                "⬇️ Télécharger la checklist prérequis BC (Excel)",
+                data=build_prerequisites_excel(prereqs),
+                file_name=f"prerequis_bc_{cfg.get('session_name', 'session')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="dl_prereq_xlsx",
             )
 
     if not corrigibles:
@@ -973,10 +972,10 @@ with tab_ses:
                         )
                 with dcol3:
                     if prereq_list:
-                        prereq_csv = pd.DataFrame(prereq_list).to_csv(index=False).encode("utf-8")
                         st.download_button(
-                            "⬇️ Prérequis BC", data=prereq_csv,
-                            file_name=f"prerequis_bc_{sid}.csv", mime="text/csv",
+                            "⬇️ Prérequis BC", data=build_prerequisites_excel(prereq_list),
+                            file_name=f"prerequis_bc_{sid}.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                             key=f"dl_prereq_{sid}", use_container_width=True,
                         )
             with ca:
