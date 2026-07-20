@@ -489,10 +489,7 @@ def display_correction_workflow(merged: dict, cfg: dict):
                         f"CORRIGE_{cfg.get('file_name', 'fichier.xlsx')}"
                     )
                     st.session_state["prerequisites_report"] = prereqs
-                    st.success(
-                        f"✅ Fichier généré avec {len(corrections)} correction(s) appliquée(s). "
-                        f"⚠️ Non testé contre un import BC réel — à valider avant démo."
-                    )
+                    st.success(f"✅ Fichier généré avec {len(corrections)} correction(s) appliquée(s).")
                 except Exception as e:
                     st.error(f"❌ Erreur lors de la génération : {e}")
 
