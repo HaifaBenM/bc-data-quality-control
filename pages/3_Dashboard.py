@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from app.core.auth import require_role
+from app.core.auth import require_role, is_consultant
 from app.db.sessions_db import get_all_sessions, STATUS_COLORS, STATUS_ICONS
 
 require_role()
@@ -27,9 +27,73 @@ col4.metric("Fichiers prêts BC",   ready_ses)
 
 st.markdown("---")
 
+
+def render_charts(session_list: list, key_prefix: str, show_by_client: bool = False) -> None:
+    """
+    Rend les graphiques réactifs à partir d'une liste de sessions déjà
+    chargée (pas de nouvel appel réseau ici — la liste est passée en
+    argument pour pouvoir être réutilisée telle quelle par la vue client
+    scopée et par la vue globale consultant).
+
+    Graphiques natifs Streamlit (st.bar_chart / st.line_chart) — pas de
+    dépendance supplémentaire (plotly/altair) à ajouter à requirements.txt.
+    """
+    if not session_list:
+        st.info("Aucune donnée à afficher pour le moment.")
+        return
+
+    df = pd.DataFrame([{
+        "date":            (s.get("created_at", "") or "")[:10],
+        "profile_code":    s.get("profile_code", ""),
+        "status":          s.get("status", "Nouvelle"),
+        "total_anomalies": s.get("total_anomalies", 0) or 0,
+        "major_anomalies": s.get("major_anomalies", 0) or 0,
+        "minor_anomalies": s.get("minor_anomalies", 0) or 0,
+    } for s in session_list])
+    df = df[df["date"] != ""]
+
+    cg1, cg2 = st.columns(2)
+
+    with cg1:
+        st.markdown("**📈 Évolution des anomalies dans le temps**")
+        if df.empty:
+            st.caption("Pas de date exploitable sur ces sessions.")
+        else:
+            evol = (
+                df.groupby("date")[["major_anomalies", "minor_anomalies"]]
+                .sum()
+                .rename(columns={"major_anomalies": "Majeures", "minor_anomalies": "Mineures"})
+                .sort_index()
+            )
+            st.line_chart(evol, use_container_width=True)
+
+    with cg2:
+        st.markdown("**🔴🟠 Répartition majeures / mineures**")
+        repartition = pd.DataFrame({
+            "Nombre": [df["major_anomalies"].sum(), df["minor_anomalies"].sum()]
+        }, index=["Majeures", "Mineures"])
+        st.bar_chart(repartition, use_container_width=True)
+
+    cg3, cg4 = st.columns(2)
+
+    with cg3:
+        st.markdown("**📋 Sessions par statut**")
+        by_status = df["status"].value_counts().rename("Nombre")
+        st.bar_chart(by_status, use_container_width=True)
+
+    if show_by_client:
+        with cg4:
+            st.markdown("**👥 Sessions par client**")
+            by_client = df["profile_code"].value_counts().rename("Nombre")
+            st.bar_chart(by_client, use_container_width=True)
+
+
 if not sessions:
     st.info("Aucune session pour ce client. Lancez une analyse depuis **Sessions Intégration** ou **Packages**.")
 else:
+    render_charts(sessions, key_prefix="client")
+    st.markdown("---")
+
     st.markdown(f"### 📋 {total_ses} session(s)")
 
     for s in sessions:
@@ -77,3 +141,27 @@ else:
 
         with st.expander("📈 Données détaillées"):
             st.dataframe(df_stats, use_container_width=True, hide_index=True)
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# VUE GLOBALE — réservée aux consultants, tous clients confondus
+# ════════════════════════════════════════════════════════════════════════════
+if is_consultant():
+    st.markdown("---")
+    st.markdown("## 🌐 Vue globale — tous clients")
+    st.caption("Réservée aux consultants — agrège les sessions de tous les clients, indépendamment du client actif.")
+
+    all_sessions = get_all_sessions()  # sans profile_code = toutes les sessions
+
+    gcol1, gcol2, gcol3, gcol4 = st.columns(4)
+    g_total  = len(all_sessions)
+    g_active = sum(1 for s in all_sessions if s.get("status") not in ("Terminée",))
+    g_major  = sum(s.get("major_anomalies", 0) for s in all_sessions)
+    g_ready  = sum(1 for s in all_sessions if s.get("major_anomalies", 0) == 0 and s.get("status") == "Terminée")
+    gcol1.metric("Sessions totales (tous clients)", g_total)
+    gcol2.metric("En cours",                         g_active)
+    gcol3.metric("Anomalies majeures",               g_major)
+    gcol4.metric("Fichiers prêts BC",                g_ready)
+
+    st.markdown("---")
+    render_charts(all_sessions, key_prefix="global", show_by_client=True)
