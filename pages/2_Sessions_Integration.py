@@ -799,6 +799,21 @@ with tab_main:
             _roadmap_key = f"level_roadmap_{cfg.get('pkg_code', '')}_{cfg.get('company_id', '')}"
 
             if _level_cfg:
+                _cached = st.session_state.get(_roadmap_key)
+                # Garde-fou : un objet en cache qui n'est pas une liste de
+                # RoadmapEntry (ex. resté d'une version antérieure du code
+                # où build_roadmap() retournait un tuple) ne doit jamais
+                # planter silencieusement plus loin (refresh_roadmap,
+                # is_level_unlocked...). On le détecte et on force une
+                # reconstruction propre plutôt que de laisser l'AttributeError
+                # remonter à l'utilisateur.
+                _cache_valid = isinstance(_cached, list) and (
+                    len(_cached) == 0 or hasattr(_cached[0], "status")
+                )
+                if _cached is not None and not _cache_valid:
+                    st.warning("⚠️ Cache de niveaux dans un format obsolète détecté — reconstruction automatique.")
+                    del st.session_state[_roadmap_key]
+
                 if _roadmap_key not in st.session_state:
                     try:
                         _profile = get_profile_by_code(cfg["client_code"])
