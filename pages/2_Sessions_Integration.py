@@ -8,7 +8,12 @@ from app.core.validator_axe_a import validate_file_axe_a
 from app.core.validator_axe_b import validate_file_axe_b
 from app.core.validator_axe_c import validate_file_axe_c, get_gemini_api_key, is_gemini_available
 from app.core.auth import require_role
-from app.core.execution_planner import get_execution_plan
+from app.core.execution_planner import get_execution_plan, build_plan_from_bc
+from app.core.integration_levels import (
+    load_level_config, traverse_dependencies, build_roadmap,
+    is_level_unlocked, refresh_roadmap, all_validated,
+)
+from app.db.supabase_client import get_supabase_client
 from app.core.simulation_context import SimulationContext
 from app.core.metadata_loader import MetadataLoader
 from app.core.correction_generator import apply_corrections
@@ -516,6 +521,14 @@ def reset_session():
               # signature et l'horodatage gelés de la session précédente.
               "ses_name_input", "_ses_name_sig", "_ses_name_ts"]:
         st.session_state[k] = (1 if k == "step" else {} if k == "config" else None)
+    # Niveaux prérequis (Besoin 2) : la roadmap et les résolutions manuelles
+    # de package_code sont propres à un (package, société) donné — à purger
+    # explicitement, elles ne sont pas dans la liste fixe ci-dessus car leur
+    # nom de clé varie (level_roadmap_<pkg>_<company>).
+    for k in list(st.session_state.keys()):
+        if k.startswith("level_roadmap_"):
+            del st.session_state[k]
+    st.session_state["level_pkg_resolve"] = {}
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -532,6 +545,7 @@ with tab_main:
         ("merged_result", None), ("axe_c_result", None), ("saved_session_id", None),
         ("original_file_bytes", None), ("generated_file_bytes", None),
         ("generated_file_name", None), ("prerequisites_report", None),
+        ("level_pkg_resolve", {}),
     ]:
         if key not in st.session_state:
             st.session_state[key] = default
@@ -766,6 +780,95 @@ with tab_main:
                 f'<b>{t["sheet"]}</b> — {t["label"]} · <b>{t["rows"]} lignes · {t["cols"]} champs</b></div>',
                 unsafe_allow_html=True
             )
+
+        # ── Niveaux prérequis (Besoin 2) — gate avant l'analyse ──────────────
+        # Phase 1 (détection) + Phase 2 (validation BC), avant d'autoriser la
+        # Phase 3 (analyse Axe A/Axe B ci-dessous, inchangée). Ne s'exécute
+        # que si la structure est valide — pas la peine de vérifier les
+        # niveaux sur un fichier qu'on va de toute façon renvoyer à l'étape 2.
+        _levels_ok = True
+        if val["is_valid"]:
+            if "level_config" not in st.session_state:
+                try:
+                    st.session_state.level_config = load_level_config(get_supabase_client())
+                except Exception as e:
+                    st.session_state.level_config = {}
+                    st.warning(f"⚠️ Impossible de charger level_config : {e}")
+
+            _level_cfg = st.session_state.level_config
+            _roadmap_key = f"level_roadmap_{cfg.get('pkg_code', '')}_{cfg.get('company_id', '')}"
+
+            if _level_cfg:
+                if _roadmap_key not in st.session_state:
+                    try:
+                        _profile = get_profile_by_code(cfg["client_code"])
+                        _tid = _profile.get("bc_tenant_id", "").strip()
+                        _env = _profile.get("bc_environment", "").strip()
+                        _cs  = _profile.get("bc_client_secret", "").strip()
+                        _cid = _profile.get("bc_client_id", "").strip()
+                        _token = get_access_token(_tid, _cid, _cs)
+                        _root_plan = get_execution_plan(
+                            profile_code=cfg["client_code"],
+                            company_id=cfg["company_id"],
+                            package_code=cfg["pkg_code"],
+                        )
+                        _pkg_resolve = st.session_state.get("level_pkg_resolve", {})
+                        _discovered = traverse_dependencies(
+                            _root_plan, build_plan_from_bc,
+                            _tid, _env, cfg["company_id"], _token,
+                            lambda tid: _pkg_resolve.get(tid),
+                        )
+                        st.session_state[_roadmap_key] = build_roadmap(_discovered, _level_cfg)
+                    except Exception as e:
+                        st.session_state[_roadmap_key] = []
+                        st.warning(f"⚠️ Détection des niveaux impossible pour l'instant : {e}")
+
+                _roadmap = st.session_state[_roadmap_key]
+
+                if _roadmap:
+                    st.markdown("---")
+                    st.markdown('<div class="step-header">🧱 Prérequis BC détectés</div>', unsafe_allow_html=True)
+
+                    if st.button("🔄 Revérifier les niveaux", key="btn_refresh_levels"):
+                        with st.spinner("Vérification BC en cours..."):
+                            st.session_state[_roadmap_key] = refresh_roadmap(
+                                cfg["client_code"], cfg["company_id"], _roadmap
+                            )
+                        st.rerun()
+
+                    _current = "__unset__"
+                    for _entry in _roadmap:
+                        if _entry.level_info.level != _current:
+                            _current = _entry.level_info.level
+                            _header = "Non classé" if _current is None else f"Niveau {_current}"
+                            st.markdown(f"**{_header}**")
+
+                        _unlocked = is_level_unlocked(_entry.level_info.level, _roadmap)
+                        _label = _entry.level_info.table_name
+                        if _entry.level_info.sub_level:
+                            _label = f"[{_entry.level_info.sub_level}] {_label}"
+
+                        _icon = "✅" if _entry.status == "validated" else ("🔒" if not _unlocked else "☐")
+                        st.markdown(f"{_icon} {_label}")
+
+                        if not _entry.chain_resolved:
+                            with st.expander(f"⚠️ package_code inconnu pour {_label} — saisir pour approfondir la détection"):
+                                _pc = st.text_input(
+                                    "package_code BC pour cette table",
+                                    key=f"pkgresolve_{_entry.level_info.table_id}",
+                                )
+                                if _pc and st.button("Relancer la détection", key=f"redetect_{_entry.level_info.table_id}"):
+                                    st.session_state.setdefault("level_pkg_resolve", {})[_entry.level_info.table_id] = _pc
+                                    del st.session_state[_roadmap_key]
+                                    st.rerun()
+
+                    _levels_ok = all_validated(_roadmap)
+                    if not _levels_ok:
+                        st.info("🔒 L'analyse qualité reste verrouillée tant que tous les niveaux ne sont pas validés dans BC.")
+                # _roadmap vide => aucune dépendance de niveau détectée => _levels_ok reste True (analyse directe)
+            # level_config vide/non chargée : ne bloque pas l'analyse — à corriger si level_config
+            # doit être rendue obligatoire (dépend de si tu veux imposer le seed avant tout usage).
+
         st.markdown("---")
         cb, cv = st.columns([2, 5])
         with cb:
@@ -776,7 +879,10 @@ with tab_main:
                 st.rerun()
         with cv:
             if val["is_valid"]:
-                if st.button("🚀 Lancer l'analyse qualité →", type="primary", use_container_width=True):
+                if st.button(
+                    "🚀 Lancer l'analyse qualité →", type="primary", use_container_width=True,
+                    disabled=not _levels_ok,
+                ):
                     api_key     = get_gemini_api_key()
                     client_code = cfg.get("client_code", "")
 
