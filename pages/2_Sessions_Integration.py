@@ -509,7 +509,12 @@ def reset_session():
     for k in ["step", "config", "parse_result", "validation",
               "merged_result", "axe_c_result", "saved_session_id",
               "original_file_bytes", "generated_file_bytes",
-              "generated_file_name", "prerequisites_report"]:
+              "generated_file_name", "prerequisites_report",
+              # Auto-remplissage du nom de session (package + date/heure) :
+              # sans ce nettoyage, une nouvelle session créée juste après un
+              # "Recommencer" sur le même package/date garderait la
+              # signature et l'horodatage gelés de la session précédente.
+              "ses_name_input", "_ses_name_sig", "_ses_name_ts"]:
         st.session_state[k] = (1 if k == "step" else {} if k == "config" else None)
 
 
@@ -548,22 +553,13 @@ with tab_main:
         st.markdown('<div class="step-header">Étape 1 — Informations</div>', unsafe_allow_html=True)
         col1, col2 = st.columns(2)
 
-        with col1:
-            default_name = f"{active_pkg_code} — " if active_pkg_code else ""
-            session_name = st.text_input(
-                "Nom de la session *",
-                value=default_name,
-                placeholder="MDD Vente — Juin 2026",
-            )
-            st.markdown(
-                f'<div style="background:#EEF4FD;border:1px solid #BFDBFE;border-radius:6px;'
-                f'padding:.5rem .75rem;font-size:.88rem;color:#1B3A6B;">'
-                f'👤 <b>{active_client_name}</b> ({active_client})'
-                f'{"<br>📦 <b>" + active_pkg_name + "</b>" if active_pkg_name else ""}'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
+        # Date de contrôle calculée AVANT le nom de session : le nom en
+        # dépend (package + date/heure). Toujours dans col2 visuellement,
+        # mais la valeur doit exister avant d'être utilisée dans col1.
+        with col2:
+            date_controle = st.date_input("📅 Date de contrôle", value=datetime.now().date(), format="DD/MM/YYYY")
 
+        with col1:
             if _ses_err:
                 st.warning(f"Impossible de charger les sociétés BC : {_ses_err}")
                 sel_company_id, sel_company_name = _default_cid, _default_cname
@@ -593,7 +589,6 @@ with tab_main:
             sel_pkg_name = active_pkg_name
 
             if not active_pkg_code:
-                st.markdown("---")
                 st.markdown("**📦 Package BC**")
                 _pkgs_available = _load_pkgs_ses(active_client, sel_company_id)
                 if _pkgs_available:
@@ -612,9 +607,42 @@ with tab_main:
                 else:
                     st.warning("Aucun package visible. Configurez la visibilité depuis Packages.")
                     sel_pkg_code, sel_pkg_name = "", ""
+                st.markdown("---")
+
+            # Nom de session auto-rempli = package + date/heure de contrôle,
+            # au lieu d'une saisie manuelle. L'horodatage est GELÉ dans
+            # session_state dès que le package ou la date change (signature
+            # trackée via _ses_name_sig) et non recalculé à chaque rerun —
+            # sinon datetime.now() changerait à chaque interaction (taper
+            # dans les notes, cocher une case...) et écraserait le champ en
+            # boucle, y compris après une édition manuelle. Granularité
+            # heure:minute:seconde pour éviter les doublons de nom si deux
+            # sessions sont créées le même jour sur le même package.
+            _name_sig    = f"{sel_pkg_code}|{date_controle.isoformat()}"
+            _sig_changed = st.session_state.get("_ses_name_sig") != _name_sig
+            if _sig_changed:
+                st.session_state["_ses_name_sig"] = _name_sig
+                st.session_state["_ses_name_ts"]  = datetime.now()
+            _ts = st.session_state.get("_ses_name_ts", datetime.now())
+            if _sig_changed or "ses_name_input" not in st.session_state:
+                st.session_state["ses_name_input"] = (
+                    f"{sel_pkg_name} — {_ts.strftime('%d/%m/%Y %H:%M:%S')}" if sel_pkg_name else ""
+                )
+            session_name = st.text_input(
+                "Nom de la session *",
+                key="ses_name_input",
+                placeholder="MDD Vente — Juin 2026",
+            )
+            st.markdown(
+                f'<div style="background:#EEF4FD;border:1px solid #BFDBFE;border-radius:6px;'
+                f'padding:.5rem .75rem;font-size:.88rem;color:#1B3A6B;">'
+                f'👤 <b>{active_client_name}</b> ({active_client})'
+                f'{"<br>📦 <b>" + active_pkg_name + "</b>" if active_pkg_name else ""}'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
 
         with col2:
-            date_controle = st.date_input("📅 Date de contrôle", value=datetime.now().date(), format="DD/MM/YYYY")
             notes     = st.text_area("Notes", height=68, key=f"step1_notes_{active_client}")
             gemini_ok = is_gemini_available()
             st.markdown("🤖 **Suggestions IA :** " + ("✅ Activées" if gemini_ok else "⚠️ Non configurées"))
