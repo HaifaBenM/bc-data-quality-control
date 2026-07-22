@@ -935,9 +935,13 @@ with tab_main:
                         # Contournement TEMPORAIRE, consultant uniquement — le temps que
                         # les tables "Non classé" soient examinées avec Shema et classées
                         # dans level_config (niveau réel ou ignored=true). Ne doit jamais
-                        # être visible ni utilisable par un client : sans cette classification,
-                        # on ne sait pas ce qu'on laisse passer.
-                        if is_consultant():
+                        # être visible ni utilisable par un client. Affiché UNIQUEMENT s'il
+                        # existe réellement des entrées level=None dans la roadmap — pas
+                        # à chaque fois qu'un niveau correctement classé attend juste
+                        # d'être rempli dans BC (ça, c'est le fonctionnement normal du
+                        # gate, aucun rapport avec une classification manquante).
+                        _has_unclassified = any(e.level_info.level is None for e in _roadmap)
+                        if _has_unclassified and is_consultant():
                             st.warning(
                                 "🔧 Consultant — des tables restent non classées dans level_config. "
                                 "Ce contournement passe outre la vérification, uniquement pour "
