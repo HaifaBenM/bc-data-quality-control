@@ -7,7 +7,7 @@ from app.core.structure_validator import validate_file_structure
 from app.core.validator_axe_a import validate_file_axe_a
 from app.core.validator_axe_b import validate_file_axe_b
 from app.core.validator_axe_c import validate_file_axe_c, get_gemini_api_key, is_gemini_available
-from app.core.auth import require_role
+from app.core.auth import require_role, is_consultant
 from app.core.execution_planner import get_execution_plan, build_plan_from_bc
 from app.core.integration_levels import (
     load_level_config, traverse_dependencies, build_roadmap,
@@ -94,6 +94,22 @@ st.markdown("""
 .tag-auto  { background: #E1F5EE; color: #0F6E56; }
 .tag-prereq{ background: #F3E8FF; color: #7C3AED; }
 .conf-bar  { background: #E2E8F0; border-radius: 3px; height: 5px; margin: 4px 0; }
+.level-check-item {
+    display: flex; align-items: center; gap: .65rem;
+    padding: .45rem 0; font-size: .92rem;
+}
+.level-check-circle-done {
+    width: 22px; height: 22px; border-radius: 50%; background: #0F6E56;
+    color: white; display: flex; align-items: center; justify-content: center;
+    font-size: 13px; flex-shrink: 0;
+}
+.level-check-circle-todo {
+    width: 22px; height: 22px; border-radius: 50%;
+    border: 2px solid #CBD5E1; flex-shrink: 0;
+}
+.level-check-label-done   { color: #1B3A6B; font-weight: 500; }
+.level-check-label-todo   { color: #334155; }
+.level-check-label-locked { color: #94A3B8; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -840,17 +856,10 @@ with tab_main:
                             lambda tid: _pkg_resolve.get(tid),
                         )
                         _built = build_roadmap(_discovered, _level_cfg)
-                        # Tolérance TEMPORAIRE à l'ancien format tuple
-                        # (roadmap, unclassified) — signe que integration_levels.py
-                        # déployé n'est pas la version attendue. Ne pas laisser ce
-                        # bloc en prod une fois la vraie version confirmée en ligne.
+                        # Tolérance à un éventuel ancien format tuple (roadmap, unclassified)
+                        # — garde-fou silencieux, ne s'affiche plus au client. À retirer une
+                        # fois qu'on est sûr que le déploiement est stable dans la durée.
                         if isinstance(_built, tuple):
-                            st.error(
-                                "🔧 DIAGNOSTIC — build_roadmap() a renvoyé un tuple : "
-                                "le fichier integration_levels.py déployé n'est pas la "
-                                "version attendue (celle qui retourne une liste). "
-                                "Vérifie le fichier sur GitHub / le déploiement Streamlit Cloud."
-                            )
                             _built = _built[0]
                         st.session_state[_roadmap_key] = _built
                     except Exception as e:
@@ -870,24 +879,38 @@ with tab_main:
                             )
                         st.rerun()
 
-                    _current = "__unset__"
+                    _total   = len(_roadmap)
+                    _done    = sum(1 for e in _roadmap if e.status == "validated")
+                    _pct     = int(100 * _done / _total) if _total else 0
+
+                    st.markdown(f"**Progression — {_pct}%**")
+                    st.progress(_pct / 100)
+
                     try:
                         for _entry in _roadmap:
-                            if _entry.level_info.level != _current:
-                                _current = _entry.level_info.level
-                                _header = "Non classé" if _current is None else f"Niveau {_current}"
-                                st.markdown(f"**{_header}**")
-
                             _unlocked = is_level_unlocked(_entry.level_info.level, _roadmap)
                             _label = _entry.level_info.table_name
                             if _entry.level_info.sub_level:
-                                _label = f"[{_entry.level_info.sub_level}] {_label}"
+                                _label = f"{_label} ({_entry.level_info.sub_level})"
 
-                            _icon = "✅" if _entry.status == "validated" else ("🔒" if not _unlocked else "☐")
-                            st.markdown(f"{_icon} {_label}")
+                            if _entry.status == "validated":
+                                _circle, _lbl_cls = '<div class="level-check-circle-done">✓</div>', "level-check-label-done"
+                            elif not _unlocked:
+                                _circle, _lbl_cls = '<div class="level-check-circle-todo"></div>', "level-check-label-locked"
+                            else:
+                                _circle, _lbl_cls = '<div class="level-check-circle-todo"></div>', "level-check-label-todo"
 
-                            if not _entry.chain_resolved:
-                                with st.expander(f"⚠️ package_code inconnu pour {_label} — saisir pour approfondir la détection"):
+                            st.markdown(
+                                f'<div class="level-check-item">{_circle}'
+                                f'<span class="{_lbl_cls}">{_label}</span></div>',
+                                unsafe_allow_html=True,
+                            )
+
+                            # package_code : réservé aux consultants — un client ne doit
+                            # jamais voir ce champ, et il n'est de toute façon jamais
+                            # nécessaire pour que la validation elle-même fonctionne.
+                            if not _entry.chain_resolved and is_consultant():
+                                with st.expander(f"🔧 Consultant — package_code pour {_label} (optionnel)"):
                                     _pc = st.text_input(
                                         "package_code BC pour cette table",
                                         key=f"pkgresolve_{_entry.level_info.table_id}",
@@ -897,17 +920,11 @@ with tab_main:
                                         del st.session_state[_roadmap_key]
                                         st.rerun()
                     except Exception as _diag_e:
-                        # DIAGNOSTIC TEMPORAIRE — à retirer une fois la vraie cause connue.
-                        # Affiche le traceback complet non censuré (contrairement au message
-                        # redacted de Streamlit Cloud) pour identifier précisément quel
-                        # objet/attribut pose problème.
+                        # DIAGNOSTIC — laissé en place tant qu'on n'a pas une confirmation
+                        # de stabilité dans la durée. Sans impact visuel si tout va bien.
                         import traceback
                         st.error("🔧 DIAGNOSTIC — erreur capturée dans la boucle d'affichage de la roadmap :")
                         st.code(traceback.format_exc())
-                        st.write("Type de `_roadmap` :", type(_roadmap))
-                        if _roadmap:
-                            st.write("Type du 1er élément :", type(_roadmap[0]))
-                            st.write("Contenu du 1er élément :", repr(_roadmap[0]))
 
                     _levels_ok = all_validated(_roadmap)
                     if not _levels_ok:
