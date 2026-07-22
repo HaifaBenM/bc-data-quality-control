@@ -839,7 +839,20 @@ with tab_main:
                             _tid, _env, cfg["company_id"], _token,
                             lambda tid: _pkg_resolve.get(tid),
                         )
-                        st.session_state[_roadmap_key] = build_roadmap(_discovered, _level_cfg)
+                        _built = build_roadmap(_discovered, _level_cfg)
+                        # Tolérance TEMPORAIRE à l'ancien format tuple
+                        # (roadmap, unclassified) — signe que integration_levels.py
+                        # déployé n'est pas la version attendue. Ne pas laisser ce
+                        # bloc en prod une fois la vraie version confirmée en ligne.
+                        if isinstance(_built, tuple):
+                            st.error(
+                                "🔧 DIAGNOSTIC — build_roadmap() a renvoyé un tuple : "
+                                "le fichier integration_levels.py déployé n'est pas la "
+                                "version attendue (celle qui retourne une liste). "
+                                "Vérifie le fichier sur GitHub / le déploiement Streamlit Cloud."
+                            )
+                            _built = _built[0]
+                        st.session_state[_roadmap_key] = _built
                     except Exception as e:
                         st.session_state[_roadmap_key] = []
                         st.warning(f"⚠️ Détection des niveaux impossible pour l'instant : {e}")
