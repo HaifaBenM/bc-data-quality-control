@@ -27,7 +27,7 @@ from typing import Callable
 class LevelInfo:
     table_id:   int
     table_name: str
-    level:      int              # 0 à 4
+    level:      int | None       # 0 à 4, ou None = "Non classé" (détectée, pas encore classée)
     sub_level:  str | None = None
     note:       str = ""
 
@@ -147,41 +147,77 @@ class RoadmapEntry:
 def build_roadmap(
     discovered: dict[int, DiscoveredTable],
     level_config: dict[int, LevelInfo],
-) -> tuple[list[RoadmapEntry], list[int]]:
+) -> list[RoadmapEntry]:
     """
     Fusionne les tables découvertes dynamiquement (traverse_dependencies)
     avec la classification niveau (load_level_config).
 
-    Retourne (roadmap, table_ids_non_classes) :
-      - roadmap : entrées triées par (niveau, sous-niveau, table_id)
-      - table_ids_non_classes : tables découvertes par jointure mais
-        absentes de level_config — à traiter explicitement (ajouter à la
-        config, ou classer "Non classé"), jamais ignorées silencieusement.
+    Toute table détectée absente de level_config N'EST PAS écartée : elle
+    devient une entrée de niveau spécial "Non classé" (level=None), pour
+    ne jamais laisser passer une dépendance simplement parce qu'elle n'a
+    pas encore été classée manuellement. Elle est :
+      - toujours débloquée (is_level_unlocked la traite à part, indépendante
+        de l'ordre N0-N4 puisqu'on ignore sa vraie position),
+      - vérifiée par le même mécanisme BC que les autres (check_table_filled),
+      - obligatoire : all_validated() exige qu'elle soit validée comme
+        n'importe quelle autre entrée avant de déverrouiller la Phase 3.
+
+    Retourne la roadmap triée : niveaux 0-4 d'abord (par niveau, sous-niveau,
+    table_id), puis les entrées "Non classé" à la fin (ordre stable par
+    table_id, elles ne dépendent d'aucun ordre).
+
+    IMPORTANT : les tables de Niveau 0 (ex. G/L Account) sont TOUJOURS
+    incluses, que la détection par jointures les ait trouvées ou non.
+    C'est une règle métier absolue ("le plan comptable est toujours
+    vérifié en premier") — elle ne peut pas dépendre du succès d'une
+    traversée dynamique, qui s'arrête souvent avant d'atteindre le plan
+    comptable (rarement référencé directement par les tables du package,
+    plutôt à 2+ sauts via un groupe comptable). La faire dépendre de la
+    détection reviendrait à violer la règle dans la majorité des cas réels.
     """
     roadmap: list[RoadmapEntry] = []
-    unclassified: list[int] = []
+    _all_ids = dict(discovered)
+    for _tid, _info in level_config.items():
+        if _info.level == 0 and _tid not in _all_ids:
+            _all_ids[_tid] = DiscoveredTable(table_id=_tid, chain_resolved=True)
 
-    for table_id, disc in discovered.items():
+    for table_id, disc in _all_ids.items():
         info = level_config.get(table_id)
         if info is None:
-            unclassified.append(table_id)
-            continue
+            info = LevelInfo(
+                table_id=table_id,
+                table_name=f"Table {table_id} (non classée)",
+                level=None,
+                sub_level=None,
+                note="Détectée par jointure, absente de level_config — à classer, mais quand même vérifiée.",
+            )
         roadmap.append(RoadmapEntry(level_info=info, chain_resolved=disc.chain_resolved))
 
-    roadmap.sort(key=lambda e: (e.level_info.level, e.level_info.sub_level or "", e.level_info.table_id))
-    return roadmap, unclassified
+    roadmap.sort(key=lambda e: (
+        e.level_info.level if e.level_info.level is not None else 99,
+        e.level_info.sub_level or "",
+        e.level_info.table_id,
+    ))
+    return roadmap
 
 
 # ── Règles de déblocage (inchangées dans leur logique) ───────────────────────
 
-def is_level_unlocked(level: int, roadmap: list[RoadmapEntry]) -> bool:
+def is_level_unlocked(level: int | None, roadmap: list[RoadmapEntry]) -> bool:
     """
-    N(x) débloqué seulement si tous les niveaux < x sont validés.
+    N(x) débloqué seulement si tous les niveaux 0-4 < x sont validés.
     Sous-niveaux de N3 indépendants entre eux.
     N4 exige que TOUS les sous-niveaux N3 de la roadmap soient validés.
+
+    Les entrées "Non classé" (level=None) sont toujours débloquées : on
+    ignore leur position réelle dans la chaîne, donc on ne peut ni les
+    faire dépendre d'un autre niveau ni faire dépendre un niveau connu
+    d'elles. Elles restent malgré tout obligatoires pour all_validated().
     """
+    if level is None:
+        return True
     for e in roadmap:
-        if e.level_info.level < level and e.status != "validated":
+        if e.level_info.level is not None and e.level_info.level < level and e.status != "validated":
             return False
     if level == 4:
         for e in roadmap:
