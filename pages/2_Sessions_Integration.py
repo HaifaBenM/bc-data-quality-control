@@ -679,7 +679,11 @@ with tab_main:
             st.markdown("🤖 **Suggestions IA :** " + ("✅ Activées" if gemini_ok else "⚠️ Non configurées"))
 
         st.markdown("---")
-        _, col_btn = st.columns([8, 2])
+        col_rc, _, col_btn = st.columns([2, 6, 2])
+        with col_rc:
+            if st.button("🔄 Recommencer", use_container_width=True, key="rc_step1"):
+                reset_session()
+                st.rerun()
         with col_btn:
             if st.button("Suivant →", type="primary", use_container_width=True):
                 if not session_name.strip():
@@ -746,10 +750,14 @@ with tab_main:
                             unsafe_allow_html=True
                         )
                 st.markdown("---")
-                cb, cv = st.columns([2, 3])
+                cb, cv, crc = st.columns([2, 3, 2])
                 with cb:
                     if st.button("← Étape précédente", use_container_width=True):
                         st.session_state.step = 1
+                        st.rerun()
+                with crc:
+                    if st.button("🔄 Recommencer", use_container_width=True, key="rc_step2a"):
+                        reset_session()
                         st.rerun()
                 with cv:
                     # Ne bloque que si le fichier n'a strictement aucun onglet
@@ -769,10 +777,14 @@ with tab_main:
                         st.session_state.step = 3
                         st.rerun()
         else:
-            cb, _ = st.columns([2, 8])
+            cb, _, crc = st.columns([2, 6, 2])
             with cb:
                 if st.button("← Étape précédente", use_container_width=True):
                     st.session_state.step = 1
+                    st.rerun()
+            with crc:
+                if st.button("🔄 Recommencer", use_container_width=True, key="rc_step2b"):
+                    reset_session()
                     st.rerun()
 
     # ── Étape 3 ──────────────────────────────────────────────────────────────
@@ -870,14 +882,16 @@ with tab_main:
 
                 if _roadmap:
                     st.markdown("---")
-                    st.markdown('<div class="step-header">🧱 Prérequis BC détectés</div>', unsafe_allow_html=True)
-
-                    if st.button("🔄 Revérifier les niveaux", key="btn_refresh_levels"):
-                        with st.spinner("Vérification BC en cours..."):
-                            st.session_state[_roadmap_key] = refresh_roadmap(
-                                cfg["client_code"], cfg["company_id"], _roadmap
-                            )
-                        st.rerun()
+                    _hcol1, _hcol2 = st.columns([5, 2])
+                    with _hcol1:
+                        st.markdown('<div class="step-header">🧱 Prérequis BC détectés</div>', unsafe_allow_html=True)
+                    with _hcol2:
+                        if st.button("🔄 Revérifier", key="btn_refresh_levels", use_container_width=True):
+                            with st.spinner("Vérification BC en cours..."):
+                                st.session_state[_roadmap_key] = refresh_roadmap(
+                                    cfg["client_code"], cfg["company_id"], _roadmap
+                                )
+                            st.rerun()
 
                     _total   = len(_roadmap)
                     _done    = sum(1 for e in _roadmap if e.status == "validated")
@@ -934,12 +948,16 @@ with tab_main:
             # doit être rendue obligatoire (dépend de si tu veux imposer le seed avant tout usage).
 
         st.markdown("---")
-        cb, cv = st.columns([2, 5])
+        cb, cv, crc = st.columns([2, 5, 2])
         with cb:
             if st.button("← Étape précédente", use_container_width=True):
                 st.session_state.step         = 2
                 st.session_state.parse_result = None
                 st.session_state.validation   = None
+                st.rerun()
+        with crc:
+            if st.button("🔄 Recommencer", use_container_width=True, key="rc_step3"):
+                reset_session()
                 st.rerun()
         with cv:
             if val["is_valid"]:
