@@ -858,30 +858,43 @@ with tab_main:
                         st.rerun()
 
                     _current = "__unset__"
-                    for _entry in _roadmap:
-                        if _entry.level_info.level != _current:
-                            _current = _entry.level_info.level
-                            _header = "Non classé" if _current is None else f"Niveau {_current}"
-                            st.markdown(f"**{_header}**")
+                    try:
+                        for _entry in _roadmap:
+                            if _entry.level_info.level != _current:
+                                _current = _entry.level_info.level
+                                _header = "Non classé" if _current is None else f"Niveau {_current}"
+                                st.markdown(f"**{_header}**")
 
-                        _unlocked = is_level_unlocked(_entry.level_info.level, _roadmap)
-                        _label = _entry.level_info.table_name
-                        if _entry.level_info.sub_level:
-                            _label = f"[{_entry.level_info.sub_level}] {_label}"
+                            _unlocked = is_level_unlocked(_entry.level_info.level, _roadmap)
+                            _label = _entry.level_info.table_name
+                            if _entry.level_info.sub_level:
+                                _label = f"[{_entry.level_info.sub_level}] {_label}"
 
-                        _icon = "✅" if _entry.status == "validated" else ("🔒" if not _unlocked else "☐")
-                        st.markdown(f"{_icon} {_label}")
+                            _icon = "✅" if _entry.status == "validated" else ("🔒" if not _unlocked else "☐")
+                            st.markdown(f"{_icon} {_label}")
 
-                        if not _entry.chain_resolved:
-                            with st.expander(f"⚠️ package_code inconnu pour {_label} — saisir pour approfondir la détection"):
-                                _pc = st.text_input(
-                                    "package_code BC pour cette table",
-                                    key=f"pkgresolve_{_entry.level_info.table_id}",
-                                )
-                                if _pc and st.button("Relancer la détection", key=f"redetect_{_entry.level_info.table_id}"):
-                                    st.session_state.setdefault("level_pkg_resolve", {})[_entry.level_info.table_id] = _pc
-                                    del st.session_state[_roadmap_key]
-                                    st.rerun()
+                            if not _entry.chain_resolved:
+                                with st.expander(f"⚠️ package_code inconnu pour {_label} — saisir pour approfondir la détection"):
+                                    _pc = st.text_input(
+                                        "package_code BC pour cette table",
+                                        key=f"pkgresolve_{_entry.level_info.table_id}",
+                                    )
+                                    if _pc and st.button("Relancer la détection", key=f"redetect_{_entry.level_info.table_id}"):
+                                        st.session_state.setdefault("level_pkg_resolve", {})[_entry.level_info.table_id] = _pc
+                                        del st.session_state[_roadmap_key]
+                                        st.rerun()
+                    except Exception as _diag_e:
+                        # DIAGNOSTIC TEMPORAIRE — à retirer une fois la vraie cause connue.
+                        # Affiche le traceback complet non censuré (contrairement au message
+                        # redacted de Streamlit Cloud) pour identifier précisément quel
+                        # objet/attribut pose problème.
+                        import traceback
+                        st.error("🔧 DIAGNOSTIC — erreur capturée dans la boucle d'affichage de la roadmap :")
+                        st.code(traceback.format_exc())
+                        st.write("Type de `_roadmap` :", type(_roadmap))
+                        if _roadmap:
+                            st.write("Type du 1er élément :", type(_roadmap[0]))
+                            st.write("Contenu du 1er élément :", repr(_roadmap[0]))
 
                     _levels_ok = all_validated(_roadmap)
                     if not _levels_ok:
