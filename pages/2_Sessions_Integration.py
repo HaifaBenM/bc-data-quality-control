@@ -10,7 +10,7 @@ from app.core.validator_axe_c import validate_file_axe_c, get_gemini_api_key, is
 from app.core.auth import require_role, is_consultant
 from app.core.execution_planner import get_execution_plan, build_plan_from_bc
 from app.core.integration_levels import (
-    load_level_config, traverse_dependencies, build_roadmap,
+    load_level_config, traverse_dependencies, build_roadmap, build_roadmap_from_prereqs,
     is_level_unlocked, refresh_roadmap, all_validated,
 )
 from app.db.supabase_client import get_supabase_client
@@ -542,7 +542,7 @@ def reset_session():
     # explicitement, elles ne sont pas dans la liste fixe ci-dessus car leur
     # nom de clé varie (level_roadmap_<pkg>_<company>).
     for k in list(st.session_state.keys()):
-        if k.startswith("level_roadmap_"):
+        if k.startswith("level_roadmap_") or k.startswith("early_axeab_"):
             del st.session_state[k]
     st.session_state["level_pkg_resolve"] = {}
 
@@ -810,11 +810,16 @@ with tab_main:
             )
 
         # ── Niveaux prérequis (Besoin 2) — gate avant l'analyse ──────────────
-        # Phase 1 (détection) + Phase 2 (validation BC), avant d'autoriser la
-        # Phase 3 (analyse Axe A/Axe B ci-dessous, inchangée). Ne s'exécute
-        # que si la structure est valide — pas la peine de vérifier les
-        # niveaux sur un fichier qu'on va de toute façon renvoyer à l'étape 2.
+        # Détection basée sur les VRAIES anomalies Axe B (build_prerequisites_report),
+        # pas sur une traversée théorique des jointures BC : une table n'apparaît que
+        # si Axe B a réellement trouvé une valeur manquante la référençant dans CE
+        # fichier. Élimine par construction le bruit des tables techniques/système
+        # (confirmé le 22/07/2026 : ~40 tables non pertinentes détectées par jointure
+        # sur un simple PKG003-Stock). Implique de lancer Axe A/Axe B ici, avant le
+        # gate, puis de réutiliser ce résultat au clic sur "Lancer l'analyse"
+        # plutôt que de le recalculer.
         _levels_ok = True
+        _early_axeb_key = f"early_axeab_{cfg.get('pkg_code', '')}_{cfg.get('company_id', '')}_{cfg.get('file_name', '')}"
         if val["is_valid"]:
             if "level_config" not in st.session_state:
                 try:
@@ -824,17 +829,10 @@ with tab_main:
                     st.warning(f"⚠️ Impossible de charger level_config : {e}")
 
             _level_cfg = st.session_state.level_config
-            _roadmap_key = f"level_roadmap_{cfg.get('pkg_code', '')}_{cfg.get('company_id', '')}"
+            _roadmap_key = f"level_roadmap_{cfg.get('pkg_code', '')}_{cfg.get('company_id', '')}_{cfg.get('file_name', '')}"
 
             if _level_cfg:
                 _cached = st.session_state.get(_roadmap_key)
-                # Garde-fou : un objet en cache qui n'est pas une liste de
-                # RoadmapEntry (ex. resté d'une version antérieure du code
-                # où build_roadmap() retournait un tuple) ne doit jamais
-                # planter silencieusement plus loin (refresh_roadmap,
-                # is_level_unlocked...). On le détecte et on force une
-                # reconstruction propre plutôt que de laisser l'AttributeError
-                # remonter à l'utilisateur.
                 _cache_valid = isinstance(_cached, list) and (
                     len(_cached) == 0
                     or (
@@ -850,30 +848,35 @@ with tab_main:
 
                 if _roadmap_key not in st.session_state:
                     try:
-                        _profile = get_profile_by_code(cfg["client_code"])
-                        _tid = _profile.get("bc_tenant_id", "").strip()
-                        _env = _profile.get("bc_environment", "").strip()
-                        _cs  = _profile.get("bc_client_secret", "").strip()
-                        _cid = _profile.get("bc_client_id", "").strip()
-                        _token = get_access_token(_tid, _cid, _cs)
-                        _root_plan = get_execution_plan(
-                            profile_code=cfg["client_code"],
-                            company_id=cfg["company_id"],
-                            package_code=cfg["pkg_code"],
+                        client_code = cfg.get("client_code", "")
+                        _exec_plan = get_execution_plan(
+                            profile_code=client_code,
+                            company_id=cfg.get("company_id", ""),
+                            package_code=cfg.get("pkg_code", ""),
                         )
-                        _pkg_resolve = st.session_state.get("level_pkg_resolve", {})
-                        _discovered = traverse_dependencies(
-                            _root_plan, build_plan_from_bc,
-                            _tid, _env, cfg["company_id"], _token,
-                            lambda tid: _pkg_resolve.get(tid),
+                        _meta_loader = MetadataLoader(client_code, cfg.get("company_id", ""))
+                        _sim_ctx     = SimulationContext()
+                        with st.spinner("⏳ Analyse des prérequis BC..."):
+                            _axe_a = validate_file_axe_a(pr, execution_plan=_exec_plan)
+                            _axe_b = validate_file_axe_b(
+                                pr,
+                                profile_code    = client_code,
+                                company_id      = cfg.get("company_id", ""),
+                                sim_context     = _sim_ctx,
+                                metadata_loader = _meta_loader,
+                                execution_plan  = _exec_plan,
+                            )
+                        # Mis en cache pour réutilisation au clic "Lancer l'analyse" —
+                        # évite de relancer Axe A/Axe B une seconde fois pour rien.
+                        st.session_state[_early_axeb_key] = {
+                            "axe_a": _axe_a, "axe_b": _axe_b, "exec_plan": _exec_plan,
+                        }
+                        _early_merged = merge_results(_axe_a, _axe_b, {"available": False}, parse_result=pr)
+                        _real = [a for a in _early_merged.get("all_anomalies", []) if a.get("Ligne", 0) > 0]
+                        _prereqs = build_prerequisites_report(
+                            _real, profile_code=client_code, company_id=cfg.get("company_id", "")
                         )
-                        _built = build_roadmap(_discovered, _level_cfg)
-                        # Tolérance à un éventuel ancien format tuple (roadmap, unclassified)
-                        # — garde-fou silencieux, ne s'affiche plus au client. À retirer une
-                        # fois qu'on est sûr que le déploiement est stable dans la durée.
-                        if isinstance(_built, tuple):
-                            _built = _built[0]
-                        st.session_state[_roadmap_key] = _built
+                        st.session_state[_roadmap_key] = build_roadmap_from_prereqs(_prereqs, _level_cfg)
                     except Exception as e:
                         st.session_state[_roadmap_key] = []
                         st.warning(f"⚠️ Détection des niveaux impossible pour l'instant : {e}")
@@ -919,20 +922,6 @@ with tab_main:
                                 f'<span class="{_lbl_cls}">{_label}</span></div>',
                                 unsafe_allow_html=True,
                             )
-
-                            # package_code : réservé aux consultants — un client ne doit
-                            # jamais voir ce champ, et il n'est de toute façon jamais
-                            # nécessaire pour que la validation elle-même fonctionne.
-                            if not _entry.chain_resolved and is_consultant():
-                                with st.expander(f"🔧 Consultant — package_code pour {_label} (optionnel)"):
-                                    _pc = st.text_input(
-                                        "package_code BC pour cette table",
-                                        key=f"pkgresolve_{_entry.level_info.table_id}",
-                                    )
-                                    if _pc and st.button("Relancer la détection", key=f"redetect_{_entry.level_info.table_id}"):
-                                        st.session_state.setdefault("level_pkg_resolve", {})[_entry.level_info.table_id] = _pc
-                                        del st.session_state[_roadmap_key]
-                                        st.rerun()
                     except Exception as _diag_e:
                         # DIAGNOSTIC — laissé en place tant qu'on n'a pas une confirmation
                         # de stabilité dans la durée. Sans impact visuel si tout va bien.
@@ -943,6 +932,19 @@ with tab_main:
                     _levels_ok = all_validated(_roadmap)
                     if not _levels_ok:
                         st.info("🔒 L'analyse qualité reste verrouillée tant que tous les niveaux ne sont pas validés dans BC.")
+                        # Contournement TEMPORAIRE, consultant uniquement — le temps que
+                        # les tables "Non classé" soient examinées avec Shema et classées
+                        # dans level_config (niveau réel ou ignored=true). Ne doit jamais
+                        # être visible ni utilisable par un client : sans cette classification,
+                        # on ne sait pas ce qu'on laisse passer.
+                        if is_consultant():
+                            st.warning(
+                                "🔧 Consultant — des tables restent non classées dans level_config. "
+                                "Ce contournement passe outre la vérification, uniquement pour "
+                                "continuer les tests le temps de la classification."
+                            )
+                            if st.checkbox("Ignorer temporairement le verrouillage (consultant, test uniquement)", key="bypass_levels"):
+                                _levels_ok = True
                 # _roadmap vide => aucune dépendance de niveau détectée => _levels_ok reste True (analyse directe)
             # level_config vide/non chargée : ne bloque pas l'analyse — à corriger si level_config
             # doit être rendue obligatoire (dépend de si tu veux imposer le seed avant tout usage).
@@ -967,26 +969,33 @@ with tab_main:
                 ):
                     api_key     = get_gemini_api_key()
                     client_code = cfg.get("client_code", "")
+                    _early = st.session_state.get(_early_axeb_key)
 
-                    with st.spinner("⏳ Analyse des contraintes..."):
-                        _exec_plan = get_execution_plan(
-                            profile_code = client_code,
-                            company_id   = cfg.get("company_id", ""),
-                            package_code = cfg.get("pkg_code", ""),
-                        )
-                        _meta_loader = MetadataLoader(client_code, cfg.get("company_id", ""))
-                        _sim_ctx     = SimulationContext()
-                        axe_a        = validate_file_axe_a(pr, execution_plan=_exec_plan)
+                    if _early:
+                        # Déjà calculés pour le gate niveaux — pas la peine de relancer
+                        # Axe A/Axe B une seconde fois pour le même fichier/package.
+                        axe_a = _early["axe_a"]
+                        axe_b = _early["axe_b"]
+                    else:
+                        with st.spinner("⏳ Analyse des contraintes..."):
+                            _exec_plan = get_execution_plan(
+                                profile_code = client_code,
+                                company_id   = cfg.get("company_id", ""),
+                                package_code = cfg.get("pkg_code", ""),
+                            )
+                            _meta_loader = MetadataLoader(client_code, cfg.get("company_id", ""))
+                            _sim_ctx     = SimulationContext()
+                            axe_a        = validate_file_axe_a(pr, execution_plan=_exec_plan)
 
-                    with st.spinner("⏳ Vérification des références..."):
-                        axe_b = validate_file_axe_b(
-                            pr,
-                            profile_code    = client_code,
-                            company_id      = cfg.get("company_id", ""),
-                            sim_context     = _sim_ctx,
-                            metadata_loader = _meta_loader,
-                            execution_plan  = _exec_plan,
-                        )
+                        with st.spinner("⏳ Vérification des références..."):
+                            axe_b = validate_file_axe_b(
+                                pr,
+                                profile_code    = client_code,
+                                company_id      = cfg.get("company_id", ""),
+                                sim_context     = _sim_ctx,
+                                metadata_loader = _meta_loader,
+                                execution_plan  = _exec_plan,
+                            )
 
                     axe_c = {"available": False, "total_suggestions": 0, "auto_corrected": 0, "by_sheet": {}}
                     if api_key:

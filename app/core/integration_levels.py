@@ -30,6 +30,10 @@ class LevelInfo:
     level:      int | None       # 0 à 4, ou None = "Non classé" (détectée, pas encore classée)
     sub_level:  str | None = None
     note:       str = ""
+    ignored:    bool = False     # table examinée et jugée non pertinente comme prérequis client
+                                  # (table technique/système/dimension) — n'apparaît jamais dans
+                                  # la roadmap, ne bloque jamais, distincte de "non classée" qui
+                                  # bloque tant qu'elle n'a pas été examinée une première fois.
 
 
 def load_level_config(supabase_client) -> dict[int, LevelInfo]:
@@ -44,9 +48,10 @@ def load_level_config(supabase_client) -> dict[int, LevelInfo]:
         CREATE TABLE level_config (
             table_id    integer PRIMARY KEY,
             table_name  text    NOT NULL,
-            level       integer NOT NULL,   -- 0 à 4
+            level       integer,            -- 0 à 4, NULL si ignored=true (pas de niveau pour une table ignorée)
             sub_level   text,               -- NULL sauf niveau 3
-            note        text
+            note        text,
+            ignored     boolean DEFAULT false  -- true = examinée, jugée non pertinente, ne bloque jamais
         );
 
     NON VÉRIFIÉ : `supabase_client` suppose un client type supabase-py
@@ -60,9 +65,10 @@ def load_level_config(supabase_client) -> dict[int, LevelInfo]:
         row["table_id"]: LevelInfo(
             table_id=row["table_id"],
             table_name=row["table_name"],
-            level=row["level"],
+            level=row.get("level"),
             sub_level=row.get("sub_level"),
             note=row.get("note", ""),
+            ignored=bool(row.get("ignored", False)),
         )
         for row in resp.data
     }
@@ -162,6 +168,16 @@ def build_roadmap(
       - obligatoire : all_validated() exige qu'elle soit validée comme
         n'importe quelle autre entrée avant de déverrouiller la Phase 3.
 
+    EXCEPTION : une table présente dans level_config avec ignored=True est
+    entièrement EXCLUE de la roadmap — ni affichée, ni vérifiée, ni
+    bloquante. Ça sert pour les tables techniques/système détectées par
+    jointure (dimensions, codes de traçabilité, tables d'extension...) que
+    Rami/Bilel ont examinées une fois et jugées non pertinentes comme
+    prérequis client. Sans cet état, chaque table technique du schéma BC
+    resterait "Non classé" indéfiniment et bloquerait l'analyse à chaque
+    fichier — inutilisable en pratique sur un vrai package (une quarantaine
+    de tables détectées sur un simple PKG003-Stock, confirmé le 22/07/2026).
+
     Retourne la roadmap triée : niveaux 0-4 d'abord (par niveau, sous-niveau,
     table_id), puis les entrées "Non classé" à la fin (ordre stable par
     table_id, elles ne dépendent d'aucun ordre).
@@ -178,11 +194,13 @@ def build_roadmap(
     roadmap: list[RoadmapEntry] = []
     _all_ids = dict(discovered)
     for _tid, _info in level_config.items():
-        if _info.level == 0 and _tid not in _all_ids:
+        if _info.level == 0 and not _info.ignored and _tid not in _all_ids:
             _all_ids[_tid] = DiscoveredTable(table_id=_tid, chain_resolved=True)
 
     for table_id, disc in _all_ids.items():
         info = level_config.get(table_id)
+        if info is not None and info.ignored:
+            continue
         if info is None:
             info = LevelInfo(
                 table_id=table_id,
@@ -192,6 +210,68 @@ def build_roadmap(
                 note="Détectée par jointure, absente de level_config — à classer, mais quand même vérifiée.",
             )
         roadmap.append(RoadmapEntry(level_info=info, chain_resolved=disc.chain_resolved))
+
+    roadmap.sort(key=lambda e: (
+        e.level_info.level if e.level_info.level is not None else 99,
+        e.level_info.sub_level or "",
+        e.level_info.table_id,
+    ))
+    return roadmap
+
+
+def build_roadmap_from_prereqs(
+    prereqs: list[dict],
+    level_config: dict[int, LevelInfo],
+) -> list[RoadmapEntry]:
+    """
+    Construit la roadmap à partir des vraies anomalies Axe B (sortie de
+    build_prerequisites_report() dans correction_classifier.py), au lieu de
+    la traversée par jointures (traverse_dependencies/build_roadmap).
+
+    Différence essentielle : une table n'apparaît ici que si Axe B a
+    RÉELLEMENT trouvé une valeur manquante référençant cette table dans CE
+    fichier précis — pas toute table théoriquement liée par le schéma BC.
+    Élimine par construction le bruit des tables techniques/système
+    (dimensions, codes de traçabilité, extensions...) qui n'ont jamais
+    d'anomalie réelle : elles ne peuvent pas apparaître ici, donc pas
+    besoin de les classer "ignored" une par une dans level_config pour
+    qu'elles arrêtent de bloquer.
+
+    Chaque ligne de `prereqs` a une clé "Table référencée BC" (string,
+    l'ID de table — voir build_prerequisites_report). chain_resolved est
+    toujours True ici : cette approche ne fait aucune traversée récursive,
+    donc la notion de "chaîne non résolue" ne s'applique pas — inutile
+    d'afficher un champ package_code pour ces entrées.
+
+    Le plan comptable (Niveau 0) reste forcé, pour la même raison que
+    build_roadmap() : ce n'est pas Axe B qui décide de son caractère
+    obligatoire, c'est une règle métier absolue.
+    """
+    table_ids: set[int] = set()
+    for row in prereqs:
+        try:
+            table_ids.add(int(row.get("Table référencée BC", 0)))
+        except (TypeError, ValueError):
+            continue
+
+    for _tid, _info in level_config.items():
+        if _info.level == 0 and not _info.ignored:
+            table_ids.add(_tid)
+
+    roadmap: list[RoadmapEntry] = []
+    for table_id in table_ids:
+        info = level_config.get(table_id)
+        if info is not None and info.ignored:
+            continue
+        if info is None:
+            info = LevelInfo(
+                table_id=table_id,
+                table_name=f"Table {table_id} (non classée)",
+                level=None,
+                sub_level=None,
+                note="Anomalie Axe B réelle sur cette table, absente de level_config — à classer, mais quand même vérifiée.",
+            )
+        roadmap.append(RoadmapEntry(level_info=info, chain_resolved=True))
 
     roadmap.sort(key=lambda e: (
         e.level_info.level if e.level_info.level is not None else 99,
