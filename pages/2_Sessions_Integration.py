@@ -808,7 +808,13 @@ with tab_main:
                 # reconstruction propre plutôt que de laisser l'AttributeError
                 # remonter à l'utilisateur.
                 _cache_valid = isinstance(_cached, list) and (
-                    len(_cached) == 0 or hasattr(_cached[0], "status")
+                    len(_cached) == 0
+                    or (
+                        hasattr(_cached[0], "level_info")
+                        and hasattr(_cached[0], "chain_resolved")
+                        and hasattr(_cached[0], "status")
+                        and hasattr(getattr(_cached[0], "level_info", None), "level")
+                    )
                 )
                 if _cached is not None and not _cache_valid:
                     st.warning("⚠️ Cache de niveaux dans un format obsolète détecté — reconstruction automatique.")
