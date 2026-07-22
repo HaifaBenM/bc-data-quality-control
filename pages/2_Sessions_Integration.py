@@ -725,6 +725,16 @@ with tab_main:
             if not pr["success"]:
                 for e in pr["errors"]:
                     st.error(f"❌ {e}")
+                st.markdown("---")
+                cb, _, crc = st.columns([2, 6, 2])
+                with cb:
+                    if st.button("← Étape précédente", use_container_width=True, key="back_step2_fail"):
+                        st.session_state.step = 1
+                        st.rerun()
+                with crc:
+                    if st.button("🔄 Recommencer", use_container_width=True, key="rc_step2_fail"):
+                        reset_session()
+                        st.rerun()
             else:
                 s = get_file_summary(pr)
                 st.success(f"✅ **{uploaded.name}**")
