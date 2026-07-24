@@ -11,6 +11,7 @@ Credentials lus depuis la table client_profiles (Supabase) :
     bc_environment, bc_company_id, bc_url
 """
 import requests
+from urllib.parse import quote
 
 
 # ── Authentification ──────────────────────────────────────────────────────────
@@ -548,9 +549,17 @@ def get_record_values_qc(
     persisté (app.db.metadata_db.get_gl_account_posting_fields) tant que
     l'extension AL n'a pas été republiée avec cette page.
     """
+    # BUG CORRIGÉ (24/07) : field_name contient des espaces ("Gen. Bus.
+    # Posting Group") — insérés tels quels dans l'URL, ils la rendent
+    # invalide/fragile (un espace brut n'est pas un caractère URL valide).
+    # C'est très probablement ce qui faisait échouer silencieusement le
+    # filtre côté BC (résultat vide, pas d'erreur HTTP). quote() encode
+    # l'espace en %20 — mais on garde l'apostrophe simple non encodée
+    # (nécessaire à la syntaxe OData `eq '...'`) via safe="'".
+    encoded_field_name = quote(field_name, safe="'")
     url = (
         f"{_qc_base(tenant_id, environment, company_id)}/recordValues"
-        f"?$filter=tableId eq {table_id} and fieldNameFilter eq '{field_name}'"
+        f"?$filter=tableId eq {table_id} and fieldNameFilter eq '{encoded_field_name}'"
     )
     resp = requests.get(url, headers=_headers(token), timeout=30)
     resp.raise_for_status()
