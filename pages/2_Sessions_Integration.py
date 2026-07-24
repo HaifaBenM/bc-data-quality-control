@@ -25,7 +25,9 @@ from app.db.metadata_db import (
     persist_gl_account_posting_fields, get_gl_account_posting_fields,
 )
 from app.db.profiles_db import get_profile_by_code
-from app.core.bc_api import get_access_token, get_companies, get_packages_qc
+from app.core.bc_api import (
+    get_access_token, get_companies, get_packages_qc, get_gl_account_fields_live,
+)
 from app.db.sessions_db import (
     save_session, update_session, delete_session,
     get_all_sessions, SESSION_STATUSES, STATUS_COLORS, STATUS_ICONS
@@ -166,6 +168,35 @@ def _load_pkgs_ses(client_code: str, company_id: str, only_visible: bool) -> lis
         return get_packages_qc(tid, env, company_id, tok, visible_only=only_visible)
     except Exception:
         return []
+
+
+def _resolve_gl_account_fallback(client_code: str, company_id: str) -> dict:
+    """
+    Tente d'abord une vérification LIVE via BC (get_gl_account_fields_live,
+    endpoint AL recordValues) — plus fiable qu'un cache car jamais périmée
+    (voir discussion du 24/07/2026 : un repli persisté reste correct tant
+    que personne ne modifie le plan comptable entre deux analyses, ce qui
+    n'est pas garanti). Retombe silencieusement sur le repli persisté
+    (cache Supabase) si le live échoue pour n'importe quelle raison — page
+    AL pas encore publiée, numéros de champ GL_ACCOUNT_FIELD_NO_* pas
+    encore renseignés dans bc_api.py, ou société sans accès BC configuré.
+    Ne jamais faire planter l'analyse pour cette seule raison.
+    """
+    try:
+        p = get_profile_by_code(client_code)
+        if p:
+            tid = p.get("bc_tenant_id", "").strip()
+            cid = p.get("bc_client_id", "").strip()
+            cs  = p.get("bc_client_secret", "").strip()
+            env = p.get("bc_environment", "").strip()
+            if all([tid, cid, cs, env, company_id]):
+                tok  = get_access_token(tid, cid, cs)
+                live = get_gl_account_fields_live(tid, env, company_id, tok)
+                if live:
+                    return live
+    except Exception:
+        pass
+    return get_gl_account_posting_fields(client_code, company_id)
 
 
 _ses_companies, _ses_err, _ = _load_companies_ses(active_client)
@@ -433,7 +464,7 @@ def display_correction_workflow(merged: dict, cfg: dict, pr: dict):
         persist_gl_account_posting_fields(_client_code, _company_id, _gl_extract)
         _gl_fallback = None
     else:
-        _gl_fallback = get_gl_account_posting_fields(_client_code, _company_id)
+        _gl_fallback = _resolve_gl_account_fallback(_client_code, _company_id)
     prereqs = prereqs + check_gl_account_prerequisites(pr, _gl_fallback)
 
     st.markdown("---")
@@ -933,7 +964,7 @@ with tab_main:
                             persist_gl_account_posting_fields(client_code, _company_id, _gl_extract)
                             _gl_fallback = None
                         else:
-                            _gl_fallback = get_gl_account_posting_fields(client_code, _company_id)
+                            _gl_fallback = _resolve_gl_account_fallback(client_code, _company_id)
                         _prereqs = _prereqs + check_gl_account_prerequisites(pr, _gl_fallback)
                         st.session_state[_roadmap_key] = build_roadmap_from_prereqs(_prereqs, _level_cfg)
                     except Exception as e:

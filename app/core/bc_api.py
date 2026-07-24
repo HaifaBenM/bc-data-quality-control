@@ -508,3 +508,98 @@ def build_tables_data_for_export(
         })
 
     return result
+
+
+def get_record_values_qc(
+    tenant_id:   str,
+    environment: str,
+    company_id:  str,
+    table_id:    int,
+    field_no:    int,
+    token:       str,
+) -> dict[str, str]:
+    """
+    Retourne {"<clé primaire>": "<valeur du champ>"} pour CHAQUE
+    enregistrement d'une table BC — via l'endpoint générique AL
+    /recordValues (page 50104, extension talan/qctools, voir
+    PageAPI.RecordValues.al dans HaifaBenM/bc-QC-Tool).
+
+    Contrairement à get_table_values() (page 50106, tableValues) qui ne
+    retourne que l'ensemble DÉDUPLIQUÉ des valeurs présentes dans un champ
+    sur toute la table, celle-ci retourne une ligne par enregistrement —
+    permet de savoir si UN compte GL précis a bien tel champ rempli, pas
+    seulement si la valeur existe quelque part dans la table.
+
+    Un enregistrement absent du résultat = champ vide pour cet
+    enregistrement (mêmes conventions que tableValues).
+
+    Raises requests.HTTPError si l'endpoint n'est pas encore publié (404)
+    ou toute autre erreur BC — l'appelant doit capturer et retomber sur le
+    repli persisté (app.db.metadata_db.get_gl_account_posting_fields) tant
+    que l'extension AL n'a pas été republiée avec cette page.
+    """
+    url = (
+        f"{_qc_base(tenant_id, environment, company_id)}/recordValues"
+        f"?$filter=tableId eq {table_id} and fieldNo eq {field_no}"
+    )
+    resp = requests.get(url, headers=_headers(token), timeout=30)
+    resp.raise_for_status()
+    values = resp.json().get("value", [])
+    return {
+        str(v.get("recordKey", "")).strip(): str(v.get("value", "")).strip()
+        for v in values if v.get("recordKey")
+    }
+
+
+# Numéros de champ de la table 15 (G/L Account) — À CONFIRMER dans VOTRE
+# BC (varie selon localisation/version) avant d'activer get_gl_account_fields_live.
+# Se vérifient facilement via l'objet AL "G/L Account" ou le Field Explorer BC.
+GL_ACCOUNT_FIELD_NO_GEN_BUS_POSTING_GROUP  = None  # TODO: renseigner le numéro réel
+GL_ACCOUNT_FIELD_NO_GEN_PROD_POSTING_GROUP = None  # TODO: renseigner le numéro réel
+
+
+def get_gl_account_fields_live(
+    tenant_id:   str,
+    environment: str,
+    company_id:  str,
+    token:       str,
+) -> dict:
+    """
+    Interroge en direct (via get_record_values_qc, table 15) l'état RÉEL
+    des champs Groupe compta. marché/produit de chaque compte GL — plus
+    fiable qu'un repli en cache car jamais périmé (voir discussion du
+    24/07/2026 : un cache reste correct tant que personne ne modifie le
+    plan comptable entre deux analyses, ce qui n'est pas garanti).
+
+    Retourne le même format que
+    app.db.metadata_db.get_gl_account_posting_fields() — remplacement
+    direct côté appelant : {"<N° compte>": {"Groupe compta. marché": "...",
+    "Groupe compta. produit": "..."}, ...}
+
+    Raises ValueError tant que GL_ACCOUNT_FIELD_NO_* ci-dessus n'ont pas été
+    renseignés avec les vrais numéros de champ BC — évite d'interroger un
+    fieldNo=None qui donnerait un résultat silencieusement vide et ferait
+    croire à tort que tous les comptes sont vides.
+    """
+    if GL_ACCOUNT_FIELD_NO_GEN_BUS_POSTING_GROUP is None or GL_ACCOUNT_FIELD_NO_GEN_PROD_POSTING_GROUP is None:
+        raise ValueError(
+            "GL_ACCOUNT_FIELD_NO_GEN_BUS_POSTING_GROUP / "
+            "GL_ACCOUNT_FIELD_NO_GEN_PROD_POSTING_GROUP non renseignés — "
+            "voir le TODO juste au-dessus de cette fonction."
+        )
+    bus = get_record_values_qc(
+        tenant_id, environment, company_id, 15,
+        GL_ACCOUNT_FIELD_NO_GEN_BUS_POSTING_GROUP, token,
+    )
+    prod = get_record_values_qc(
+        tenant_id, environment, company_id, 15,
+        GL_ACCOUNT_FIELD_NO_GEN_PROD_POSTING_GROUP, token,
+    )
+    accounts = set(bus) | set(prod)
+    return {
+        acc: {
+            "Groupe compta. marché":  bus.get(acc, ""),
+            "Groupe compta. produit": prod.get(acc, ""),
+        }
+        for acc in accounts
+    }
