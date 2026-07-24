@@ -145,7 +145,7 @@ def _load_companies_ses(client_code: str) -> tuple[list, str, str]:
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def _load_pkgs_ses(client_code: str, company_id: str) -> list:
+def _load_pkgs_ses(client_code: str, company_id: str, only_visible: bool) -> list:
     try:
         p = get_profile_by_code(client_code)
         if not p:
@@ -157,7 +157,7 @@ def _load_pkgs_ses(client_code: str, company_id: str) -> list:
         if not all([tid, cid, cs, env, company_id]):
             return []
         tok = get_access_token(tid, cid, cs)
-        return get_packages_qc(tid, env, company_id, tok, visible_only=True)
+        return get_packages_qc(tid, env, company_id, tok, visible_only=only_visible)
     except Exception:
         return []
 
@@ -527,6 +527,17 @@ def display_correction_workflow(merged: dict, cfg: dict):
 
 
 def reset_session():
+    # BUG CORRIGÉ (24/07/2026) : "ses_name_input" est la clé du st.text_input
+    # du nom de session (Étape 1), instancié PLUS HAUT dans le même run que
+    # le bouton "Recommencer" qui appelle cette fonction. Streamlit interdit
+    # `st.session_state[key] = valeur` pour une clé de widget déjà
+    # instanciée dans le run courant (StreamlitAPIException — vérifié dans
+    # session_state.py : la restriction porte sur __setitem__, pas sur
+    # __delitem__). On utilise donc `del` partout ici, jamais une
+    # assignation directe — un rerun suit immédiatement chaque appel, donc
+    # les valeurs par défaut (step=1, config={}...) seront réinitialisées
+    # normalement au prochain run par le bloc d'init habituel, pas besoin
+    # de les fixer ici.
     for k in ["step", "config", "parse_result", "validation",
               "merged_result", "axe_c_result", "saved_session_id",
               "original_file_bytes", "generated_file_bytes",
@@ -536,7 +547,8 @@ def reset_session():
               # "Recommencer" sur le même package/date garderait la
               # signature et l'horodatage gelés de la session précédente.
               "ses_name_input", "_ses_name_sig", "_ses_name_ts"]:
-        st.session_state[k] = (1 if k == "step" else {} if k == "config" else None)
+        if k in st.session_state:
+            del st.session_state[k]
     # Niveaux prérequis (Besoin 2) : la roadmap et les résolutions manuelles
     # de package_code sont propres à un (package, société) donné — à purger
     # explicitement, elles ne sont pas dans la liste fixe ci-dessus car leur
@@ -544,7 +556,8 @@ def reset_session():
     for k in list(st.session_state.keys()):
         if k.startswith("level_roadmap_") or k.startswith("early_axeab_"):
             del st.session_state[k]
-    st.session_state["level_pkg_resolve"] = {}
+    if "level_pkg_resolve" in st.session_state:
+        del st.session_state["level_pkg_resolve"]
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -629,7 +642,7 @@ with tab_main:
 
             if not active_pkg_code:
                 st.markdown("**📦 Package BC**")
-                _pkgs_available = _load_pkgs_ses(active_client, sel_company_id)
+                _pkgs_available = _load_pkgs_ses(active_client, sel_company_id, not is_consultant())
                 if _pkgs_available:
                     _pkg_opts = {
                         f"{p.get('code', '')} — {p.get('packageName', '')}": (
