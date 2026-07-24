@@ -163,7 +163,58 @@ def _is_account_reference_column(col_name: str) -> bool:
     return any(name.startswith(p) for p in _ACCOUNT_FIELD_PREFIXES)
 
 
-def check_gl_account_prerequisites(parsed_file: dict) -> list[dict]:
+def extract_gl_account_posting_fields(parsed_file: dict) -> dict:
+    """
+    Extrait {"<N° compte>": {"Groupe compta. marché": "...", "Groupe
+    compta. produit": "..."}, ...} depuis l'onglet Compte général (table 15)
+    d'un fichier déjà parsé — à appeler côté page juste après une analyse
+    qui contient réellement cet onglet, pour persister l'état courant via
+    app.db.metadata_db.persist_gl_account_posting_fields() (repli utilisé
+    par check_gl_account_prerequisites quand un futur fichier n'aura plus
+    l'onglet 15, ex. test isolé de 92/93/94).
+
+    Retourne {} si l'onglet Compte général est absent ou vide — rien à
+    persister dans ce cas, ne pas écraser une image précédente valide avec
+    du vide (l'appelant ne doit persister QUE si ce dict est non vide).
+    """
+    sheets   = parsed_file.get("sheets", {})
+    metadata = parsed_file.get("metadata", {})
+
+    gl_sheet_name = next(
+        (name for name, meta in metadata.items() if str(meta.get("table_id", "")) == "15"),
+        None,
+    )
+    if gl_sheet_name is None:
+        return {}
+
+    gl_df = sheets.get(gl_sheet_name)
+    if gl_df is None or gl_df.empty:
+        return {}
+
+    account_col = next((c for c in gl_df.columns if str(c).strip() == "N°"), None)
+    if account_col is None:
+        return {}
+
+    out = {}
+    present_fields = [f for f in GL_ACCOUNT_REQUIRED_FIELDS if f in gl_df.columns]
+    if not present_fields:
+        return {}
+
+    for _, row in gl_df.iterrows():
+        acc_no = str(row.get(account_col, "")).strip()
+        if not acc_no:
+            continue
+        out[acc_no] = {
+            f: ("" if pd.isna(row.get(f, "")) else str(row.get(f, "")).strip())
+            for f in present_fields
+        }
+    return out
+
+
+def check_gl_account_prerequisites(
+    parsed_file: dict,
+    gl_reference_fallback: dict[str, dict] | None = None,
+) -> list[dict]:
     """
     Pour chaque compte général référencé par un champ-compte d'une table de
     groupe comptable (92, 93, 94, ou toute autre table du même type présente
@@ -186,10 +237,23 @@ def check_gl_account_prerequisites(parsed_file: dict) -> list[dict]:
           "Occurrences": <int>,
         }
 
-    Si l'onglet Compte général (table 15) est absent du fichier déposé (cas
-    normal pour un package qui ne contient pas la comptabilité), retourne []
-    silencieusement — ce contrôle ne s'applique qu'aux fichiers qui
-    contiennent réellement la table 15.
+    gl_reference_fallback : dict[str, dict] | None
+        Repli utilisé quand le fichier déposé ne contient PAS l'onglet
+        Compte général (table 15) — cas confirmé en réel le 24/07/2026 :
+        Rami teste 92/93/94 comme package séparé (workflow sessions
+        mère/fille), sans GL Account dans le même fichier. Sans ce repli, le
+        contrôle ne trouve rien à comparer et retombe à tort sur "fichier
+        correct" alors que BC refuse toujours l'import (compte 77110001
+        toujours sans Groupe compta. produit). Format attendu :
+        {"<N° compte>": {"Groupe compta. marché": "...", "Groupe compta.
+        produit": "..."}, ...} — typiquement rechargé depuis le cache
+        Supabase bc_metadata_cache (voir app/db/metadata_db.py,
+        entity_name="gl_account_posting_fields") persisté la dernière fois
+        qu'un fichier contenant réellement l'onglet 15 a été analysé pour
+        cette société.
+
+    Si ni l'onglet Compte général du fichier NI gl_reference_fallback ne
+    sont disponibles, retourne [] silencieusement (rien à vérifier).
     """
     sheets   = parsed_file.get("sheets", {})
     metadata = parsed_file.get("metadata", {})
@@ -198,18 +262,25 @@ def check_gl_account_prerequisites(parsed_file: dict) -> list[dict]:
         (name for name, meta in metadata.items() if str(meta.get("table_id", "")) == "15"),
         None,
     )
-    if gl_sheet_name is None:
-        return []
+    gl_df = sheets.get(gl_sheet_name) if gl_sheet_name else None
+    if gl_df is not None and gl_df.empty:
+        gl_df = None
 
-    gl_df = sheets.get(gl_sheet_name)
-    if gl_df is None or gl_df.empty:
-        return []
+    gl_by_account = None
+    if gl_df is not None:
+        account_col = next((c for c in gl_df.columns if str(c).strip() == "N°"), None)
+        if account_col is not None:
+            gl_by_account = gl_df.set_index(gl_df[account_col].astype(str).str.strip())
 
-    account_col = next((c for c in gl_df.columns if str(c).strip() == "N°"), None)
-    if account_col is None:
-        return []
+    # Repli sur l'image persistée si le fichier n'a pas (ou plus) d'onglet
+    # Compte général exploitable — voir docstring ci-dessus.
+    using_fallback = False
+    if gl_by_account is None and gl_reference_fallback:
+        gl_by_account = pd.DataFrame.from_dict(gl_reference_fallback, orient="index")
+        using_fallback = True
 
-    gl_by_account = gl_df.set_index(gl_df[account_col].astype(str).str.strip())
+    if gl_by_account is None or gl_by_account.empty:
+        return []
 
     missing: dict[tuple, dict] = {}
 
@@ -240,7 +311,10 @@ def check_gl_account_prerequisites(parsed_file: dict) -> list[dict]:
                     # exactement le cas confirmé sur le fichier réel de Rami
                     # le 23/07 (aucun compte n'a Groupe compta. marché/
                     # produit rempli). Traiter comme vide, pas comme absent.
-                    if required_field in gl_df.columns:
+                    # Sur le repli (using_fallback), la colonne existe
+                    # toujours (construite depuis un dict complet) — même
+                    # logique, pas de cas particulier nécessaire.
+                    if required_field in gl_by_account.columns:
                         _val = gl_row.get(required_field, "")
                         # BUG CORRIGÉ (24/07) : un NaN pandas (case vide dans
                         # le fichier Excel) est "truthy" en Python — `nan or
@@ -258,7 +332,8 @@ def check_gl_account_prerequisites(parsed_file: dict) -> list[dict]:
                         missing[key] = {
                             "Table référencée BC": "15",
                             "Nom table BC": "Compte général",
-                            "Code manquant": f"{acc_no} — {required_field} vide",
+                            "Code manquant": f"{acc_no} — {required_field} vide"
+                                             + (" (vérifié via socle persisté)" if using_fallback else ""),
                             "Champs concernés": set(),
                             "Occurrences": 0,
                         }

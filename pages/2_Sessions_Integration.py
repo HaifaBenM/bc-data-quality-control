@@ -17,7 +17,13 @@ from app.db.supabase_client import get_supabase_client
 from app.core.simulation_context import SimulationContext
 from app.core.metadata_loader import MetadataLoader
 from app.core.correction_generator import apply_corrections
-from app.core.correction_classifier import build_prerequisites_report, build_prerequisites_excel
+from app.core.correction_classifier import (
+    build_prerequisites_report, build_prerequisites_excel,
+    check_gl_account_prerequisites, extract_gl_account_posting_fields,
+)
+from app.db.metadata_db import (
+    persist_gl_account_posting_fields, get_gl_account_posting_fields,
+)
 from app.db.profiles_db import get_profile_by_code
 from app.core.bc_api import get_access_token, get_companies, get_packages_qc
 from app.db.sessions_db import (
@@ -391,7 +397,7 @@ def display_unified_results(merged: dict, axe_c: dict, pr: dict = None):
                     )
 
 
-def display_correction_workflow(merged: dict, cfg: dict):
+def display_correction_workflow(merged: dict, cfg: dict, pr: dict):
     """
     Étape de correction : sépare les anomalies corrigibles dans le fichier
     (VALEUR_CORRIGIBLE) des prérequis à créer côté BC (PREALABLE_BC_REQUIS),
@@ -416,6 +422,19 @@ def display_correction_workflow(merged: dict, cfg: dict):
     prereqs = build_prerequisites_report(
         real, profile_code=cfg.get("client_code", ""), company_id=cfg.get("company_id", "")
     )
+    # Même contrôle croisé GL Account que dans la roadmap de niveaux (Étape 3)
+    # — voir le commentaire détaillé à l'endroit où _prereqs est construit
+    # plus loin dans ce fichier. Ici aussi le rapport final "Prérequis BC" en
+    # bénéficie, pas seulement la checklist de niveaux.
+    _client_code = cfg.get("client_code", "")
+    _company_id  = cfg.get("company_id", "")
+    _gl_extract  = extract_gl_account_posting_fields(pr)
+    if _gl_extract:
+        persist_gl_account_posting_fields(_client_code, _company_id, _gl_extract)
+        _gl_fallback = None
+    else:
+        _gl_fallback = get_gl_account_posting_fields(_client_code, _company_id)
+    prereqs = prereqs + check_gl_account_prerequisites(pr, _gl_fallback)
 
     st.markdown("---")
     st.markdown('<div class="step-header">🔧 Correction & génération du fichier</div>', unsafe_allow_html=True)
@@ -899,6 +918,23 @@ with tab_main:
                         _prereqs = build_prerequisites_report(
                             _real, profile_code=client_code, company_id=cfg.get("company_id", "")
                         )
+                        # Contrôle croisé GL Account <-> groupes comptables (92/93/94...).
+                        # Voir app.core.correction_classifier.check_gl_account_prerequisites.
+                        # Confirmé nécessaire par test réel du 23-24/07/2026 (compte
+                        # 77110001 sans Groupe compta. produit, invisible pour Axe B
+                        # puisque ce n'est pas un code de référence manquant mais un
+                        # champ GL vide). Si le fichier déposé contient l'onglet GL
+                        # Account, on l'utilise ET on persiste son état pour les futurs
+                        # fichiers 92/93/94 testés seuls (workflow sessions mère/fille) ;
+                        # sinon on retombe sur le dernier état persisté pour cette société.
+                        _company_id = cfg.get("company_id", "")
+                        _gl_extract = extract_gl_account_posting_fields(pr)
+                        if _gl_extract:
+                            persist_gl_account_posting_fields(client_code, _company_id, _gl_extract)
+                            _gl_fallback = None
+                        else:
+                            _gl_fallback = get_gl_account_posting_fields(client_code, _company_id)
+                        _prereqs = _prereqs + check_gl_account_prerequisites(pr, _gl_fallback)
                         st.session_state[_roadmap_key] = build_roadmap_from_prereqs(_prereqs, _level_cfg)
                     except Exception as e:
                         st.session_state[_roadmap_key] = []
@@ -1089,7 +1125,7 @@ with tab_main:
         st.markdown("---")
 
         display_unified_results(merged, axe_c, pr)
-        display_correction_workflow(merged, cfg)
+        display_correction_workflow(merged, cfg, pr)
 
         st.markdown("---")
         cb, cr, cs, cst = st.columns([2, 2, 3, 3])

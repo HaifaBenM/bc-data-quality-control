@@ -398,3 +398,64 @@ def _store_reference_cache(
         )
     except Exception:
         pass
+
+# ── Repli persisté pour check_gl_account_prerequisites (24/07/2026) ────────
+# Réutilise le cache générique existant (bc_metadata_cache / save_reference_data
+# / get_cached_metadata) — pas de nouvelle table Supabase. Nécessaire car un
+# fichier 92/93/94 testé seul (workflow sessions mère/fille de Rami) ne
+# contient pas l'onglet GL Account, donc le contrôle croisé
+# (correction_classifier.check_gl_account_prerequisites) n'a rien à comparer
+# sans cette image persistée du dernier fichier qui contenait réellement la
+# table 15. Confirmé nécessaire par test réel du 24/07/2026 : BC a rejeté
+# l'import 92 (compte 77110001) alors que l'outil affichait "fichier correct"
+# faute de cette référence.
+
+GL_ACCOUNT_POSTING_FIELDS_ENTITY = "gl_account_posting_fields"
+
+
+def persist_gl_account_posting_fields(
+    profile_code: str,
+    company_id:   str,
+    gl_accounts:  dict,
+) -> tuple[bool, str]:
+    """
+    Persiste, pour chaque compte GL Account présent dans le dernier fichier
+    analysé contenant l'onglet 15, l'état de ses champs Groupe compta.
+    marché/produit. Écrasé à chaque nouvelle analyse (reflète toujours le
+    dernier état connu, pas un instantané figé dans le temps) — cohérent
+    avec la décision actée le 23/07 : le socle est figé dans sa structure,
+    mais ses données peuvent être modifiées/complétées dans le temps.
+
+    gl_accounts : {"<N° compte>": {"Groupe compta. marché": "...",
+                                    "Groupe compta. produit": "..."}, ...}
+    """
+    data = [{"N°": acc_no, **fields} for acc_no, fields in gl_accounts.items()]
+    return save_reference_data(
+        profile_code=profile_code,
+        company_id=company_id,
+        entity_name=GL_ACCOUNT_POSTING_FIELDS_ENTITY,
+        label="GL Account — Groupe compta. marché/produit",
+        data=data,
+        record_count=len(data),
+    )
+
+
+def get_gl_account_posting_fields(
+    profile_code: str,
+    company_id:   str,
+) -> dict:
+    """
+    Relit le dernier état persisté par persist_gl_account_posting_fields().
+    Retourne {} si rien n'a jamais été persisté pour cette société (aucun
+    fichier avec l'onglet GL Account n'a encore été analysé pour ce
+    profile_code/company_id) — l'appelant doit alors traiter ça comme
+    "rien à vérifier", pas comme une erreur.
+    """
+    row = get_cached_metadata(profile_code, company_id, GL_ACCOUNT_POSTING_FIELDS_ENTITY)
+    if not row:
+        return {}
+    fields = row.get("fields") or []
+    return {
+        str(r.get("N°", "")).strip(): {k: v for k, v in r.items() if k != "N°"}
+        for r in fields if r.get("N°")
+    }
