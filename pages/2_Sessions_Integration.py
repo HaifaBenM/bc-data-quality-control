@@ -176,11 +176,17 @@ def _resolve_gl_account_fallback(client_code: str, company_id: str) -> dict:
     endpoint AL recordValues) — plus fiable qu'un cache car jamais périmée
     (voir discussion du 24/07/2026 : un repli persisté reste correct tant
     que personne ne modifie le plan comptable entre deux analyses, ce qui
-    n'est pas garanti). Retombe silencieusement sur le repli persisté
-    (cache Supabase) si le live échoue pour n'importe quelle raison — page
-    AL pas encore publiée, numéros de champ GL_ACCOUNT_FIELD_NO_* pas
-    encore renseignés dans bc_api.py, ou société sans accès BC configuré.
-    Ne jamais faire planter l'analyse pour cette seule raison.
+    n'est pas garanti). Retombe sur le repli persisté (cache Supabase) si
+    le live échoue pour n'importe quelle raison — page AL pas encore
+    publiée, société sans accès BC configuré, etc. Ne jamais faire planter
+    l'analyse pour cette seule raison.
+
+    DIAGNOSTIC TEMPORAIRE (24/07/2026) : affiche désormais un st.caption
+    avec le résultat réel du live (nombre de comptes obtenus, ou l'erreur
+    précise si ça échoue) — jusqu'ici l'échec était avalé silencieusement
+    par un except Exception nu, impossible de savoir si le live échouait
+    vraiment ou s'il tournait mais ne trouvait rien. À retirer une fois le
+    comportement confirmé stable.
     """
     try:
         p = get_profile_by_code(client_code)
@@ -192,9 +198,15 @@ def _resolve_gl_account_fallback(client_code: str, company_id: str) -> dict:
             if all([tid, cid, cs, env, company_id]):
                 tok  = get_access_token(tid, cid, cs)
                 live = get_gl_account_fields_live(tid, env, company_id, tok)
+                st.caption(f"🔧 Debug GL live : {len(live)} compte(s) reçu(s) via recordValues.")
                 if live:
                     return live
-    except Exception:
+            else:
+                st.caption("🔧 Debug GL live : profil BC incomplet (tenant/client/secret/env/company).")
+        else:
+            st.caption(f"🔧 Debug GL live : aucun profil trouvé pour '{client_code}'.")
+    except Exception as e:
+        st.caption(f"🔧 Debug GL live : échec — {type(e).__name__}: {e}")
         pass
     return get_gl_account_posting_fields(client_code, company_id)
 
