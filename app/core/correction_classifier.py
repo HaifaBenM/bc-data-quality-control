@@ -117,6 +117,151 @@ _PREREQ_COLUMNS = [
 ]
 
 
+# ── Contrôle croisé GL Account <-> groupes comptables (socle MDD Compta) ────
+#
+# Confirmé par test réel le 23/07/2026 : importer 92/93/94 après GL Account
+# échoue quand même si le compte général référencé par un champ-compte de
+# 92/93/94 n'a pas LUI-MÊME ses propres Groupe compta. marché / Groupe
+# compta. produit renseignés — erreur BC "Groupe compta. produit doit avoir
+# une valeur dans Compte général: N°=<compte>. Il ne peut pas être vide ou
+# nul." Ce n'est pas une histoire de table manquante (le compte existe déjà,
+# GL Account est intégré) : c'est un champ précis, sur une ligne précise,
+# manquant.
+#
+# Vérification 100% inter-onglets DU MÊME fichier déposé, aucun appel BC :
+# le compte et le groupe qui le référence sont dans le même package MDD
+# Comptabilité (socle figé confirmé par Rami/Bilel), donc les deux onglets
+# sont déjà là au moment du contrôle.
+
+GL_ACCOUNT_REQUIRED_FIELDS = ["Groupe compta. marché", "Groupe compta. produit"]
+
+_ACCOUNT_FIELD_PREFIXES = ("compte", "cpte")
+_ACCOUNT_FIELD_EXCLUSIONS = {
+    "afficher tous les comptes lors de la consultation",
+}
+
+
+def _is_account_reference_column(col_name: str) -> bool:
+    """
+    Un champ "champ-compte" pointe vers un compte général (Chart of
+    Accounts) — reconnu par son libellé BC standard : commence par
+    "Compte" ou "Cpte" (Compte client, Compte frais forfaitaires, Cpte
+    arrondi débit...), à l'exclusion des champs qui contiennent le mot
+    sans être une référence de compte (ex. la case à cocher "Afficher tous
+    les comptes lors de la consultation").
+
+    NON VÉRIFIÉ AU-DELÀ DES ONGLETS 92/93 DU FICHIER RÉEL DE RAMI (22/07) :
+    la règle générique tient sur ces deux tables, mais n'a pas été testée
+    sur d'autres tables de groupes comptables (FA Posting Group, Bank
+    Account Posting Group...) si elles apparaissent un jour dans le socle —
+    à revérifier si de nouveaux libellés de champ ne matchent pas ce motif.
+    """
+    name = str(col_name or "").strip().lower()
+    if name in _ACCOUNT_FIELD_EXCLUSIONS:
+        return False
+    return any(name.startswith(p) for p in _ACCOUNT_FIELD_PREFIXES)
+
+
+def check_gl_account_prerequisites(parsed_file: dict) -> list[dict]:
+    """
+    Pour chaque compte général référencé par un champ-compte d'une table de
+    groupe comptable (92, 93, 94, ou toute autre table du même type présente
+    dans le fichier), vérifie que ce compte a bien ses propres champs
+    "Groupe compta. marché" et "Groupe compta. produit" remplis dans
+    l'onglet Compte général (table 15) — AVANT de considérer 92/93/94
+    intégrables sans erreur BC.
+
+    Ne fait AUCUN appel BC : contrôle purement inter-onglets sur le fichier
+    déjà déposé (parse_uploaded_file). S'utilise en amont de l'intégration
+    BC de 92/93/94, pas après-coup sur une erreur déjà survenue.
+
+    Retourne une liste de dicts au même format que build_prerequisites_report
+    (réutilisable tel quel avec build_prerequisites_excel) :
+        {
+          "Table référencée BC": "15",
+          "Nom table BC": "Compte général",
+          "Code manquant": "<N° compte> — <champ vide>",
+          "Champs concernés": "<onglet>.<colonne> ; ...",
+          "Occurrences": <int>,
+        }
+
+    Si l'onglet Compte général (table 15) est absent du fichier déposé (cas
+    normal pour un package qui ne contient pas la comptabilité), retourne []
+    silencieusement — ce contrôle ne s'applique qu'aux fichiers qui
+    contiennent réellement la table 15.
+    """
+    sheets   = parsed_file.get("sheets", {})
+    metadata = parsed_file.get("metadata", {})
+
+    gl_sheet_name = next(
+        (name for name, meta in metadata.items() if str(meta.get("table_id", "")) == "15"),
+        None,
+    )
+    if gl_sheet_name is None:
+        return []
+
+    gl_df = sheets.get(gl_sheet_name)
+    if gl_df is None or gl_df.empty:
+        return []
+
+    account_col = next((c for c in gl_df.columns if str(c).strip() == "N°"), None)
+    if account_col is None:
+        return []
+
+    gl_by_account = gl_df.set_index(gl_df[account_col].astype(str).str.strip())
+
+    missing: dict[tuple, dict] = {}
+
+    for sheet_name, df in sheets.items():
+        if sheet_name == gl_sheet_name or df is None or df.empty:
+            continue
+
+        account_columns = [c for c in df.columns if _is_account_reference_column(c)]
+        if not account_columns:
+            continue
+
+        for col in account_columns:
+            for raw_value in df[col].dropna():
+                acc_no = str(raw_value).strip()
+                if not acc_no or acc_no not in gl_by_account.index:
+                    continue  # compte inexistant : déjà signalé par ailleurs (Axe B), pas ce contrôle
+
+                gl_row = gl_by_account.loc[acc_no]
+                if hasattr(gl_row, "ndim") and gl_row.ndim > 1:
+                    gl_row = gl_row.iloc[0]  # N° dupliqué dans le fichier — on ne plante pas, 1re occurrence
+
+                for required_field in GL_ACCOUNT_REQUIRED_FIELDS:
+                    # ATTENTION : parse_uploaded_file() fait df.dropna(axis=1,
+                    # how="all") — une colonne 100% vide sur TOUS les comptes
+                    # du fichier disparaît purement et simplement de gl_df.
+                    # Donc "colonne absente" ne veut PAS dire "rien à
+                    # vérifier" : ça veut dire "vide pour tous les comptes",
+                    # exactement le cas confirmé sur le fichier réel de Rami
+                    # le 23/07 (aucun compte n'a Groupe compta. marché/
+                    # produit rempli). Traiter comme vide, pas comme absent.
+                    if required_field in gl_df.columns:
+                        if str(gl_row.get(required_field, "") or "").strip():
+                            continue  # rempli, rien à signaler
+
+                    key = (acc_no, required_field)
+                    if key not in missing:
+                        missing[key] = {
+                            "Table référencée BC": "15",
+                            "Nom table BC": "Compte général",
+                            "Code manquant": f"{acc_no} — {required_field} vide",
+                            "Champs concernés": set(),
+                            "Occurrences": 0,
+                        }
+                    missing[key]["Champs concernés"].add(f"{sheet_name}.{col}")
+                    missing[key]["Occurrences"] += 1
+
+    report = []
+    for row in missing.values():
+        row["Champs concernés"] = ", ".join(sorted(row["Champs concernés"]))
+        report.append(row)
+    return sorted(report, key=lambda r: -r["Occurrences"])
+
+
 def build_prerequisites_excel(prereqs: list[dict]) -> bytes:
     """
     Génère un .xlsx mis en forme (en-tête coloré, colonnes dimensionnées,
