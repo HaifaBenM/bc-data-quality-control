@@ -36,7 +36,15 @@ _OPTION_VALUES: dict[str, dict[str, list[str]]] = {
         "Type": ["", " ", "Stock", "Service", "Hors stock"],
     },
     "15": {
-        "Type compte":          ["", " ", "Reportage", "Total", "Début total", "Fin total"],
+        # "Validation" ajouté le 24/07/2026 : confirmé par test réel de Rami
+        # — BC accepte cette valeur sans erreur sur les 350 comptes du fichier
+        # réel, alors qu'elle était absente de cette liste (350 faux positifs
+        # "Valeur Option non autorisée"). "Reportage" restait dans la liste
+        # d'origine mais n'a JAMAIS été confirmée par un test réel — conservée
+        # ici sans suppression (aucune instruction explicite de la retirer),
+        # mais à vérifier avec Shema si elle correspond à une vraie valeur BC
+        # ou si c'était une supposition erronée dès le départ.
+        "Type compte":          ["", " ", "Validation", "Reportage", "Total", "Début total", "Fin total"],
         "Catégorie compte":     ["", " ", "Actif", "Passif", "Fonds propres",
                                  "Produits", "Charges", "Coût des marchandises"],
         "Type comptabilisation":["", " ", "Vente", "Achat"],
