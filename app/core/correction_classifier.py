@@ -17,6 +17,7 @@ par Axe B (get_reference_values_by_table_id) : aucun appel BC additionnel.
 from __future__ import annotations
 import difflib
 import io
+import pandas as pd
 
 # Score de similarité minimal pour considérer un code existant comme "faute
 # de frappe probable" plutôt que "code inexistant". Pas encore calibré sur
@@ -240,7 +241,16 @@ def check_gl_account_prerequisites(parsed_file: dict) -> list[dict]:
                     # le 23/07 (aucun compte n'a Groupe compta. marché/
                     # produit rempli). Traiter comme vide, pas comme absent.
                     if required_field in gl_df.columns:
-                        if str(gl_row.get(required_field, "") or "").strip():
+                        _val = gl_row.get(required_field, "")
+                        # BUG CORRIGÉ (24/07) : un NaN pandas (case vide dans
+                        # le fichier Excel) est "truthy" en Python — `nan or
+                        # ""` vaut nan, pas "". Sans pd.isna() ici, un champ
+                        # réellement vide comme celui du compte 40110001
+                        # passait à tort pour "rempli". Confirmé en testant
+                        # sur le fichier réel de Rami du 24/07 (0 anomalie
+                        # remontée alors que Compte fournisseur ETRANGER
+                        # avait Groupe compta. marché/produit vides).
+                        if not pd.isna(_val) and str(_val).strip():
                             continue  # rempli, rien à signaler
 
                     key = (acc_no, required_field)
