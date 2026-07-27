@@ -1037,6 +1037,32 @@ with tab_main:
                             except Exception as e:
                                 st.error(f"{type(e).__name__}: {e}")
 
+                        st.divider()
+                        st.caption(
+                            "Test 3 — même requête que le Test 1 (fieldNameFilter='No.'), mais "
+                            "en URL brute construite ici, sans passer par get_record_values_qc. "
+                            "Si ça remonte 0 aussi, le bug est côté AL (comparaison FldRef.Name), "
+                            "pas dans la construction de l'URL en Python."
+                        )
+                        if st.button("Tester recordValues (fieldNameFilter='No.' brut)", key="btn_debug_recordvalues_rawname"):
+                            try:
+                                _dbg_profile3 = get_profile_by_code(cfg.get("client_code", ""))
+                                _dbg_tid3 = _dbg_profile3.get("bc_tenant_id", "").strip()
+                                _dbg_cid3 = _dbg_profile3.get("bc_client_id", "").strip()
+                                _dbg_cs3  = _dbg_profile3.get("bc_client_secret", "").strip()
+                                _dbg_env3 = _dbg_profile3.get("bc_environment", "").strip()
+                                _dbg_company3 = cfg.get("company_id", "")
+                                _dbg_tok3 = get_access_token(_dbg_tid3, _dbg_cid3, _dbg_cs3)
+                                import requests as _dbg_requests3
+                                from app.core.bc_api import _qc_base as _dbg_qc_base3, _headers as _dbg_headers3
+                                _dbg_url3 = f"{_dbg_qc_base3(_dbg_tid3, _dbg_env3, _dbg_company3)}/recordValues?$filter=tableId eq 15 and fieldNameFilter eq 'No.'"
+                                st.code(_dbg_url3)
+                                _dbg_resp3 = _dbg_requests3.get(_dbg_url3, headers=_dbg_headers3(_dbg_tok3), timeout=30)
+                                st.write(f"**HTTP {_dbg_resp3.status_code}**")
+                                st.code(_dbg_resp3.text[:2000])
+                            except Exception as e:
+                                st.error(f"{type(e).__name__}: {e}")
+
                 if _roadmap:
                     st.markdown("---")
                     _hcol1, _hcol2 = st.columns([5, 2])
