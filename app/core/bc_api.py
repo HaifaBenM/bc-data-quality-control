@@ -584,22 +584,36 @@ def get_gl_account_fields_live(
     reste correct tant que personne ne modifie le plan comptable entre
     deux analyses, ce qui n'est pas garanti).
 
+    BUG CORRIGÉ (24/07/2026) : get_record_values_qc (comme tableValues) ne
+    matérialise QUE les valeurs non vides — un compte dont le champ est
+    vide n'apparaissait donc jamais dans bus/prod. check_gl_account_prerequisites
+    traite "compte absent du dict" comme "compte inexistant, à ignorer",
+    ratant exactement les comptes vides qu'on veut détecter (confirmé : 0
+    comptes reçus sur un test réel alors que 77110001 existe bien mais est
+    vide). Correctif : on récupère d'abord l'univers de TOUS les comptes
+    existants (champ "No.", toujours rempli — clé primaire), puis on
+    construit un dict DENSE où chaque compte de cet univers a une entrée,
+    vide ou non — un compte absent du résultat final signifie maintenant
+    vraiment "n'existe pas", jamais "vide".
+
     Retourne le même format que
     app.db.metadata_db.get_gl_account_posting_fields() — remplacement
     direct côté appelant : {"<N° compte>": {"Groupe compta. marché": "...",
     "Groupe compta. produit": "..."}, ...}
     """
+    universe = get_record_values_qc(
+        tenant_id, environment, company_id, 15, "No.", token,
+    )
     bus = get_record_values_qc(
         tenant_id, environment, company_id, 15, "Gen. Bus. Posting Group", token,
     )
     prod = get_record_values_qc(
         tenant_id, environment, company_id, 15, "Gen. Prod. Posting Group", token,
     )
-    accounts = set(bus) | set(prod)
     return {
         acc: {
             "Groupe compta. marché":  bus.get(acc, ""),
             "Groupe compta. produit": prod.get(acc, ""),
         }
-        for acc in accounts
+        for acc in universe
     }

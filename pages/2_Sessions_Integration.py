@@ -198,16 +198,17 @@ def _resolve_gl_account_fallback(client_code: str, company_id: str) -> dict:
             if all([tid, cid, cs, env, company_id]):
                 tok  = get_access_token(tid, cid, cs)
                 live = get_gl_account_fields_live(tid, env, company_id, tok)
-                st.caption(f"🔧 Debug GL live : {len(live)} compte(s) reçu(s) via recordValues.")
+                if is_consultant():
+                    st.caption(f"🔧 [Debug consultant] Vérification live du plan comptable : {len(live)} compte(s) GL trouvé(s).")
                 if live:
                     return live
-            else:
-                st.caption("🔧 Debug GL live : profil BC incomplet (tenant/client/secret/env/company).")
-        else:
-            st.caption(f"🔧 Debug GL live : aucun profil trouvé pour '{client_code}'.")
+            elif is_consultant():
+                st.caption("🔧 [Debug consultant] Vérification live impossible : profil BC incomplet (tenant/client/secret/environnement/société).")
+        elif is_consultant():
+            st.caption(f"🔧 [Debug consultant] Vérification live impossible : aucun profil trouvé pour '{client_code}'.")
     except Exception as e:
-        st.caption(f"🔧 Debug GL live : échec — {type(e).__name__}: {e}")
-        pass
+        if is_consultant():
+            st.caption(f"🔧 [Debug consultant] Vérification live échouée : {type(e).__name__}: {e}")
     return get_gl_account_posting_fields(client_code, company_id)
 
 
