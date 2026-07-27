@@ -986,6 +986,30 @@ with tab_main:
 
                 _roadmap = st.session_state[_roadmap_key]
 
+                if is_consultant():
+                    with st.expander("🔧 Diagnostic recordValues (consultant)"):
+                        st.caption(
+                            "Teste directement l'endpoint live recordValues pour ce client/société, "
+                            "sans rien configurer en local — utilise les mêmes identifiants que l'outil."
+                        )
+                        if st.button("Tester recordValues (champ No., table 15)", key="btn_debug_recordvalues"):
+                            try:
+                                _dbg_profile = get_profile_by_code(client_code)
+                                _dbg_tid = _dbg_profile.get("bc_tenant_id", "").strip()
+                                _dbg_cid = _dbg_profile.get("bc_client_id", "").strip()
+                                _dbg_cs  = _dbg_profile.get("bc_client_secret", "").strip()
+                                _dbg_env = _dbg_profile.get("bc_environment", "").strip()
+                                _dbg_company = cfg.get("company_id", "")
+                                _dbg_tok = get_access_token(_dbg_tid, _dbg_cid, _dbg_cs)
+                                _dbg_result = get_gl_account_fields_live(_dbg_tid, _dbg_env, _dbg_company, _dbg_tok)
+                                st.write(f"**{len(_dbg_result)} compte(s) GL trouvé(s) au total.**")
+                                st.json(dict(list(_dbg_result.items())[:10]))
+                            except Exception as e:
+                                st.error(f"{type(e).__name__}: {e}")
+                                _dbg_resp = getattr(e, "response", None)
+                                if _dbg_resp is not None:
+                                    st.code(f"HTTP {_dbg_resp.status_code}\n{_dbg_resp.text[:1500]}")
+
                 if _roadmap:
                     st.markdown("---")
                     _hcol1, _hcol2 = st.columns([5, 2])
