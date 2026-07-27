@@ -1010,6 +1010,33 @@ with tab_main:
                                 if _dbg_resp is not None:
                                     st.code(f"HTTP {_dbg_resp.status_code}\n{_dbg_resp.text[:1500]}")
 
+                        st.divider()
+                        st.caption(
+                            "Test 2 — contourne complètement la résolution par nom de champ : "
+                            "interroge fieldNo=1 en brut (le champ 1 est presque toujours la clé "
+                            "primaire sur une table BC standard). Si ça remonte aussi 0, le "
+                            "problème n'est PAS dans la réflexion par nom mais plus en amont "
+                            "(société vide, table mal ouverte, réponse OData mal formée...)."
+                        )
+                        if st.button("Tester recordValues (fieldNo=1 brut, sans résolution par nom)", key="btn_debug_recordvalues_raw"):
+                            try:
+                                _dbg_profile2 = get_profile_by_code(cfg.get("client_code", ""))
+                                _dbg_tid2 = _dbg_profile2.get("bc_tenant_id", "").strip()
+                                _dbg_cid2 = _dbg_profile2.get("bc_client_id", "").strip()
+                                _dbg_cs2  = _dbg_profile2.get("bc_client_secret", "").strip()
+                                _dbg_env2 = _dbg_profile2.get("bc_environment", "").strip()
+                                _dbg_company2 = cfg.get("company_id", "")
+                                _dbg_tok2 = get_access_token(_dbg_tid2, _dbg_cid2, _dbg_cs2)
+                                import requests as _dbg_requests
+                                from app.core.bc_api import _qc_base as _dbg_qc_base, _headers as _dbg_headers
+                                _dbg_url = f"{_dbg_qc_base(_dbg_tid2, _dbg_env2, _dbg_company2)}/recordValues?$filter=tableId eq 15 and fieldNo eq 1"
+                                st.code(_dbg_url)
+                                _dbg_resp2 = _dbg_requests.get(_dbg_url, headers=_dbg_headers(_dbg_tok2), timeout=30)
+                                st.write(f"**HTTP {_dbg_resp2.status_code}**")
+                                st.code(_dbg_resp2.text[:2000])
+                            except Exception as e:
+                                st.error(f"{type(e).__name__}: {e}")
+
                 if _roadmap:
                     st.markdown("---")
                     _hcol1, _hcol2 = st.columns([5, 2])
