@@ -148,6 +148,7 @@ class RoadmapEntry:
     chain_resolved: bool = True
     status:         str = "pending"  # "pending" | "validated"
     last_check:     str | None = None  # None | "filled" | "empty" | "unknown" — motif du statut "pending", pour l'UI
+    sub_anomalies:  list[dict] | None = None  # détail à afficher en sous-niveau (ex. comptes GL avec champs vides) — None si non applicable à cette table, [] si applicable et propre
 
 
 def build_roadmap(
@@ -246,13 +247,24 @@ def build_roadmap_from_prereqs(
     Le plan comptable (Niveau 0) reste forcé, pour la même raison que
     build_roadmap() : ce n'est pas Axe B qui décide de son caractère
     obligatoire, c'est une règle métier absolue.
+
+    GÉNÉRALISÉ (27/07/2026) : chaque entrée de la roadmap reçoit maintenant
+    son propre sous-détail (entry.sub_anomalies) — les lignes de `prereqs`
+    qui la concernent (même "Table référencée BC"). Avant cette version,
+    seul G/L Account (table 15) avait ce sous-détail, câblé à la main côté
+    appelant (2_Sessions_Integration.py) — demandé par Rami : si plusieurs
+    tables ont des prérequis détectés, chacune doit afficher le sien, pas
+    seulement GL Account.
     """
-    table_ids: set[int] = set()
+    prereqs_by_table: dict[int, list[dict]] = {}
     for row in prereqs:
         try:
-            table_ids.add(int(row.get("Table référencée BC", 0)))
+            _tid = int(row.get("Table référencée BC", 0))
         except (TypeError, ValueError):
             continue
+        prereqs_by_table.setdefault(_tid, []).append(row)
+
+    table_ids: set[int] = set(prereqs_by_table.keys())
 
     for _tid, _info in level_config.items():
         if _info.level == 0 and not _info.ignored:
@@ -271,7 +283,11 @@ def build_roadmap_from_prereqs(
                 sub_level=None,
                 note="Anomalie Axe B réelle sur cette table, absente de level_config — à classer, mais quand même vérifiée.",
             )
-        roadmap.append(RoadmapEntry(level_info=info, chain_resolved=True))
+        roadmap.append(RoadmapEntry(
+            level_info=info,
+            chain_resolved=True,
+            sub_anomalies=prereqs_by_table.get(table_id) or None,
+        ))
 
     roadmap.sort(key=lambda e: (
         e.level_info.level if e.level_info.level is not None else 99,
@@ -342,21 +358,55 @@ def check_table_filled(profile_code: str, company_id: str, table_id: int) -> str
     return "filled" if codes else "empty"
 
 
-def refresh_roadmap(profile_code: str, company_id: str, roadmap: list[RoadmapEntry]) -> list[RoadmapEntry]:
+def refresh_roadmap(
+    profile_code: str,
+    company_id: str,
+    roadmap: list[RoadmapEntry],
+    gl_account_check: Callable[[], list[dict]] | None = None,
+) -> list[RoadmapEntry]:
     """
     Bouton "Revérifier" — relance le check BC pour chaque entrée débloquée
     et non validée. Seul "filled" fait passer le statut à "validated" ;
     "empty" et "unknown" laissent le niveau "pending" mais avec un motif
     différent (à afficher distinctement côté UI : "pas encore rempli"
     vs "vérification impossible pour le moment").
+
+    gl_account_check : callable optionnel, sans argument, qui retourne la
+    liste d'anomalies du contrôle croisé GL Account (voir
+    correction_classifier.check_gl_account_prerequisites — champs Groupe
+    compta. marché/produit vides sur des comptes référencés par 92/93/94).
+
+    CORRIGÉ (27/07/2026) : avant cette version, le contrôle croisé GL
+    Account était calculé (dans display_correction_workflow, Phase B) mais
+    JAMAIS reconnecté à l'état "validated" du niveau — la table 15 passait
+    à 100% dès que check_table_filled la voyait "filled" (des comptes
+    existent), sans jamais vérifier que leurs champs Groupe compta. étaient
+    remplis. Rami : "ça progresse sans avoir rien fait côté BC." Corrigé :
+    si gl_account_check est fourni et que le niveau correspond à la table
+    15, son résultat conditionne désormais le statut "validated" au même
+    titre que check_table_filled — les deux doivent être propres. Le
+    détail (quels comptes, quels champs) est stocké dans
+    entry.sub_anomalies pour affichage en sous-niveau dans la roadmap.
     """
     for e in roadmap:
-        if e.status == "validated":
+        if e.status == "validated" and e.level_info.table_id != 15:
             continue
         if not is_level_unlocked(e.level_info.level, roadmap):
             continue
         result = check_table_filled(profile_code, company_id, e.level_info.table_id)
         e.last_check = result
+
+        if e.level_info.table_id == 15 and gl_account_check is not None:
+            try:
+                e.sub_anomalies = gl_account_check()
+            except Exception:
+                e.sub_anomalies = None  # contrôle indisponible pour l'instant — ne bloque pas sur une panne technique, mais ne valide pas non plus tant que result != "filled"
+            if result == "filled" and not e.sub_anomalies:
+                e.status = "validated"
+            elif e.sub_anomalies:
+                e.status = "pending"  # comptes existent mais champs vides — jamais validé tant que non vide
+            continue
+
         if result == "filled":
             e.status = "validated"
     return roadmap

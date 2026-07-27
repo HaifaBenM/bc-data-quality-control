@@ -466,39 +466,15 @@ def display_correction_workflow(merged: dict, cfg: dict, pr: dict):
     prereqs = build_prerequisites_report(
         real, profile_code=cfg.get("client_code", ""), company_id=cfg.get("company_id", "")
     )
-    # Même contrôle croisé GL Account que dans la roadmap de niveaux (Étape 3)
-    # — voir le commentaire détaillé à l'endroit où _prereqs est construit
-    # plus loin dans ce fichier. Ici aussi le rapport final "Prérequis BC" en
-    # bénéficie, pas seulement la checklist de niveaux.
-    _client_code = cfg.get("client_code", "")
-    _company_id  = cfg.get("company_id", "")
-    _gl_extract  = extract_gl_account_posting_fields(pr)
-    if _gl_extract:
-        persist_gl_account_posting_fields(_client_code, _company_id, _gl_extract)
-        _gl_fallback = None
-    else:
-        _gl_fallback = _resolve_gl_account_fallback(_client_code, _company_id)
-    prereqs = prereqs + check_gl_account_prerequisites(pr, _gl_fallback)
+    # Le contrôle croisé GL Account (comptes GL référencés par 92/93/94 avec
+    # champs vides) a été retiré d'ici le 27/07/2026 : il appartient
+    # exclusivement à la roadmap de niveaux (Phase A, Étape 3, avant clic
+    # "Analyse qualité") — Phase B ne montre plus que les erreurs
+    # corrigibles, clarifié explicitement par Rami. Voir _prereqs plus loin
+    # dans ce fichier pour l'endroit où ce contrôle reste actif.
 
     st.markdown("---")
     st.markdown('<div class="step-header">🔧 Correction & génération du fichier</div>', unsafe_allow_html=True)
-
-    if prereqs:
-        st.markdown(
-            f'<div class="card-prereq">🟣 <b>{len(prereqs)} donnée(s) manquante(s) côté BC</b> — '
-            f'ces codes n\'existent dans aucune table référencée. Ils doivent être créés dans BC '
-            f'AVANT import ; aucune valeur saisie dans le fichier ne les rendra valides.</div>',
-            unsafe_allow_html=True
-        )
-        with st.expander(f"🟣 Prérequis BC à créer ({len(prereqs)})", expanded=True):
-            st.dataframe(pd.DataFrame(prereqs), use_container_width=True, hide_index=True)
-            st.download_button(
-                "⬇️ Télécharger la checklist prérequis BC (Excel)",
-                data=build_prerequisites_excel(prereqs),
-                file_name=f"prerequis_bc_{cfg.get('session_name', 'session')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                key="dl_prereq_xlsx",
-            )
 
     if not corrigibles:
         st.info("Aucune correction directement applicable au fichier pour le moment.")
@@ -978,7 +954,13 @@ with tab_main:
                             _gl_fallback = None
                         else:
                             _gl_fallback = _resolve_gl_account_fallback(client_code, _company_id)
-                        _prereqs = _prereqs + check_gl_account_prerequisites(pr, _gl_fallback)
+                        _gl_anomalies = check_gl_account_prerequisites(pr, _gl_fallback)
+                        _prereqs = _prereqs + _gl_anomalies
+                        # build_roadmap_from_prereqs regroupe désormais génériquement
+                        # les lignes de _prereqs par table et les attache en
+                        # sub_anomalies à CHAQUE niveau concerné (pas seulement GL
+                        # Account) — demandé par Rami le 27/07 : plusieurs tables
+                        # prérequis doivent chacune afficher leur propre détail.
                         st.session_state[_roadmap_key] = build_roadmap_from_prereqs(_prereqs, _level_cfg)
                     except Exception as e:
                         st.session_state[_roadmap_key] = []
@@ -1071,8 +1053,19 @@ with tab_main:
                     with _hcol2:
                         if st.button("🔄 Revérifier", key="btn_refresh_levels", use_container_width=True):
                             with st.spinner("Vérification BC en cours..."):
+                                def _gl_check():
+                                    _rc_company_id = cfg.get("company_id", "")
+                                    _rc_extract = extract_gl_account_posting_fields(pr)
+                                    if _rc_extract:
+                                        persist_gl_account_posting_fields(cfg["client_code"], _rc_company_id, _rc_extract)
+                                        _rc_fallback = None
+                                    else:
+                                        _rc_fallback = _resolve_gl_account_fallback(cfg["client_code"], _rc_company_id)
+                                    return check_gl_account_prerequisites(pr, _rc_fallback)
+
                                 st.session_state[_roadmap_key] = refresh_roadmap(
-                                    cfg["client_code"], cfg["company_id"], _roadmap
+                                    cfg["client_code"], cfg["company_id"], _roadmap,
+                                    gl_account_check=_gl_check,
                                 )
                             st.rerun()
 
@@ -1102,6 +1095,15 @@ with tab_main:
                                 f'<span class="{_lbl_cls}">{_label}</span></div>',
                                 unsafe_allow_html=True,
                             )
+                            if _entry.sub_anomalies:
+                                with st.expander(
+                                    f"⚠️ {len(_entry.sub_anomalies)} champ(s) manquant(s) sur des comptes référencés",
+                                    expanded=False,
+                                ):
+                                    st.dataframe(
+                                        pd.DataFrame(_entry.sub_anomalies),
+                                        use_container_width=True, hide_index=True,
+                                    )
                     except Exception as _diag_e:
                         # DIAGNOSTIC — laissé en place tant qu'on n'a pas une confirmation
                         # de stabilité dans la durée. Sans impact visuel si tout va bien.
