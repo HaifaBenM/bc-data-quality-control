@@ -994,7 +994,7 @@ with tab_main:
                         )
                         if st.button("Tester recordValues (champ No., table 15)", key="btn_debug_recordvalues"):
                             try:
-                                _dbg_profile = get_profile_by_code(client_code)
+                                _dbg_profile = get_profile_by_code(cfg.get("client_code", ""))
                                 _dbg_tid = _dbg_profile.get("bc_tenant_id", "").strip()
                                 _dbg_cid = _dbg_profile.get("bc_client_id", "").strip()
                                 _dbg_cs  = _dbg_profile.get("bc_client_secret", "").strip()
