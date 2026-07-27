@@ -968,6 +968,84 @@ with tab_main:
 
                 _roadmap = st.session_state[_roadmap_key]
 
+                if is_consultant():
+                    with st.expander("🔧 Diagnostic recordValues (consultant)"):
+                        st.caption(
+                            "Teste directement l'endpoint live recordValues pour ce client/société, "
+                            "sans rien configurer en local — utilise les mêmes identifiants que l'outil."
+                        )
+                        if st.button("Tester recordValues (champ No., table 15)", key="btn_debug_recordvalues"):
+                            try:
+                                _dbg_profile = get_profile_by_code(cfg.get("client_code", ""))
+                                _dbg_tid = _dbg_profile.get("bc_tenant_id", "").strip()
+                                _dbg_cid = _dbg_profile.get("bc_client_id", "").strip()
+                                _dbg_cs  = _dbg_profile.get("bc_client_secret", "").strip()
+                                _dbg_env = _dbg_profile.get("bc_environment", "").strip()
+                                _dbg_company = cfg.get("company_id", "")
+                                _dbg_tok = get_access_token(_dbg_tid, _dbg_cid, _dbg_cs)
+                                _dbg_result = get_gl_account_fields_live(_dbg_tid, _dbg_env, _dbg_company, _dbg_tok)
+                                st.write(f"**{len(_dbg_result)} compte(s) GL trouvé(s) au total.**")
+                                st.json(dict(list(_dbg_result.items())[:10]))
+                            except Exception as e:
+                                st.error(f"{type(e).__name__}: {e}")
+                                _dbg_resp = getattr(e, "response", None)
+                                if _dbg_resp is not None:
+                                    st.code(f"HTTP {_dbg_resp.status_code}\n{_dbg_resp.text[:1500]}")
+
+                        st.divider()
+                        st.caption(
+                            "Test 2 — contourne complètement la résolution par nom de champ : "
+                            "interroge fieldNo=1 en brut (le champ 1 est presque toujours la clé "
+                            "primaire sur une table BC standard). Si ça remonte aussi 0, le "
+                            "problème n'est PAS dans la réflexion par nom mais plus en amont "
+                            "(société vide, table mal ouverte, réponse OData mal formée...)."
+                        )
+                        if st.button("Tester recordValues (fieldNo=1 brut, sans résolution par nom)", key="btn_debug_recordvalues_raw"):
+                            try:
+                                _dbg_profile2 = get_profile_by_code(cfg.get("client_code", ""))
+                                _dbg_tid2 = _dbg_profile2.get("bc_tenant_id", "").strip()
+                                _dbg_cid2 = _dbg_profile2.get("bc_client_id", "").strip()
+                                _dbg_cs2  = _dbg_profile2.get("bc_client_secret", "").strip()
+                                _dbg_env2 = _dbg_profile2.get("bc_environment", "").strip()
+                                _dbg_company2 = cfg.get("company_id", "")
+                                _dbg_tok2 = get_access_token(_dbg_tid2, _dbg_cid2, _dbg_cs2)
+                                import requests as _dbg_requests
+                                from app.core.bc_api import _qc_base as _dbg_qc_base, _headers as _dbg_headers
+                                _dbg_url = f"{_dbg_qc_base(_dbg_tid2, _dbg_env2, _dbg_company2)}/recordValues?$filter=tableId eq 15 and fieldNo eq 1"
+                                st.code(_dbg_url)
+                                _dbg_resp2 = _dbg_requests.get(_dbg_url, headers=_dbg_headers(_dbg_tok2), timeout=30)
+                                st.write(f"**HTTP {_dbg_resp2.status_code}**")
+                                st.code(_dbg_resp2.text[:2000])
+                            except Exception as e:
+                                st.error(f"{type(e).__name__}: {e}")
+
+                        st.divider()
+                        st.caption(
+                            "Test 3 — même requête que le Test 1 (fieldNameFilter='No.'), mais "
+                            "en URL brute construite ici, sans passer par get_record_values_qc. "
+                            "Historique : confirmé cassé côté AL (comparaison FldRef.Name) — "
+                            "contourné depuis via resolve_field_no_via_package(). Conservé ici à "
+                            "titre de comparaison si le comportement AL changeait un jour."
+                        )
+                        if st.button("Tester recordValues (fieldNameFilter='No.' brut)", key="btn_debug_recordvalues_rawname"):
+                            try:
+                                _dbg_profile3 = get_profile_by_code(cfg.get("client_code", ""))
+                                _dbg_tid3 = _dbg_profile3.get("bc_tenant_id", "").strip()
+                                _dbg_cid3 = _dbg_profile3.get("bc_client_id", "").strip()
+                                _dbg_cs3  = _dbg_profile3.get("bc_client_secret", "").strip()
+                                _dbg_env3 = _dbg_profile3.get("bc_environment", "").strip()
+                                _dbg_company3 = cfg.get("company_id", "")
+                                _dbg_tok3 = get_access_token(_dbg_tid3, _dbg_cid3, _dbg_cs3)
+                                import requests as _dbg_requests3
+                                from app.core.bc_api import _qc_base as _dbg_qc_base3, _headers as _dbg_headers3
+                                _dbg_url3 = f"{_dbg_qc_base3(_dbg_tid3, _dbg_env3, _dbg_company3)}/recordValues?$filter=tableId eq 15 and fieldNameFilter eq 'No.'"
+                                st.code(_dbg_url3)
+                                _dbg_resp3 = _dbg_requests3.get(_dbg_url3, headers=_dbg_headers3(_dbg_tok3), timeout=30)
+                                st.write(f"**HTTP {_dbg_resp3.status_code}**")
+                                st.code(_dbg_resp3.text[:2000])
+                            except Exception as e:
+                                st.error(f"{type(e).__name__}: {e}")
+
                 if _roadmap:
                     st.markdown("---")
                     _hcol1, _hcol2 = st.columns([5, 2])
@@ -986,10 +1064,20 @@ with tab_main:
                                         _rc_fallback = _resolve_gl_account_fallback(cfg["client_code"], _rc_company_id)
                                     return check_gl_account_prerequisites(pr, _rc_fallback)
 
-                                st.session_state[_roadmap_key] = refresh_roadmap(
-                                    cfg["client_code"], cfg["company_id"], _roadmap,
-                                    gl_account_check=_gl_check,
-                                )
+                                # DIAGNOSTIC (27/07) : Streamlit Cloud masque le message
+                                # d'erreur réel en production ("error redacted"). On capture
+                                # et affiche nous-mêmes la trace complète pour voir la vraie
+                                # cause du TypeError signalé par Rami, plutôt que de deviner.
+                                try:
+                                    st.session_state[_roadmap_key] = refresh_roadmap(
+                                        cfg["client_code"], cfg["company_id"], _roadmap,
+                                        gl_account_check=_gl_check,
+                                    )
+                                except Exception as _refresh_e:
+                                    import traceback as _refresh_tb
+                                    st.error(f"🔧 DIAGNOSTIC — erreur capturée dans refresh_roadmap : {type(_refresh_e).__name__}: {_refresh_e}")
+                                    st.code(_refresh_tb.format_exc())
+                                    st.stop()
                             st.rerun()
 
                     _total   = len(_roadmap)
