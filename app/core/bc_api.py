@@ -516,7 +516,7 @@ def get_record_values_qc(
     environment: str,
     company_id:  str,
     table_id:    int,
-    field_name:  str,
+    field_no:    int,
     token:       str,
 ) -> dict[str, str]:
     """
@@ -531,35 +531,28 @@ def get_record_values_qc(
     permet de savoir si UN compte GL précis a bien tel champ rempli, pas
     seulement si la valeur existe quelque part dans la table.
 
-    field_name : le NOM AL interne du champ (ex. "Gen. Bus. Posting
-    Group"), PAS son numéro — résolu dynamiquement côté AL par réflexion
-    (RecRef.FieldIndex, comparaison sur FldRef.Name). Ce nom est stable
-    dans toutes les localisations BC, contrairement au numéro de champ qui
-    peut varier — aucun numéro à connaître ou à coder en dur ici.
+    BUG AL CONFIRMÉ (24/07/2026) : le filtre fieldNameFilter (résolution
+    par nom de champ, ex. "Gen. Bus. Posting Group") retourne
+    systématiquement 0 résultat, confirmé en URL brute (donc pas un bug
+    Python) — la comparaison FldRef.Name côté AL ne fonctionne pas comme
+    attendu, cause exacte non identifiée. En attendant un correctif AL,
+    cette fonction n'accepte plus que field_no (numéro), dont le
+    fonctionnement est confirmé fiable sur un test réel. Pour rester
+    dynamique sans coder de numéro en dur côté appelant, voir
+    resolve_field_no_via_package() ci-dessous qui résout le numéro via
+    l'endpoint packageFields déjà existant et fonctionnel.
 
     Un enregistrement absent du résultat = champ vide pour cet
     enregistrement (mêmes conventions que tableValues).
 
-    Raises requests.HTTPError si l'endpoint n'est pas encore publié (404),
-    si field_name ne correspond à aucun champ de la table (page AL renvoie
-    alors un résultat vide, pas une erreur — donc un dict vide ici est
-    ambigu entre "rien de rempli" et "nom de champ introuvable" ; à
-    diagnostiquer via le champ fieldNo=0 en retour si besoin), ou toute
-    autre erreur BC — l'appelant doit capturer et retomber sur le repli
-    persisté (app.db.metadata_db.get_gl_account_posting_fields) tant que
-    l'extension AL n'a pas été republiée avec cette page.
+    Raises requests.HTTPError si l'endpoint n'est pas encore publié (404)
+    ou toute autre erreur BC — l'appelant doit capturer et retomber sur le
+    repli persisté (app.db.metadata_db.get_gl_account_posting_fields) tant
+    que l'extension AL n'a pas été republiée avec cette page.
     """
-    # BUG CORRIGÉ (24/07) : field_name contient des espaces ("Gen. Bus.
-    # Posting Group") — insérés tels quels dans l'URL, ils la rendent
-    # invalide/fragile (un espace brut n'est pas un caractère URL valide).
-    # C'est très probablement ce qui faisait échouer silencieusement le
-    # filtre côté BC (résultat vide, pas d'erreur HTTP). quote() encode
-    # l'espace en %20 — mais on garde l'apostrophe simple non encodée
-    # (nécessaire à la syntaxe OData `eq '...'`) via safe="'".
-    encoded_field_name = quote(field_name, safe="'")
     url = (
         f"{_qc_base(tenant_id, environment, company_id)}/recordValues"
-        f"?$filter=tableId eq {table_id} and fieldNameFilter eq '{encoded_field_name}'"
+        f"?$filter=tableId eq {table_id} and fieldNo eq {field_no}"
     )
     resp = requests.get(url, headers=_headers(token), timeout=30)
     resp.raise_for_status()
@@ -570,6 +563,45 @@ def get_record_values_qc(
     }
 
 
+def resolve_field_no_via_package(
+    tenant_id:   str,
+    environment: str,
+    company_id:  str,
+    table_id:    int,
+    field_name:  str,
+    token:       str,
+) -> int | None:
+    """
+    Résout dynamiquement le numéro d'un champ (ex. "Gen. Bus. Posting
+    Group" sur la table 15) en cherchant dans tous les packages BC de la
+    société un package qui inclut cette table, via l'endpoint packageFields
+    déjà existant et fonctionnel (get_package_fields_qc) — aucun numéro
+    codé en dur, contrairement à une constante Python (objection légitime
+    de Rami le 24/07/2026), et sans dépendre du filtre fieldNameFilter de
+    recordValues, actuellement buggé côté AL (voir get_record_values_qc).
+
+    Retourne None si aucun package ne contient ce champ pour cette table —
+    l'appelant doit alors traiter ça comme "impossible à résoudre pour
+    l'instant", pas comme une erreur bloquante.
+    """
+    packages = get_packages_qc(tenant_id, environment, company_id, token, visible_only=False)
+    for pkg in packages:
+        package_code = pkg.get("code", "")
+        if not package_code:
+            continue
+        try:
+            fields = get_package_fields_qc(tenant_id, environment, company_id, package_code, table_id, token)
+        except Exception:
+            continue
+        for f in fields:
+            if f.get("fieldName", "").strip() == field_name:
+                try:
+                    return int(f.get("fieldId"))
+                except (TypeError, ValueError):
+                    continue
+    return None
+
+
 def get_gl_account_fields_live(
     tenant_id:   str,
     environment: str,
@@ -577,39 +609,50 @@ def get_gl_account_fields_live(
     token:       str,
 ) -> dict:
     """
-    Interroge en direct (via get_record_values_qc, table 15, par NOM de
-    champ — jamais de numéro codé en dur) l'état RÉEL des champs Groupe
-    compta. marché/produit de chaque compte GL — plus fiable qu'un repli
-    en cache car jamais périmé (voir discussion du 24/07/2026 : un cache
-    reste correct tant que personne ne modifie le plan comptable entre
-    deux analyses, ce qui n'est pas garanti).
+    Interroge en direct l'état RÉEL des champs Groupe compta. marché/
+    produit de chaque compte GL — plus fiable qu'un repli en cache car
+    jamais périmé (voir discussion du 24/07/2026 : un cache reste correct
+    tant que personne ne modifie le plan comptable entre deux analyses, ce
+    qui n'est pas garanti).
 
-    BUG CORRIGÉ (24/07/2026) : get_record_values_qc (comme tableValues) ne
+    Résout les numéros de champ dynamiquement via
+    resolve_field_no_via_package() (packageFields, déjà fonctionnel) au
+    lieu de fieldNameFilter (recordValues), actuellement buggé côté AL —
+    confirmé le 24/07/2026 par un test réel isolant le problème (fieldNo=1
+    en brut fonctionne, fieldNameFilter='No.' en brut retourne 0 dans les
+    deux cas, Python et URL directe). Toujours aucun numéro codé en dur :
+    la résolution se refait à chaque appel.
+
+    BUG CORRIGÉ précédemment : get_record_values_qc (comme tableValues) ne
     matérialise QUE les valeurs non vides — un compte dont le champ est
-    vide n'apparaissait donc jamais dans bus/prod. check_gl_account_prerequisites
-    traite "compte absent du dict" comme "compte inexistant, à ignorer",
-    ratant exactement les comptes vides qu'on veut détecter (confirmé : 0
-    comptes reçus sur un test réel alors que 77110001 existe bien mais est
-    vide). Correctif : on récupère d'abord l'univers de TOUS les comptes
-    existants (champ "No.", toujours rempli — clé primaire), puis on
-    construit un dict DENSE où chaque compte de cet univers a une entrée,
-    vide ou non — un compte absent du résultat final signifie maintenant
-    vraiment "n'existe pas", jamais "vide".
+    vide n'apparaissait donc jamais dans bus/prod. Correctif : on récupère
+    d'abord l'univers de TOUS les comptes existants (champ "No.", résolu
+    dynamiquement lui aussi), puis on construit un dict DENSE où chaque
+    compte a une entrée, vide ou non.
 
     Retourne le même format que
     app.db.metadata_db.get_gl_account_posting_fields() — remplacement
     direct côté appelant : {"<N° compte>": {"Groupe compta. marché": "...",
     "Groupe compta. produit": "..."}, ...}
+
+    Raises ValueError si un des 3 champs (No., Gen. Bus./Prod. Posting
+    Group) n'a pu être résolu dans aucun package — l'appelant doit
+    capturer et retomber sur le repli persisté.
     """
-    universe = get_record_values_qc(
-        tenant_id, environment, company_id, 15, "No.", token,
-    )
-    bus = get_record_values_qc(
-        tenant_id, environment, company_id, 15, "Gen. Bus. Posting Group", token,
-    )
-    prod = get_record_values_qc(
-        tenant_id, environment, company_id, 15, "Gen. Prod. Posting Group", token,
-    )
+    no_field_no  = resolve_field_no_via_package(tenant_id, environment, company_id, 15, "No.", token)
+    bus_field_no = resolve_field_no_via_package(tenant_id, environment, company_id, 15, "Gen. Bus. Posting Group", token)
+    prod_field_no = resolve_field_no_via_package(tenant_id, environment, company_id, 15, "Gen. Prod. Posting Group", token)
+
+    if no_field_no is None or bus_field_no is None or prod_field_no is None:
+        raise ValueError(
+            f"Résolution dynamique des champs impossible (No.={no_field_no}, "
+            f"Gen. Bus.={bus_field_no}, Gen. Prod.={prod_field_no}) — aucun package "
+            f"BC ne contient ces champs pour la table 15 dans cette société."
+        )
+
+    universe = get_record_values_qc(tenant_id, environment, company_id, 15, no_field_no, token)
+    bus      = get_record_values_qc(tenant_id, environment, company_id, 15, bus_field_no, token)
+    prod     = get_record_values_qc(tenant_id, environment, company_id, 15, prod_field_no, token)
     return {
         acc: {
             "Groupe compta. marché":  bus.get(acc, ""),
