@@ -119,32 +119,58 @@ def _extract_attr(tag_text: str, attr: str) -> str | None:
 
 
 def _find_row_span(xml_text: str, row_number: int) -> tuple[int, int] | None:
-    """(start, end) de la balise <row r="N" ...>...</row> (ou auto-fermante) dans xml_text."""
-    m = re.search(rf'<row\b[^>]*\br="{row_number}"[^>]*>', xml_text)
+    """(start, end) de la balise <row r="N" ...>...</row> (ou auto-fermante)
+    dans xml_text.
+
+    CORRIGÉ (28/07/2026) : le fichier export BC réel de la table 15 (GL
+    Account) utilise un préfixe de namespace explicite sur ses éléments
+    (<x:row>, <x:c>...), contrairement aux fichiers testés le 17/07 qui
+    utilisaient le namespace par défaut sans préfixe (<row>, <c>). La regex
+    cherchait littéralement "<row" et ne matchait jamais sur ce fichier —
+    échec silencieux confirmé (apply_corrections rendait un fichier
+    identique à l'original, aucune erreur levée). Fix : préfixe optionnel
+    (\\w+:)? accepté devant row/c/rows dans toutes les regex de ce module.
+    """
+    m = re.search(rf'<(?:\w+:)?row\b[^>]*\br="{row_number}"[^>]*>', xml_text)
     if m and not m.group(0).endswith("/>"):
-        m_close = re.search(r"</row>", xml_text[m.end():])
+        m_close = re.search(r"</(?:\w+:)?row>", xml_text[m.end():])
         if not m_close:
             return None
         return (m.start(), m.end() + m_close.end())
-    m_self = re.search(rf'<row\b[^>]*\br="{row_number}"[^>]*/>', xml_text)
+    m_self = re.search(rf'<(?:\w+:)?row\b[^>]*\br="{row_number}"[^>]*/>', xml_text)
     if m_self:
         return (m_self.start(), m_self.end())
     return None
 
 
 def _replace_cell_in_row(row_xml: str, cell_ref: str, new_value: str) -> str:
-    """Remplace la cellule cell_ref dans le fragment row_xml par une inline string, en gardant son style (s=)."""
+    """Remplace la cellule cell_ref dans le fragment row_xml par une inline
+    string, en gardant son style (s=). Préfixe de namespace optionnel
+    (voir _find_row_span) — CORRIGÉ (28/07/2026, 2e passe) : la cellule de
+    remplacement doit reprendre EXACTEMENT le même préfixe que la cellule
+    d'origine (ex. "x:c", "x:is", "x:t"), pas un tag sans préfixe. Ce
+    fichier ne déclare xmlns "main" que via xmlns:x (pas de xmlns= par
+    défaut) — un <c> sans préfixe tomberait dans le namespace nul, donc
+    hors schéma, et provoquerait la même corruption/vidage de feuille que
+    le bug ElementTree du 17/07. Le préfixe est extrait de la balise
+    trouvée et réutilisé tel quel sur c/is/t.
+    """
     esc_ref = re.escape(cell_ref)
 
-    m = re.search(rf'<c\b[^>]*\br="{esc_ref}"[^>]*>.*?</c>', row_xml, re.DOTALL)
+    m = re.search(rf'<((?:\w+:)?)c\b[^>]*\br="{esc_ref}"[^>]*>.*?</(?:\w+:)?c>', row_xml, re.DOTALL)
     if not m:
-        m = re.search(rf'<c\b[^>]*\br="{esc_ref}"[^>]*/>', row_xml)
+        m = re.search(rf'<((?:\w+:)?)c\b[^>]*\br="{esc_ref}"[^>]*/>', row_xml)
     if not m:
         return row_xml  # cellule introuvable — on laisse la ligne intacte plutôt que deviner
 
+    prefix = m.group(1)  # ex. "x:" ou "" — repris tel quel, jamais deviné
     style  = _extract_attr(m.group(0), "s")
     s_attr = f' s="{style}"' if style else ""
-    new_cell = f'<c r="{cell_ref}"{s_attr} t="inlineStr"><is><t xml:space="preserve">{_xml_escape(new_value)}</t></is></c>'
+    new_cell = (
+        f'<{prefix}c r="{cell_ref}"{s_attr} t="inlineStr">'
+        f'<{prefix}is><{prefix}t xml:space="preserve">{_xml_escape(new_value)}</{prefix}t></{prefix}is>'
+        f'</{prefix}c>'
+    )
     return row_xml[:m.start()] + new_cell + row_xml[m.end():]
 
 

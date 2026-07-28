@@ -141,6 +141,29 @@ _ACCOUNT_FIELD_EXCLUSIONS = {
     "afficher tous les comptes lors de la consultation",
 }
 
+# CORRIGÉ (28/07/2026) : avant cette version, check_gl_account_prerequisites
+# exigeait GL_ACCOUNT_REQUIRED_FIELDS (les 2 champs) sur TOUT champ-compte
+# matchant _is_account_reference_column, sans distinction. Comparaison
+# directe avec les erreurs BC réelles (import Groupe compta. client, 4
+# groupes ETRANGER/GROUPE INTERNE/INTRACOMMUNAUTAIRE/NATIONAL) : BC n'a
+# réclamé QUE "Groupe compta. produit", et UNIQUEMENT sur "Compte frais
+# supplémentaires" et "Compte intérêts" — jamais sur "Compte client",
+# "Compte fournisseur", les comptes d'escompte (débit/crédit) ou les
+# comptes d'écart de lettrage, et jamais "Groupe compta. marché" du tout.
+# 20 faux positifs sur 28 confirmés (12 comptes + le champ marché en trop).
+#
+# Ce mapping ne couvre QUE ce qui a été vu en erreur BC réelle — ne pas
+# généraliser en avance de preuve (même logique que pour les autres
+# tables du socle : on attend l'erreur réelle avant de coder la règle).
+# À ÉLARGIR quand 93 (Groupe compta. fournisseur), 94 (Groupe compta.
+# stock), ou un calcul d'intérêts/frais de retard réel dans BC révèlent
+# une exigence sur d'autres champs-compte (ex. Compte frais forfaitaires
+# côté fournisseur, Compte débit/crédit escompte, Cpte arr. lettr. dev.).
+GL_ACCOUNT_FIELD_REQUIREMENTS: dict[str, list[str]] = {
+    "compte frais supplémentaires": ["Groupe compta. produit"],
+    "compte intérêts": ["Groupe compta. produit"],
+}
+
 
 def _is_account_reference_column(col_name: str) -> bool:
     """
@@ -302,7 +325,10 @@ def check_gl_account_prerequisites(
                 if hasattr(gl_row, "ndim") and gl_row.ndim > 1:
                     gl_row = gl_row.iloc[0]  # N° dupliqué dans le fichier — on ne plante pas, 1re occurrence
 
-                for required_field in GL_ACCOUNT_REQUIRED_FIELDS:
+                required_fields_for_col = GL_ACCOUNT_FIELD_REQUIREMENTS.get(
+                    str(col).strip().lower(), []
+                )
+                for required_field in required_fields_for_col:
                     # ATTENTION : parse_uploaded_file() fait df.dropna(axis=1,
                     # how="all") — une colonne 100% vide sur TOUS les comptes
                     # du fichier disparaît purement et simplement de gl_df.
