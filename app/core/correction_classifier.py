@@ -237,6 +237,7 @@ def extract_gl_account_posting_fields(parsed_file: dict) -> dict:
 def check_gl_account_prerequisites(
     parsed_file: dict,
     gl_reference_fallback: dict[str, dict] | None = None,
+    prefer_fallback: bool = False,
 ) -> list[dict]:
     """
     Pour chaque compte général référencé par un champ-compte d'une table de
@@ -246,9 +247,11 @@ def check_gl_account_prerequisites(
     l'onglet Compte général (table 15) — AVANT de considérer 92/93/94
     intégrables sans erreur BC.
 
-    Ne fait AUCUN appel BC : contrôle purement inter-onglets sur le fichier
-    déjà déposé (parse_uploaded_file). S'utilise en amont de l'intégration
-    BC de 92/93/94, pas après-coup sur une erreur déjà survenue.
+    Ne fait AUCUN appel BC lui-même : contrôle purement inter-onglets sur le
+    fichier déjà déposé (parse_uploaded_file) et/ou sur gl_reference_fallback
+    fourni par l'appelant (qui, lui, peut avoir interrogé BC en direct — voir
+    prefer_fallback ci-dessous). S'utilise en amont de l'intégration BC de
+    92/93/94, pas après-coup sur une erreur déjà survenue.
 
     Retourne une liste de dicts au même format que build_prerequisites_report
     (réutilisable tel quel avec build_prerequisites_excel) :
@@ -262,18 +265,29 @@ def check_gl_account_prerequisites(
 
     gl_reference_fallback : dict[str, dict] | None
         Repli utilisé quand le fichier déposé ne contient PAS l'onglet
-        Compte général (table 15) — cas confirmé en réel le 24/07/2026 :
-        Rami teste 92/93/94 comme package séparé (workflow sessions
-        mère/fille), sans GL Account dans le même fichier. Sans ce repli, le
-        contrôle ne trouve rien à comparer et retombe à tort sur "fichier
-        correct" alors que BC refuse toujours l'import (compte 77110001
-        toujours sans Groupe compta. produit). Format attendu :
+        Compte général (table 15), OU en priorité si prefer_fallback=True
+        (voir ci-dessous). Format attendu :
         {"<N° compte>": {"Groupe compta. marché": "...", "Groupe compta.
-        produit": "..."}, ...} — typiquement rechargé depuis le cache
-        Supabase bc_metadata_cache (voir app/db/metadata_db.py,
-        entity_name="gl_account_posting_fields") persisté la dernière fois
-        qu'un fichier contenant réellement l'onglet 15 a été analysé pour
-        cette société.
+        produit": "..."}, ...} — typiquement le résultat live de
+        app.core.bc_api.get_gl_account_fields_live(), ou à défaut le cache
+        Supabase bc_metadata_cache persisté (voir app/db/metadata_db.py,
+        entity_name="gl_account_posting_fields").
+
+    prefer_fallback : bool
+        AJOUTÉ (28/07/2026) : par défaut False (comportement historique —
+        l'onglet du fichier déposé prime toujours). À mettre à True quand
+        gl_reference_fallback provient d'une lecture BC live confirmée
+        réussie : dans ce cas le live doit primer sur l'onglet du fichier,
+        pas l'inverse. Cas confirmé en réel le 28/07/2026 : un fichier
+        template repris d'UNE AUTRE société (pour être intégré dans la
+        société de test) contient son propre onglet Compte général, sans
+        rapport avec l'état réel de la société testée — l'utiliser en
+        priorité aurait fait remonter à tort les 2 comptes comme non
+        corrigés alors qu'ils l'étaient réellement dans BC, ET aurait
+        pollué le cache persisté avec ces valeurs étrangères au prochain
+        appel de persist_gl_account_posting_fields côté appelant.
+        Si gl_reference_fallback est vide/absent malgré prefer_fallback=True,
+        on retombe quand même sur l'onglet du fichier (mieux que rien).
 
     Si ni l'onglet Compte général du fichier NI gl_reference_fallback ne
     sont disponibles, retourne [] silencieusement (rien à vérifier).
@@ -290,14 +304,19 @@ def check_gl_account_prerequisites(
         gl_df = None
 
     gl_by_account = None
-    if gl_df is not None:
+    using_fallback = False
+
+    if prefer_fallback and gl_reference_fallback:
+        gl_by_account = pd.DataFrame.from_dict(gl_reference_fallback, orient="index")
+        using_fallback = True
+
+    if gl_by_account is None and gl_df is not None:
         account_col = next((c for c in gl_df.columns if str(c).strip() == "N°"), None)
         if account_col is not None:
             gl_by_account = gl_df.set_index(gl_df[account_col].astype(str).str.strip())
 
-    # Repli sur l'image persistée si le fichier n'a pas (ou plus) d'onglet
-    # Compte général exploitable — voir docstring ci-dessus.
-    using_fallback = False
+    # Repli sur l'image fournie (live BC ou cache persisté) si l'onglet du
+    # fichier n'est pas exploitable — voir docstring ci-dessus.
     if gl_by_account is None and gl_reference_fallback:
         gl_by_account = pd.DataFrame.from_dict(gl_reference_fallback, orient="index")
         using_fallback = True

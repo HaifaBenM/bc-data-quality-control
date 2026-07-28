@@ -170,45 +170,65 @@ def _load_pkgs_ses(client_code: str, company_id: str, only_visible: bool) -> lis
         return []
 
 
-def _resolve_gl_account_fallback(client_code: str, company_id: str) -> dict:
+def _try_live_gl_account(client_code: str, company_id: str) -> dict:
     """
-    Tente d'abord une vérification LIVE via BC (get_gl_account_fields_live,
-    endpoint AL recordValues) — plus fiable qu'un cache car jamais périmée
-    (voir discussion du 24/07/2026 : un repli persisté reste correct tant
-    que personne ne modifie le plan comptable entre deux analyses, ce qui
-    n'est pas garanti). Retombe sur le repli persisté (cache Supabase) si
-    le live échoue pour n'importe quelle raison — page AL pas encore
-    publiée, société sans accès BC configuré, etc. Ne jamais faire planter
-    l'analyse pour cette seule raison.
+    Tentative de lecture live BC (get_gl_account_fields_live) — extrait de
+    _resolve_gl_account_fallback (28/07/2026) pour pouvoir l'appeler
+    indépendamment du repli cache, AVANT même de regarder si le fichier
+    déposé a son propre onglet Compte général. Voir check_gl_account_
+    prerequisites(prefer_fallback=...) : le live doit primer sur l'onglet
+    du fichier, pas seulement s'y substituer quand l'onglet est absent —
+    sinon un fichier template repris d'une autre société (avec son propre
+    onglet 15, sans rapport avec la société réellement testée) fait
+    remonter à tort des anomalies déjà corrigées dans BC.
 
-    DIAGNOSTIC TEMPORAIRE (24/07/2026) : affiche désormais un st.caption
-    avec le résultat réel du live (nombre de comptes obtenus, ou l'erreur
-    précise si ça échoue) — jusqu'ici l'échec était avalé silencieusement
-    par un except Exception nu, impossible de savoir si le live échouait
-    vraiment ou s'il tournait mais ne trouvait rien. À retirer une fois le
-    comportement confirmé stable.
+    Retourne {} si le live échoue ou ne trouve rien — jamais d'exception
+    remontée à l'appelant.
     """
     try:
         p = get_profile_by_code(client_code)
-        if p:
-            tid = p.get("bc_tenant_id", "").strip()
-            cid = p.get("bc_client_id", "").strip()
-            cs  = p.get("bc_client_secret", "").strip()
-            env = p.get("bc_environment", "").strip()
-            if all([tid, cid, cs, env, company_id]):
-                tok  = get_access_token(tid, cid, cs)
-                live = get_gl_account_fields_live(tid, env, company_id, tok)
-                if is_consultant():
-                    st.caption(f"🔧 [Debug consultant] Vérification live du plan comptable : {len(live)} compte(s) GL trouvé(s).")
-                if live:
-                    return live
-            elif is_consultant():
+        if not p:
+            if is_consultant():
+                st.caption(f"🔧 [Debug consultant] Vérification live impossible : aucun profil trouvé pour '{client_code}'.")
+            return {}
+        tid = p.get("bc_tenant_id", "").strip()
+        cid = p.get("bc_client_id", "").strip()
+        cs  = p.get("bc_client_secret", "").strip()
+        env = p.get("bc_environment", "").strip()
+        if not all([tid, cid, cs, env, company_id]):
+            if is_consultant():
                 st.caption("🔧 [Debug consultant] Vérification live impossible : profil BC incomplet (tenant/client/secret/environnement/société).")
-        elif is_consultant():
-            st.caption(f"🔧 [Debug consultant] Vérification live impossible : aucun profil trouvé pour '{client_code}'.")
+            return {}
+        tok  = get_access_token(tid, cid, cs)
+        live = get_gl_account_fields_live(tid, env, company_id, tok)
+        if is_consultant():
+            st.caption(f"🔧 [Debug consultant] Vérification live du plan comptable : {len(live)} compte(s) GL trouvé(s).")
+        return live or {}
     except Exception as e:
         if is_consultant():
             st.caption(f"🔧 [Debug consultant] Vérification live échouée : {type(e).__name__}: {e}")
+        return {}
+
+
+def _resolve_gl_account_fallback(client_code: str, company_id: str) -> dict:
+    """
+    Tente d'abord une vérification LIVE via BC (_try_live_gl_account) — plus
+    fiable qu'un cache car jamais périmée (voir discussion du 24/07/2026 :
+    un repli persisté reste correct tant que personne ne modifie le plan
+    comptable entre deux analyses, ce qui n'est pas garanti). Retombe sur le
+    repli persisté (cache Supabase) si le live échoue pour n'importe quelle
+    raison — page AL pas encore publiée, société sans accès BC configuré,
+    etc. Ne jamais faire planter l'analyse pour cette seule raison.
+
+    Utilisée quand le fichier déposé n'a PAS d'onglet Compte général
+    exploitable. Pour le cas où le fichier EN A un mais qu'on veut quand
+    même prioriser le live (fichier template d'une autre société), voir
+    _try_live_gl_account() appelé directement, combiné à
+    check_gl_account_prerequisites(prefer_fallback=True).
+    """
+    live = _try_live_gl_account(client_code, company_id)
+    if live:
+        return live
     return get_gl_account_posting_fields(client_code, company_id)
 
 
@@ -943,18 +963,33 @@ with tab_main:
                         # Confirmé nécessaire par test réel du 23-24/07/2026 (compte
                         # 77110001 sans Groupe compta. produit, invisible pour Axe B
                         # puisque ce n'est pas un code de référence manquant mais un
-                        # champ GL vide). Si le fichier déposé contient l'onglet GL
-                        # Account, on l'utilise ET on persiste son état pour les futurs
-                        # fichiers 92/93/94 testés seuls (workflow sessions mère/fille) ;
-                        # sinon on retombe sur le dernier état persisté pour cette société.
+                        # champ GL vide).
+                        #
+                        # CORRIGÉ (28/07/2026) : avant cette version, l'onglet GL
+                        # Account du fichier déposé primait TOUJOURS dès qu'il était
+                        # présent, le live BC n'étant tenté qu'en son absence. Bug
+                        # confirmé en réel : un fichier template repris d'une AUTRE
+                        # société (pour être intégré dans la société de test) a son
+                        # propre onglet Compte général, sans rapport avec l'état réel
+                        # de la société testée — il primait à tort sur le live, ET sa
+                        # persistance écrasait le cache Supabase avec ces valeurs
+                        # étrangères. Le live BC est désormais tenté EN PREMIER,
+                        # systématiquement ; l'onglet du fichier ne sert plus que de
+                        # repli si le live échoue (société sans accès BC configuré,
+                        # page AL pas encore publiée, etc.).
                         _company_id = cfg.get("company_id", "")
-                        _gl_extract = extract_gl_account_posting_fields(pr)
-                        if _gl_extract:
-                            persist_gl_account_posting_fields(client_code, _company_id, _gl_extract)
-                            _gl_fallback = None
+                        _gl_live = _try_live_gl_account(client_code, _company_id)
+                        if _gl_live:
+                            persist_gl_account_posting_fields(client_code, _company_id, _gl_live)
+                            _gl_anomalies = check_gl_account_prerequisites(pr, _gl_live, prefer_fallback=True)
                         else:
-                            _gl_fallback = _resolve_gl_account_fallback(client_code, _company_id)
-                        _gl_anomalies = check_gl_account_prerequisites(pr, _gl_fallback)
+                            _gl_extract = extract_gl_account_posting_fields(pr)
+                            if _gl_extract:
+                                persist_gl_account_posting_fields(client_code, _company_id, _gl_extract)
+                                _gl_fallback = None
+                            else:
+                                _gl_fallback = get_gl_account_posting_fields(client_code, _company_id)
+                            _gl_anomalies = check_gl_account_prerequisites(pr, _gl_fallback)
                         _prereqs = _prereqs + _gl_anomalies
                         # build_roadmap_from_prereqs regroupe désormais génériquement
                         # les lignes de _prereqs par table et les attache en
@@ -1056,12 +1091,18 @@ with tab_main:
                             with st.spinner("Vérification BC en cours..."):
                                 def _gl_check():
                                     _rc_company_id = cfg.get("company_id", "")
+                                    # Même correction que la construction initiale (28/07/2026) :
+                                    # live BC en premier, l'onglet du fichier n'est qu'un repli.
+                                    _rc_live = _try_live_gl_account(cfg["client_code"], _rc_company_id)
+                                    if _rc_live:
+                                        persist_gl_account_posting_fields(cfg["client_code"], _rc_company_id, _rc_live)
+                                        return check_gl_account_prerequisites(pr, _rc_live, prefer_fallback=True)
                                     _rc_extract = extract_gl_account_posting_fields(pr)
                                     if _rc_extract:
                                         persist_gl_account_posting_fields(cfg["client_code"], _rc_company_id, _rc_extract)
                                         _rc_fallback = None
                                     else:
-                                        _rc_fallback = _resolve_gl_account_fallback(cfg["client_code"], _rc_company_id)
+                                        _rc_fallback = get_gl_account_posting_fields(cfg["client_code"], _rc_company_id)
                                     return check_gl_account_prerequisites(pr, _rc_fallback)
 
                                 # DIAGNOSTIC (27/07) : Streamlit Cloud masque le message
