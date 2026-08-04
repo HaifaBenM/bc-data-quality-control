@@ -631,13 +631,33 @@ def get_gl_account_fields_live(
     compte a une entrée, vide ou non.
 
     Retourne le même format que
-    app.db.metadata_db.get_gl_account_posting_fields() — remplacement
-    direct côté appelant : {"<N° compte>": {"Groupe compta. marché": "...",
-    "Groupe compta. produit": "..."}, ...}
+    app.db.metadata_db.get_gl_account_posting_fields(), ENRICHI (04/08/2026)
+    d'une clé "Gen. Posting Type" par compte quand ce champ a pu être
+    résolu — utilisée par
+    app.core.correction_classifier._gl_account_requires_gen_prod_group()
+    pour déterminer dynamiquement si Groupe compta. produit est requis,
+    au lieu du mapping statique GL_ACCOUNT_FIELD_REQUIREMENTS :
+    {"<N° compte>": {"Groupe compta. marché": "...",
+    "Groupe compta. produit": "...", "Gen. Posting Type": "..."}, ...}
+    La clé "Gen. Posting Type" est ABSENTE (pas vide) pour tous les
+    comptes si ce champ n'a pu être résolu dans aucun package BC — voir
+    _gen_prod_no ci-dessous. L'appelant (check_gl_account_prerequisites)
+    traite déjà ce cas comme "indisponible -> repli sur le mapping
+    statique", pas comme "vide -> rien à exiger" (distinction volontaire,
+    ne pas fusionner ces deux cas).
 
-    Raises ValueError si un des 3 champs (No., Gen. Bus./Prod. Posting
-    Group) n'a pu être résolu dans aucun package — l'appelant doit
-    capturer et retomber sur le repli persisté.
+    Raises ValueError si un des 3 champs HISTORIQUES (No., Gen. Bus./Prod.
+    Posting Group) n'a pu être résolu — comportement inchangé. La
+    résolution de "Gen. Posting Type" est volontairement NON bloquante :
+    un échec dessus ne doit pas casser le repli live existant, déjà
+    fiable sur les 2 champs historiques.
+
+    À VÉRIFIER CÔTÉ BC avant de faire confiance à ce nouveau champ : il
+    doit figurer dans la sélection de champs d'AU MOINS un Config Package
+    existant pour la table 15 (Compte général), sinon
+    resolve_field_no_via_package() retourne None silencieusement pour lui
+    (pas d'exception) et le repli statique reste utilisé partout — pas de
+    régression, mais pas de bénéfice tant que ce n'est pas confirmé.
     """
     no_field_no  = resolve_field_no_via_package(tenant_id, environment, company_id, 15, "No.", token)
     bus_field_no = resolve_field_no_via_package(tenant_id, environment, company_id, 15, "Gen. Bus. Posting Group", token)
@@ -653,10 +673,30 @@ def get_gl_account_fields_live(
     universe = get_record_values_qc(tenant_id, environment, company_id, 15, no_field_no, token)
     bus      = get_record_values_qc(tenant_id, environment, company_id, 15, bus_field_no, token)
     prod     = get_record_values_qc(tenant_id, environment, company_id, 15, prod_field_no, token)
-    return {
+
+    # Résolution NON bloquante du nouveau champ — un échec ici ne doit
+    # jamais faire perdre le repli historique (bus/prod), voir docstring.
+    gen_posting = {}
+    try:
+        gen_field_no = resolve_field_no_via_package(
+            tenant_id, environment, company_id, 15, "Gen. Posting Type", token
+        )
+        if gen_field_no is not None:
+            gen_posting = get_record_values_qc(
+                tenant_id, environment, company_id, 15, gen_field_no, token
+            )
+    except Exception:
+        gen_posting = {}  # Gen. Posting Type indisponible — repli statique côté appelant
+
+    result = {
         acc: {
             "Groupe compta. marché":  bus.get(acc, ""),
             "Groupe compta. produit": prod.get(acc, ""),
         }
         for acc in universe
     }
+    if gen_posting:
+        for acc in result:
+            if acc in gen_posting:
+                result[acc]["Gen. Posting Type"] = gen_posting[acc]
+    return result

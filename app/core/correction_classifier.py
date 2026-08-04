@@ -141,28 +141,76 @@ _ACCOUNT_FIELD_EXCLUSIONS = {
     "afficher tous les comptes lors de la consultation",
 }
 
-# CORRIGÉ (28/07/2026) : avant cette version, check_gl_account_prerequisites
-# exigeait GL_ACCOUNT_REQUIRED_FIELDS (les 2 champs) sur TOUT champ-compte
-# matchant _is_account_reference_column, sans distinction. Comparaison
-# directe avec les erreurs BC réelles (import Groupe compta. client, 4
-# groupes ETRANGER/GROUPE INTERNE/INTRACOMMUNAUTAIRE/NATIONAL) : BC n'a
-# réclamé QUE "Groupe compta. produit", et UNIQUEMENT sur "Compte frais
-# supplémentaires" et "Compte intérêts" — jamais sur "Compte client",
-# "Compte fournisseur", les comptes d'escompte (débit/crédit) ou les
-# comptes d'écart de lettrage, et jamais "Groupe compta. marché" du tout.
-# 20 faux positifs sur 28 confirmés (12 comptes + le champ marché en trop).
+# REMPLACÉ PAR UNE RÈGLE DYNAMIQUE (04/08/2026) — voir
+# _gl_account_requires_gen_prod_group() ci-dessous.
 #
-# Ce mapping ne couvre QUE ce qui a été vu en erreur BC réelle — ne pas
-# généraliser en avance de preuve (même logique que pour les autres
-# tables du socle : on attend l'erreur réelle avant de coder la règle).
-# À ÉLARGIR quand 93 (Groupe compta. fournisseur), 94 (Groupe compta.
-# stock), ou un calcul d'intérêts/frais de retard réel dans BC révèlent
-# une exigence sur d'autres champs-compte (ex. Compte frais forfaitaires
-# côté fournisseur, Compte débit/crédit escompte, Cpte arr. lettr. dev.).
+# Mécanisme BC réel (confirmé par la documentation Microsoft et plusieurs
+# cas terrain, pas une liste de libellés à deviner un par un) : un compte
+# GL référencé DIRECTEMENT par un champ-compte (sans article pour fournir
+# le Gen. Prod. Posting Group) exige que CE COMPTE ait lui-même son
+# "Gen. Posting Type" — donc son Groupe compta. produit — rempli, MAIS
+# uniquement si ce compte est lui-même typé Vente/Achat (Gen. Posting
+# Type non vide). Un compte au Gen. Posting Type vide (ex. Compte client,
+# Compte fournisseur — comptes de bilan) n'est jamais concerné. Le Groupe
+# compta. marché, lui, vient toujours du client/fournisseur du document,
+# jamais du compte GL — structurellement jamais requis ici, ce qui
+# explique (sans exception à maintenir) pourquoi il n'a jamais été observé
+# en erreur BC pour "Compte frais supplémentaires"/"Compte intérêts".
+#
+# GL_ACCOUNT_FIELD_REQUIREMENTS est CONSERVÉ comme repli explicite : la
+# règle dynamique a besoin du champ "Gen. Posting Type" sur le compte
+# (fichier OU live), qui n'est pas garanti disponible partout tout de
+# suite (absent du socle MDD Comptabilité actuel, à confirmer côté BC —
+# voir GEN_POSTING_TYPE_AL_FIELD). Si ce champ est indisponible pour un
+# compte donné, on retombe sur ce mapping connu plutôt que de perdre la
+# détection déjà validée le 28/07/2026 sur ces 2 cas réels.
 GL_ACCOUNT_FIELD_REQUIREMENTS: dict[str, list[str]] = {
     "compte frais supplémentaires": ["Groupe compta. produit"],
     "compte intérêts": ["Groupe compta. produit"],
 }
+
+# Nom de champ AL (interne, stable quelle que soit la langue de la
+# société BC) — c'est CE nom qui doit être passé à
+# resolve_field_no_via_package() côté bc_api.py pour la résolution live.
+# Ne pas confondre avec le libellé français affiché dans le fichier Excel
+# (fieldCaption) — voir _GEN_POSTING_TYPE_CAPTION_CANDIDATES ci-dessous.
+GEN_POSTING_TYPE_AL_FIELD = "Gen. Posting Type"
+
+# NON CONFIRMÉ CONTRE UN VRAI FICHIER BC — le socle MDD Comptabilité
+# actuel (vérifié le 04/08/2026 sur Par_défaut28_07_2026_16_42_36.xlsx)
+# N'INCLUT PAS ce champ dans son export (51 colonnes présentes, aucune ne
+# correspond). Cette liste de libellés candidats sert de détection best-
+# effort SI le champ est ajouté un jour à la sélection de champs du
+# package — à réduire à la seule vraie valeur dès qu'un export BC réel
+# l'inclut et confirme le libellé exact.
+_GEN_POSTING_TYPE_CAPTION_CANDIDATES = (
+    "type comptabilisation générale",
+    "type comptabilisation généraux",
+    "gen. posting type",
+)
+
+
+def _gl_account_requires_gen_prod_group(gl_row, gl_columns) -> bool | None:
+    """
+    True  : le compte a un Gen. Posting Type non vide -> Groupe compta.
+            produit doit être rempli sur ce compte.
+    False : Gen. Posting Type est présent et vide -> rien à exiger.
+    None  : Gen. Posting Type n'est disponible ni dans le fichier ni dans
+            le repli (live/cache) -> l'appelant doit se rabattre sur
+            GL_ACCOUNT_FIELD_REQUIREMENTS, pas conclure à tort "rien à
+            exiger" par absence de donnée.
+    """
+    gen_col = next(
+        (c for c in gl_columns if str(c).strip().lower() in _GEN_POSTING_TYPE_CAPTION_CANDIDATES
+         or str(c).strip() == GEN_POSTING_TYPE_AL_FIELD),
+        None,
+    )
+    if gen_col is None:
+        return None
+    val = gl_row.get(gen_col, "")
+    if pd.isna(val):
+        return False
+    return str(val).strip() not in ("", " ")
 
 
 def _is_account_reference_column(col_name: str) -> bool:
@@ -220,6 +268,20 @@ def extract_gl_account_posting_fields(parsed_file: dict) -> dict:
 
     out = {}
     present_fields = [f for f in GL_ACCOUNT_REQUIRED_FIELDS if f in gl_df.columns]
+    # Capture best-effort du Gen. Posting Type si présent dans le fichier
+    # (voir _GEN_POSTING_TYPE_CAPTION_CANDIDATES — libellé non confirmé à
+    # ce jour, absent du socle MDD Comptabilité actuel). On garde le nom
+    # de colonne RÉEL du fichier (pas une constante) pour que
+    # _gl_account_requires_gen_prod_group() le retrouve tel quel côté
+    # check_gl_account_prerequisites.
+    gen_col = next(
+        (c for c in gl_df.columns
+         if str(c).strip().lower() in _GEN_POSTING_TYPE_CAPTION_CANDIDATES
+         or str(c).strip() == GEN_POSTING_TYPE_AL_FIELD),
+        None,
+    )
+    if gen_col is not None:
+        present_fields = present_fields + [gen_col]
     if not present_fields:
         return {}
 
@@ -344,9 +406,23 @@ def check_gl_account_prerequisites(
                 if hasattr(gl_row, "ndim") and gl_row.ndim > 1:
                     gl_row = gl_row.iloc[0]  # N° dupliqué dans le fichier — on ne plante pas, 1re occurrence
 
-                required_fields_for_col = GL_ACCOUNT_FIELD_REQUIREMENTS.get(
-                    str(col).strip().lower(), []
-                )
+                # RÈGLE DYNAMIQUE EN PRIORITÉ (04/08/2026) : déterminée par
+                # le Gen. Posting Type du compte lui-même, pas par le nom
+                # du champ qui le référence — voir
+                # _gl_account_requires_gen_prod_group(). Repli sur le
+                # mapping statique connu UNIQUEMENT si cette donnée est
+                # indisponible (None), jamais si elle vaut False (compte
+                # confirmé non concerné, ne pas écraser cette conclusion
+                # par une supposition du mapping statique).
+                _dynamic = _gl_account_requires_gen_prod_group(gl_row, gl_by_account.columns)
+                if _dynamic is True:
+                    required_fields_for_col = ["Groupe compta. produit"]
+                elif _dynamic is False:
+                    required_fields_for_col = []
+                else:
+                    required_fields_for_col = GL_ACCOUNT_FIELD_REQUIREMENTS.get(
+                        str(col).strip().lower(), []
+                    )
                 for required_field in required_fields_for_col:
                     # ATTENTION : parse_uploaded_file() fait df.dropna(axis=1,
                     # how="all") — une colonne 100% vide sur TOUS les comptes
