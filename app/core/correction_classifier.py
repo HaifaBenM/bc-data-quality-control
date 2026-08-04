@@ -450,11 +450,17 @@ def check_gl_account_prerequisites(
 
                     key = (acc_no, required_field)
                     if key not in missing:
+                        _rule_marker = {
+                            True:  "règle dynamique — Gen. Posting Type",
+                            False: "règle dynamique — Gen. Posting Type",
+                            None:  "mapping statique (Gen. Posting Type indisponible)",
+                        }[_dynamic]
                         missing[key] = {
                             "Table référencée BC": "15",
                             "Nom table BC": "Compte général",
                             "Code manquant": f"{acc_no} — {required_field} vide"
-                                             + (" (vérifié via socle persisté)" if using_fallback else ""),
+                                             + (" (vérifié via socle persisté)" if using_fallback else "")
+                                             + f" [{_rule_marker}]",
                             "Champs concernés": set(),
                             "Occurrences": 0,
                         }
