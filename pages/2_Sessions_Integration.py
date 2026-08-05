@@ -27,6 +27,7 @@ from app.db.metadata_db import (
 from app.db.profiles_db import get_profile_by_code
 from app.core.bc_api import (
     get_access_token, get_companies, get_packages_qc, get_gl_account_fields_live,
+    diagnose_standard_api_account,
 )
 from app.db.sessions_db import (
     save_session, update_session, delete_session,
@@ -1028,6 +1029,33 @@ with tab_main:
                                 st.json(_dbg_companies_raw)
                             except Exception as _dbg_exc0:
                                 st.error(f"Échec : {_dbg_exc0}")
+                        # AJOUTÉ (04/08/2026) : isole plateforme BC vs extension
+                        # talan/qctools — interroge l'API STANDARD BC (pas notre
+                        # extension) sur un compte précis, pour trancher un écart
+                        # constaté entre le client web BC (à jour) et l'API.
+                        _dbg_acc_test = st.text_input(
+                            "N° de compte à tester (API standard)", value="77110001",
+                            key="dbg_acc_no_input",
+                        )
+                        if st.button("Tester API standard (accounts)", key="btn_debug_std_api"):
+                            try:
+                                _dbg_profile3b = get_profile_by_code(cfg.get("client_code", ""))
+                                _dbg_tid3b = _dbg_profile3b.get("bc_tenant_id", "").strip()
+                                _dbg_cid3b = _dbg_profile3b.get("bc_client_id", "").strip()
+                                _dbg_cs3b  = _dbg_profile3b.get("bc_client_secret", "").strip()
+                                _dbg_env3b = _dbg_profile3b.get("bc_environment", "").strip()
+                                _dbg_company3b = cfg.get("company_id", "")
+                                _dbg_tok3b = get_access_token(_dbg_tid3b, _dbg_cid3b, _dbg_cs3b)
+                                _dbg_std_result = diagnose_standard_api_account(
+                                    _dbg_tid3b, _dbg_env3b, _dbg_company3b, _dbg_acc_test, _dbg_tok3b
+                                )
+                                if _dbg_std_result["found"]:
+                                    st.success(f"✅ API standard TROUVE le compte {_dbg_acc_test} — le souci est spécifique à l'extension talan/qctools, pas la plateforme.")
+                                else:
+                                    st.warning(f"⚠️ API standard NE TROUVE PAS le compte {_dbg_acc_test} non plus — probable délai de réplication côté plateforme BC, pas un bug de code.")
+                                st.json(_dbg_std_result["raw"])
+                            except Exception as _dbg_exc3b:
+                                st.error(f"Échec : {_dbg_exc3b}")
                         if st.button("Tester recordValues (champ No., table 15)", key="btn_debug_recordvalues"):
                             try:
                                 _dbg_profile = get_profile_by_code(cfg.get("client_code", ""))

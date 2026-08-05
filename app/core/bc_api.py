@@ -64,6 +64,33 @@ def get_companies(tenant_id: str, environment: str, token: str) -> list[dict]:
     return resp.json().get("value", [])
 
 
+def diagnose_standard_api_account(
+    tenant_id: str, environment: str, company_id: str, account_no: str, token: str
+) -> dict:
+    """
+    AJOUTÉ (04/08/2026) — diagnostic ponctuel, pas un helper métier réutilisé
+    ailleurs. Interroge l'API BC STANDARD (/api/v2.0/companies({id})/accounts),
+    PAS l'extension custom talan/qctools, pour isoler si un écart constaté
+    (ex. TEST-GL-VALIDATION retournant un plan comptable différent de celui
+    vu dans le client web BC) vient de la plateforme (délai de réplication
+    API tier après restauration d'environnement) ou spécifiquement de
+    l'extension AL. Si ce endpoint standard voit aussi le mauvais compte
+    (ou rien), le souci est côté plateforme, pas côté code talan/qctools.
+
+    Retourne {"found": bool, "raw": <réponse JSON complète>}.
+    """
+    url = (
+        f"https://api.businesscentral.dynamics.com"
+        f"/v2.0/{tenant_id}/{environment}/api/v2.0"
+        f"/companies({company_id})/accounts"
+        f"?$filter=number eq '{account_no}'"
+    )
+    resp = requests.get(url, headers=_headers(token), timeout=15)
+    resp.raise_for_status()
+    data = resp.json()
+    return {"found": bool(data.get("value")), "raw": data}
+
+
 def resolve_company_id(profile: dict, token: str) -> str:
     """
     Retourne le company_id à utiliser :
