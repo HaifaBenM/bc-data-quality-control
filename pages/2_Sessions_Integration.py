@@ -1067,6 +1067,22 @@ with tab_main:
                                 _dbg_tok = get_access_token(_dbg_tid, _dbg_cid, _dbg_cs)
                                 _dbg_result = get_gl_account_fields_live(_dbg_tid, _dbg_env, _dbg_company, _dbg_tok)
                                 st.write(f"**{len(_dbg_result)} compte(s) GL trouvé(s) au total.**")
+                                # CORRIGÉ (04/08/2026) : st.json(...[:10]) masquait
+                                # silencieusement tout compte au-delà des 10 premiers
+                                # triés — a fait perdre plusieurs heures de diagnostic
+                                # sur 77110001/76310001 (jamais dans les 10 premiers
+                                # d'une liste de 351 comptes). Recherche ciblée par
+                                # numéro de compte en plus de l'échantillon.
+                                _dbg_lookup = st.text_input(
+                                    "Chercher un/des compte(s) précis (séparés par virgule)",
+                                    value="77110001, 76310001",
+                                    key="dbg_gl_lookup_input",
+                                )
+                                if _dbg_lookup.strip():
+                                    _dbg_targets = [t.strip() for t in _dbg_lookup.split(",") if t.strip()]
+                                    _dbg_found = {t: _dbg_result.get(t, "❌ ABSENT du live") for t in _dbg_targets}
+                                    st.json(_dbg_found)
+                                st.caption("Échantillon (10 premiers comptes, triés) :")
                                 st.json(dict(list(_dbg_result.items())[:10]))
                             except Exception as e:
                                 st.error(f"{type(e).__name__}: {e}")
