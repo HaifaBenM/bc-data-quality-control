@@ -399,12 +399,31 @@ def refresh_roadmap(
         if e.level_info.table_id == 15 and gl_account_check is not None:
             try:
                 e.sub_anomalies = gl_account_check()
-            except Exception:
-                e.sub_anomalies = None  # contrôle indisponible pour l'instant — ne bloque pas sur une panne technique, mais ne valide pas non plus tant que result != "filled"
+            except Exception as _gl_exc:
+                # CORRIGÉ (04/08/2026) : au lieu de None (invisible, et qui
+                # validait à tort la table 15 — voir plus bas), on rend
+                # l'erreur réelle visible dans sub_anomalies. L'UI affiche
+                # déjà ce contenu en sous-détail sous G/L Account, donc
+                # cette ligne apparaîtra directement dans la roadmap au lieu
+                # de disparaître silencieusement.
+                e.sub_anomalies = [{
+                    "Table référencée BC": "15",
+                    "Nom table BC": "Compte général",
+                    "Code manquant": f"⚠️ Contrôle GL Account indisponible : {type(_gl_exc).__name__}: {_gl_exc}",
+                    "Champs concernés": "",
+                    "Occurrences": 1,
+                }]
+            # `not None` et `not []` valent tous les deux True en Python —
+            # le code précédent validait à tort la table 15 quand
+            # gl_account_check() plantait silencieusement, exactement
+            # comme s'il avait tourné et confirmé 0 anomalie. Un contrôle
+            # indisponible (ou en échec) ne doit JAMAIS valider — seule
+            # une liste vide RÉELLEMENT retournée (contrôle exécuté avec
+            # succès, rien trouvé) le peut.
             if result == "filled" and not e.sub_anomalies:
                 e.status = "validated"
             elif e.sub_anomalies:
-                e.status = "pending"  # comptes existent mais champs vides — jamais validé tant que non vide
+                e.status = "pending"  # comptes existent mais champs vides (ou contrôle en échec) — jamais validé
             continue
 
         if result == "filled":
