@@ -20,6 +20,7 @@ from app.core.correction_generator import apply_corrections
 from app.core.correction_classifier import (
     build_prerequisites_report, build_prerequisites_excel,
     check_gl_account_prerequisites, extract_gl_account_posting_fields,
+    _is_account_reference_column,
 )
 from app.db.metadata_db import (
     persist_gl_account_posting_fields, get_gl_account_posting_fields,
@@ -1154,12 +1155,29 @@ with tab_main:
                             with st.spinner("Vérification BC en cours..."):
                                 def _gl_check():
                                     _rc_company_id = cfg.get("company_id", "")
+                                    # DIAGNOSTIC TEMPORAIRE (04/08/2026) — à retirer une fois
+                                    # la cause du "toujours 100%" confirmée. Montre l'état réel
+                                    # de `pr` et des colonnes détectées à CE point précis du
+                                    # code, plutôt que de continuer à deviner.
+                                    _dbg_sheets = pr.get("sheets", {})
+                                    st.caption(f"🔧 [Debug] Onglets dans pr : {list(_dbg_sheets.keys())}")
+                                    _dbg_92 = next((n for n in _dbg_sheets if "92" in n), None)
+                                    if _dbg_92:
+                                        _dbg_cols = list(_dbg_sheets[_dbg_92].columns)
+                                        st.caption(f"🔧 [Debug] Colonnes onglet '{_dbg_92}' : {_dbg_cols}")
+                                        _dbg_acc_cols = [c for c in _dbg_cols if _is_account_reference_column(c)]
+                                        st.caption(f"🔧 [Debug] Colonnes reconnues comme champ-compte : {_dbg_acc_cols}")
+                                    else:
+                                        st.caption("🔧 [Debug] Aucun onglet contenant '92' trouvé dans pr.")
                                     # Même correction que la construction initiale (28/07/2026) :
                                     # live BC en premier, l'onglet du fichier n'est qu'un repli.
                                     _rc_live = _try_live_gl_account(cfg["client_code"], _rc_company_id)
+                                    st.caption(f"🔧 [Debug] _rc_live : {len(_rc_live)} compte(s), produit 77110001={_rc_live.get('77110001', {}).get('Groupe compta. produit', '???')!r}")
                                     if _rc_live:
                                         persist_gl_account_posting_fields(cfg["client_code"], _rc_company_id, _rc_live)
-                                        return check_gl_account_prerequisites(pr, _rc_live, prefer_fallback=True)
+                                        _dbg_out = check_gl_account_prerequisites(pr, _rc_live, prefer_fallback=True)
+                                        st.caption(f"🔧 [Debug] check_gl_account_prerequisites -> {len(_dbg_out)} anomalie(s)")
+                                        return _dbg_out
                                     _rc_extract = extract_gl_account_posting_fields(pr)
                                     if _rc_extract:
                                         persist_gl_account_posting_fields(cfg["client_code"], _rc_company_id, _rc_extract)
