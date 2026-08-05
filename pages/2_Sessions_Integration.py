@@ -1009,6 +1009,25 @@ with tab_main:
                             "Teste directement l'endpoint live recordValues pour ce client/société, "
                             "sans rien configurer en local — utilise les mêmes identifiants que l'outil."
                         )
+                        # AJOUTÉ (04/08/2026) : dump brut de /api/v2.0/companies pour
+                        # comparer sans ambiguïté le nom affiché ("TEST-GL-VALIDATION")
+                        # à l'ID (systemId) réellement utilisé par company_id — sert à
+                        # trancher entre "mauvaise société sélectionnée" et "vrai bug
+                        # de scoping côté extension AL" quand le nom semble correct
+                        # mais que le plan comptable retourné ne correspond pas.
+                        if st.button("Lister sociétés BC (brut)", key="btn_debug_companies_raw"):
+                            try:
+                                _dbg_profile0 = get_profile_by_code(cfg.get("client_code", ""))
+                                _dbg_tid0 = _dbg_profile0.get("bc_tenant_id", "").strip()
+                                _dbg_cid0 = _dbg_profile0.get("bc_client_id", "").strip()
+                                _dbg_cs0  = _dbg_profile0.get("bc_client_secret", "").strip()
+                                _dbg_env0 = _dbg_profile0.get("bc_environment", "").strip()
+                                _dbg_tok0 = get_access_token(_dbg_tid0, _dbg_cid0, _dbg_cs0)
+                                _dbg_companies_raw = get_companies(_dbg_tid0, _dbg_env0, _dbg_tok0)
+                                st.write(f"**company_id actuel de cette session : `{cfg.get('company_id', '')}`**")
+                                st.json(_dbg_companies_raw)
+                            except Exception as _dbg_exc0:
+                                st.error(f"Échec : {_dbg_exc0}")
                         if st.button("Tester recordValues (champ No., table 15)", key="btn_debug_recordvalues"):
                             try:
                                 _dbg_profile = get_profile_by_code(cfg.get("client_code", ""))
