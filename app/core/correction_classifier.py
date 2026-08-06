@@ -176,12 +176,6 @@ GL_ACCOUNT_FIELD_REQUIREMENTS: dict[str, list[str]] = {
 # (fieldCaption) — voir _GEN_POSTING_TYPE_CAPTION_CANDIDATES ci-dessous.
 GEN_POSTING_TYPE_AL_FIELD = "Gen. Posting Type"
 
-# MARQUEUR DE VERSION TEMPORAIRE (04/08/2026) — pour confirmer sans
-# ambiguïté ce qui tourne réellement en production, après plusieurs
-# décalages de déploiement suspectés sur ce fichier. À retirer une fois
-# le problème du "toujours 0 anomalie sur Revérifier" résolu.
-CORRECTION_CLASSIFIER_DEBUG_VERSION = "2026-08-04-v4-marker-test"
-
 # NON CONFIRMÉ CONTRE UN VRAI FICHIER BC — le socle MDD Comptabilité
 # actuel (vérifié le 04/08/2026 sur Par_défaut28_07_2026_16_42_36.xlsx)
 # N'INCLUT PAS ce champ dans son export (51 colonnes présentes, aucune ne
@@ -462,11 +456,15 @@ def check_gl_account_prerequisites(
 
                     key = (acc_no, required_field)
                     if key not in missing:
-                        _rule_marker = {
-                            True:  "règle dynamique — Gen. Posting Type",
-                            False: "règle dynamique — Gen. Posting Type",
-                            None:  "mapping statique (Gen. Posting Type indisponible)",
-                        }[_dynamic]
+                        # CORRIGÉ (06/08/2026) : le marqueur doit refléter la
+                        # vraie source de CE champ précis, pas juste _dynamic
+                        # globalement — depuis l'union statique+dynamique,
+                        # _dynamic=False peut coexister avec un champ fourni
+                        # par le mapping statique (comme 77110001/76310001).
+                        if _dynamic is True and required_field == "Groupe compta. produit":
+                            _rule_marker = "règle dynamique — Gen. Posting Type"
+                        else:
+                            _rule_marker = "mapping statique"
                         missing[key] = {
                             "Table référencée BC": "15",
                             "Nom table BC": "Compte général",

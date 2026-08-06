@@ -20,7 +20,6 @@ from app.core.correction_generator import apply_corrections
 from app.core.correction_classifier import (
     build_prerequisites_report, build_prerequisites_excel,
     check_gl_account_prerequisites, extract_gl_account_posting_fields,
-    _is_account_reference_column, CORRECTION_CLASSIFIER_DEBUG_VERSION,
 )
 from app.db.metadata_db import (
     persist_gl_account_posting_fields, get_gl_account_posting_fields,
@@ -1153,118 +1152,29 @@ with tab_main:
                     with _hcol2:
                         if st.button("🔄 Revérifier", key="btn_refresh_levels", use_container_width=True):
                             with st.spinner("Vérification BC en cours..."):
-                                # Persisté dans session_state (pas juste st.caption transitoire)
-                                # pour survivre au st.rerun() qui efface l'affichage immédiat.
-                                _dbg_lines = []
-
                                 def _gl_check():
                                     _rc_company_id = cfg.get("company_id", "")
-                                    _dbg_lines.append(f"VERSION correction_classifier.py chargée : {CORRECTION_CLASSIFIER_DEBUG_VERSION}")
-                                    _dbg_sheets = pr.get("sheets", {})
-                                    _dbg_lines.append(f"Onglets dans pr : {list(_dbg_sheets.keys())}")
-                                    # AJOUTÉ : jamais vérifié jusqu'ici — le vrai coupable
-                                    # probable. gl_sheet_name est résolu depuis metadata,
-                                    # pas depuis les noms d'onglets eux-mêmes.
-                                    _dbg_metadata = pr.get("metadata", {})
-                                    _dbg_lines.append(f"metadata complet : {_dbg_metadata}")
-                                    _dbg_gl_sheet_name = next(
-                                        (n for n, m in _dbg_metadata.items() if str(m.get("table_id", "")) == "15"),
-                                        None,
-                                    )
-                                    _dbg_lines.append(f"gl_sheet_name résolu : {_dbg_gl_sheet_name!r}")
-                                    _dbg_92 = next((n for n in _dbg_sheets if "92" in n), None)
-                                    if _dbg_92:
-                                        _dbg_cols = list(_dbg_sheets[_dbg_92].columns)
-                                        _dbg_lines.append(f"Colonnes onglet '{_dbg_92}' : {_dbg_cols}")
-                                        _dbg_acc_cols = [c for c in _dbg_cols if _is_account_reference_column(c)]
-                                        _dbg_lines.append(f"Colonnes reconnues comme champ-compte : {_dbg_acc_cols}")
-                                        # AJOUTÉ : valeurs RÉELLES (pas juste les noms de colonnes)
-                                        # pour "Compte frais supplémentaires"/"Compte intérêts" —
-                                        # jamais vérifié jusqu'ici, seuls les noms l'ont été.
-                                        for _dbg_target_col in ("Compte frais supplémentaires", "Compte intérêts"):
-                                            if _dbg_target_col in _dbg_sheets[_dbg_92].columns:
-                                                _dbg_vals = list(_dbg_sheets[_dbg_92][_dbg_target_col])
-                                                _dbg_lines.append(f"Valeurs '{_dbg_target_col}' : {_dbg_vals!r}")
-                                    else:
-                                        _dbg_lines.append("Aucun onglet contenant '92' trouvé dans pr.")
-                                    # Même correction que la construction initiale (28/07/2026) :
-                                    # live BC en premier, l'onglet du fichier n'est qu'un repli.
+                                    # Live BC en premier, l'onglet du fichier n'est qu'un
+                                    # repli (28/07/2026) — voir check_gl_account_prerequisites.
                                     _rc_live = _try_live_gl_account(cfg["client_code"], _rc_company_id)
-                                    _dbg_lines.append(
-                                        f"_rc_live : {len(_rc_live)} compte(s), "
-                                        f"produit 77110001={_rc_live.get('77110001', {}).get('Groupe compta. produit', '???')!r}, "
-                                        f"produit 76310001={_rc_live.get('76310001', {}).get('Groupe compta. produit', '???')!r}"
-                                    )
-                                    # AJOUTÉ : LA vraie suspecte — jamais vérifiée. Si
-                                    # "Gen. Posting Type" a été résolu (même à tort par un
-                                    # bug AL) et vaut non-vide, la règle dynamique annule
-                                    # silencieusement l'exigence (required_fields_for_col=[]).
-                                    _dbg_lines.append(
-                                        f"77110001 clés complètes : {_rc_live.get('77110001', {})!r}"
-                                    )
-                                    _dbg_lines.append(
-                                        f"76310001 clés complètes : {_rc_live.get('76310001', {})!r}"
-                                    )
-                                    # AJOUTÉ : reproduit exactement la construction de
-                                    # gl_by_account faite dans check_gl_account_prerequisites,
-                                    # pour tester directement l'appartenance des 2 comptes —
-                                    # dernière étape non encore vérifiée isolément.
-                                    import pandas as _dbg_pd
-                                    if _rc_live:
-                                        _dbg_gl_by_account = _dbg_pd.DataFrame.from_dict(_rc_live, orient="index")
-                                        _dbg_lines.append(f"gl_by_account.index dtype : {_dbg_gl_by_account.index.dtype}, taille : {len(_dbg_gl_by_account)}")
-                                        _dbg_lines.append(f"'77110001' in gl_by_account.index : {'77110001' in _dbg_gl_by_account.index}")
-                                        _dbg_lines.append(f"'76310001' in gl_by_account.index : {'76310001' in _dbg_gl_by_account.index}")
-                                        _dbg_lines.append(f"5 premiers index : {list(_dbg_gl_by_account.index[:5])}")
                                     if _rc_live:
                                         persist_gl_account_posting_fields(cfg["client_code"], _rc_company_id, _rc_live)
-                                        # ULTIME VÉRIFICATION : reproduit la boucle de
-                                        # correspondance directement ici, sans passer par
-                                        # la fonction importée, pour isoler un éventuel
-                                        # souci lié à l'import lui-même plutôt qu'à la
-                                        # logique (déjà validée identique par ailleurs).
-                                        _dbg_inline_hits = []
-                                        for _dbg_col in ("Compte frais supplémentaires", "Compte intérêts"):
-                                            if _dbg_92 and _dbg_col in _dbg_sheets[_dbg_92].columns:
-                                                for _dbg_v in _dbg_sheets[_dbg_92][_dbg_col].dropna():
-                                                    _dbg_acc = str(_dbg_v).strip()
-                                                    _dbg_inline_hits.append(
-                                                        f"{_dbg_col}={_dbg_acc!r}, "
-                                                        f"in gl_by_account.index={_dbg_acc in _dbg_gl_by_account.index}, "
-                                                        f"produit={_dbg_gl_by_account.loc[_dbg_acc].get('Groupe compta. produit', '???') if _dbg_acc in _dbg_gl_by_account.index else 'N/A'!r}"
-                                                    )
-                                        _dbg_lines.append(f"Boucle inline (bypass fonction) : {_dbg_inline_hits}")
-                                        _dbg_lines.append(f"check_gl_account_prerequisites (identité fonction) : {check_gl_account_prerequisites}")
-                                        _dbg_out = check_gl_account_prerequisites(pr, _rc_live, prefer_fallback=True)
-                                        _dbg_lines.append(f"check_gl_account_prerequisites -> {len(_dbg_out)} anomalie(s) : {_dbg_out}")
-                                        return _dbg_out
+                                        return check_gl_account_prerequisites(pr, _rc_live, prefer_fallback=True)
                                     _rc_extract = extract_gl_account_posting_fields(pr)
                                     if _rc_extract:
                                         persist_gl_account_posting_fields(cfg["client_code"], _rc_company_id, _rc_extract)
                                         _rc_fallback = None
                                     else:
                                         _rc_fallback = get_gl_account_posting_fields(cfg["client_code"], _rc_company_id)
-                                    _dbg_out2 = check_gl_account_prerequisites(pr, _rc_fallback)
-                                    _dbg_lines.append(f"(chemin repli fichier) -> {len(_dbg_out2)} anomalie(s) : {_dbg_out2}")
-                                    return _dbg_out2
+                                    return check_gl_account_prerequisites(pr, _rc_fallback)
 
-                                # DIAGNOSTIC (27/07) : Streamlit Cloud masque le message
-                                # d'erreur réel en production ("error redacted"). On capture
-                                # et affiche nous-mêmes la trace complète pour voir la vraie
-                                # cause du TypeError signalé par Rami, plutôt que de deviner.
                                 try:
                                     st.session_state[_roadmap_key] = refresh_roadmap(
                                         cfg["client_code"], cfg["company_id"], _roadmap,
                                         gl_account_check=_gl_check,
                                     )
-                                    st.session_state["_gl_debug_lines"] = _dbg_lines
                                 except Exception as _refresh_e:
-                                    st.session_state["_gl_debug_lines"] = _dbg_lines + [
-                                        f"EXCEPTION refresh_roadmap : {type(_refresh_e).__name__}: {_refresh_e}"
-                                    ]
-                                    import traceback as _refresh_tb
-                                    st.error(f"🔧 DIAGNOSTIC — erreur capturée dans refresh_roadmap : {type(_refresh_e).__name__}: {_refresh_e}")
-                                    st.code(_refresh_tb.format_exc())
+                                    st.error(f"Erreur lors de la revérification : {type(_refresh_e).__name__}: {_refresh_e}")
                                     st.stop()
                             st.rerun()
 
@@ -1274,15 +1184,6 @@ with tab_main:
 
                     st.markdown(f"**Progression — {_pct}%**")
                     st.progress(_pct / 100)
-
-                    # DIAGNOSTIC TEMPORAIRE (04/08/2026) — persiste après le
-                    # st.rerun() du bouton Revérifier, contrairement à
-                    # st.caption() qui disparaissait avant lecture possible.
-                    # À retirer une fois la cause du blocage confirmée.
-                    if "_gl_debug_lines" in st.session_state:
-                        with st.expander("🔧 Debug — dernier Revérifier (temporaire)", expanded=True):
-                            for _l in st.session_state["_gl_debug_lines"]:
-                                st.code(_l, language=None)
 
                     try:
                         for _entry in _roadmap:
