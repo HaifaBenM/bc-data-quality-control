@@ -1162,6 +1162,16 @@ with tab_main:
                                     _dbg_lines.append(f"VERSION correction_classifier.py chargée : {CORRECTION_CLASSIFIER_DEBUG_VERSION}")
                                     _dbg_sheets = pr.get("sheets", {})
                                     _dbg_lines.append(f"Onglets dans pr : {list(_dbg_sheets.keys())}")
+                                    # AJOUTÉ : jamais vérifié jusqu'ici — le vrai coupable
+                                    # probable. gl_sheet_name est résolu depuis metadata,
+                                    # pas depuis les noms d'onglets eux-mêmes.
+                                    _dbg_metadata = pr.get("metadata", {})
+                                    _dbg_lines.append(f"metadata complet : {_dbg_metadata}")
+                                    _dbg_gl_sheet_name = next(
+                                        (n for n, m in _dbg_metadata.items() if str(m.get("table_id", "")) == "15"),
+                                        None,
+                                    )
+                                    _dbg_lines.append(f"gl_sheet_name résolu : {_dbg_gl_sheet_name!r}")
                                     _dbg_92 = next((n for n in _dbg_sheets if "92" in n), None)
                                     if _dbg_92:
                                         _dbg_cols = list(_dbg_sheets[_dbg_92].columns)
