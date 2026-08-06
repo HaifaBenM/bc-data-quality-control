@@ -1195,6 +1195,16 @@ with tab_main:
                                         f"produit 77110001={_rc_live.get('77110001', {}).get('Groupe compta. produit', '???')!r}, "
                                         f"produit 76310001={_rc_live.get('76310001', {}).get('Groupe compta. produit', '???')!r}"
                                     )
+                                    # AJOUTÉ : LA vraie suspecte — jamais vérifiée. Si
+                                    # "Gen. Posting Type" a été résolu (même à tort par un
+                                    # bug AL) et vaut non-vide, la règle dynamique annule
+                                    # silencieusement l'exigence (required_fields_for_col=[]).
+                                    _dbg_lines.append(
+                                        f"77110001 clés complètes : {_rc_live.get('77110001', {})!r}"
+                                    )
+                                    _dbg_lines.append(
+                                        f"76310001 clés complètes : {_rc_live.get('76310001', {})!r}"
+                                    )
                                     # AJOUTÉ : reproduit exactement la construction de
                                     # gl_by_account faite dans check_gl_account_prerequisites,
                                     # pour tester directement l'appartenance des 2 comptes —
