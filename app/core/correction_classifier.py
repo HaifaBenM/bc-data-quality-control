@@ -421,14 +421,20 @@ def check_gl_account_prerequisites(
                 # confirmé non concerné, ne pas écraser cette conclusion
                 # par une supposition du mapping statique).
                 _dynamic = _gl_account_requires_gen_prod_group(gl_row, gl_by_account.columns)
+                # CORRIGÉ (06/08/2026) : la règle dynamique ne doit JAMAIS
+                # retirer un cas déjà confirmé par GL_ACCOUNT_FIELD_REQUIREMENTS
+                # (mapping validé sur de vraies erreurs BC le 28/07) — seulement
+                # en AJOUTER de nouveaux. Bug réel constaté : "Gen. Posting Type"
+                # résolu en live avec une valeur vide donnait _dynamic=False
+                # (pas None), ce qui effaçait à tort la détection statique
+                # confirmée sur 77110001/76310001 (0 anomalie au lieu de 2).
+                # Union des deux sources, jamais une substitution.
+                required_fields_for_col = set(
+                    GL_ACCOUNT_FIELD_REQUIREMENTS.get(str(col).strip().lower(), [])
+                )
                 if _dynamic is True:
-                    required_fields_for_col = ["Groupe compta. produit"]
-                elif _dynamic is False:
-                    required_fields_for_col = []
-                else:
-                    required_fields_for_col = GL_ACCOUNT_FIELD_REQUIREMENTS.get(
-                        str(col).strip().lower(), []
-                    )
+                    required_fields_for_col.add("Groupe compta. produit")
+                required_fields_for_col = list(required_fields_for_col)
                 for required_field in required_fields_for_col:
                     # ATTENTION : parse_uploaded_file() fait df.dropna(axis=1,
                     # how="all") — une colonne 100% vide sur TOUS les comptes
