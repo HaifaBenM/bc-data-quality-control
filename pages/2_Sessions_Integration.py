@@ -1168,6 +1168,13 @@ with tab_main:
                                         _dbg_lines.append(f"Colonnes onglet '{_dbg_92}' : {_dbg_cols}")
                                         _dbg_acc_cols = [c for c in _dbg_cols if _is_account_reference_column(c)]
                                         _dbg_lines.append(f"Colonnes reconnues comme champ-compte : {_dbg_acc_cols}")
+                                        # AJOUTÉ : valeurs RÉELLES (pas juste les noms de colonnes)
+                                        # pour "Compte frais supplémentaires"/"Compte intérêts" —
+                                        # jamais vérifié jusqu'ici, seuls les noms l'ont été.
+                                        for _dbg_target_col in ("Compte frais supplémentaires", "Compte intérêts"):
+                                            if _dbg_target_col in _dbg_sheets[_dbg_92].columns:
+                                                _dbg_vals = list(_dbg_sheets[_dbg_92][_dbg_target_col])
+                                                _dbg_lines.append(f"Valeurs '{_dbg_target_col}' : {_dbg_vals!r}")
                                     else:
                                         _dbg_lines.append("Aucun onglet contenant '92' trouvé dans pr.")
                                     # Même correction que la construction initiale (28/07/2026) :
@@ -1178,6 +1185,17 @@ with tab_main:
                                         f"produit 77110001={_rc_live.get('77110001', {}).get('Groupe compta. produit', '???')!r}, "
                                         f"produit 76310001={_rc_live.get('76310001', {}).get('Groupe compta. produit', '???')!r}"
                                     )
+                                    # AJOUTÉ : reproduit exactement la construction de
+                                    # gl_by_account faite dans check_gl_account_prerequisites,
+                                    # pour tester directement l'appartenance des 2 comptes —
+                                    # dernière étape non encore vérifiée isolément.
+                                    import pandas as _dbg_pd
+                                    if _rc_live:
+                                        _dbg_gl_by_account = _dbg_pd.DataFrame.from_dict(_rc_live, orient="index")
+                                        _dbg_lines.append(f"gl_by_account.index dtype : {_dbg_gl_by_account.index.dtype}, taille : {len(_dbg_gl_by_account)}")
+                                        _dbg_lines.append(f"'77110001' in gl_by_account.index : {'77110001' in _dbg_gl_by_account.index}")
+                                        _dbg_lines.append(f"'76310001' in gl_by_account.index : {'76310001' in _dbg_gl_by_account.index}")
+                                        _dbg_lines.append(f"5 premiers index : {list(_dbg_gl_by_account.index[:5])}")
                                     if _rc_live:
                                         persist_gl_account_posting_fields(cfg["client_code"], _rc_company_id, _rc_live)
                                         _dbg_out = check_gl_account_prerequisites(pr, _rc_live, prefer_fallback=True)
