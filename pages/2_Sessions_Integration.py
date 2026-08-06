@@ -20,7 +20,7 @@ from app.core.correction_generator import apply_corrections
 from app.core.correction_classifier import (
     build_prerequisites_report, build_prerequisites_excel,
     check_gl_account_prerequisites, extract_gl_account_posting_fields,
-    _is_account_reference_column,
+    _is_account_reference_column, CORRECTION_CLASSIFIER_DEBUG_VERSION,
 )
 from app.db.metadata_db import (
     persist_gl_account_posting_fields, get_gl_account_posting_fields,
@@ -1159,6 +1159,7 @@ with tab_main:
 
                                 def _gl_check():
                                     _rc_company_id = cfg.get("company_id", "")
+                                    _dbg_lines.append(f"VERSION correction_classifier.py chargée : {CORRECTION_CLASSIFIER_DEBUG_VERSION}")
                                     _dbg_sheets = pr.get("sheets", {})
                                     _dbg_lines.append(f"Onglets dans pr : {list(_dbg_sheets.keys())}")
                                     _dbg_92 = next((n for n in _dbg_sheets if "92" in n), None)
