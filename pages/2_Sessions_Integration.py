@@ -1198,6 +1198,23 @@ with tab_main:
                                         _dbg_lines.append(f"5 premiers index : {list(_dbg_gl_by_account.index[:5])}")
                                     if _rc_live:
                                         persist_gl_account_posting_fields(cfg["client_code"], _rc_company_id, _rc_live)
+                                        # ULTIME VÉRIFICATION : reproduit la boucle de
+                                        # correspondance directement ici, sans passer par
+                                        # la fonction importée, pour isoler un éventuel
+                                        # souci lié à l'import lui-même plutôt qu'à la
+                                        # logique (déjà validée identique par ailleurs).
+                                        _dbg_inline_hits = []
+                                        for _dbg_col in ("Compte frais supplémentaires", "Compte intérêts"):
+                                            if _dbg_92 and _dbg_col in _dbg_sheets[_dbg_92].columns:
+                                                for _dbg_v in _dbg_sheets[_dbg_92][_dbg_col].dropna():
+                                                    _dbg_acc = str(_dbg_v).strip()
+                                                    _dbg_inline_hits.append(
+                                                        f"{_dbg_col}={_dbg_acc!r}, "
+                                                        f"in gl_by_account.index={_dbg_acc in _dbg_gl_by_account.index}, "
+                                                        f"produit={_dbg_gl_by_account.loc[_dbg_acc].get('Groupe compta. produit', '???') if _dbg_acc in _dbg_gl_by_account.index else 'N/A'!r}"
+                                                    )
+                                        _dbg_lines.append(f"Boucle inline (bypass fonction) : {_dbg_inline_hits}")
+                                        _dbg_lines.append(f"check_gl_account_prerequisites (identité fonction) : {check_gl_account_prerequisites}")
                                         _dbg_out = check_gl_account_prerequisites(pr, _rc_live, prefer_fallback=True)
                                         _dbg_lines.append(f"check_gl_account_prerequisites -> {len(_dbg_out)} anomalie(s) : {_dbg_out}")
                                         return _dbg_out
