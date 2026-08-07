@@ -459,3 +459,67 @@ def get_gl_account_posting_fields(
         str(r.get("N°", "")).strip(): {k: v for k, v in r.items() if k != "N°"}
         for r in fields if r.get("N°")
     }
+
+TABLE_CAPTIONS_ENTITY = "table_captions"
+
+
+def get_table_caption_cached(
+    profile_code: str,
+    company_id:   str,
+    table_id:     str,
+) -> str | None:
+    """
+    AJOUTÉ (07/08/2026) — résolution dynamique du libellé BC d'une table,
+    avec cache Supabase (TTL 30 jours : un libellé de table BC ne change
+    quasiment jamais, pas besoin du TTL 24h générique). Un seul enregistrement
+    Supabase par (profile_code, company_id) regroupe TOUTES les tables déjà
+    résolues (dict table_id -> caption), pour éviter de multiplier les lignes
+    de cache table par table.
+
+    Appelée par correction_classifier.build_prerequisites_report() en
+    source prioritaire, AVANT le repli sur le dictionnaire statique
+    master_data_config.REFERENCE_TABLES. Retourne None si la résolution live
+    échoue (BC injoignable, table inexistante, profil BC mal configuré) —
+    l'appelant retombe alors sur le dictionnaire statique, jamais d'erreur
+    remontée ici.
+    """
+    table_id = str(table_id)
+
+    cached_row = get_cached_metadata(profile_code, company_id, TABLE_CAPTIONS_ENTITY)
+    cached_captions = {}
+    if cached_row:
+        raw = cached_row.get("fields")
+        if isinstance(raw, dict):
+            cached_captions = raw
+        elif isinstance(raw, list) and raw and isinstance(raw[0], dict):
+            # save_metadata() sérialise toujours en JSON ; si jamais stocké
+            # comme liste de paires par un appelant futur, on gère aussi ce cas.
+            cached_captions = {r.get("table_id"): r.get("caption") for r in raw if r.get("table_id")}
+
+    if table_id in cached_captions and is_cache_valid(
+        profile_code, company_id, TABLE_CAPTIONS_ENTITY, hours=24 * 30
+    ):
+        return cached_captions[table_id] or None
+
+    try:
+        from app.db.profiles_db import get_profile_by_code
+        from app.core.bc_api import get_access_token, get_table_caption
+
+        profile = get_profile_by_code(profile_code)
+        tenant_id     = (profile.get("bc_tenant_id") or "").strip()
+        client_id     = (profile.get("bc_client_id") or "").strip()
+        client_secret = (profile.get("bc_client_secret") or "").strip()
+        environment   = (profile.get("bc_environment") or "").strip()
+        if not (tenant_id and client_id and client_secret and environment and company_id):
+            return None
+
+        token = get_access_token(tenant_id, client_id, client_secret)
+        caption = get_table_caption(tenant_id, environment, company_id, int(table_id), token)
+        if not caption:
+            return None
+
+        cached_captions[table_id] = caption
+        save_metadata(profile_code, company_id, TABLE_CAPTIONS_ENTITY, "reference", cached_captions)
+        return caption
+    except Exception:
+        return None

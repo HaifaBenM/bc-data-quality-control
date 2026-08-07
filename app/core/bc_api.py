@@ -342,6 +342,32 @@ def _qc_base(tenant_id: str, environment: str, company_id: str) -> str:
     )
 
 
+def get_table_caption(
+    tenant_id: str, environment: str, company_id: str, table_id: int, token: str
+) -> str | None:
+    """
+    AJOUTÉ (07/08/2026) — résolution dynamique du libellé BC d'une table via
+    la nouvelle page 50107 "Talan QC Table Caption API" (RecRef.Caption,
+    français forcé côté AL). Remplace côté Python le dictionnaire statique
+    master_data_config.REFERENCE_TABLES comme source prioritaire —
+    voir metadata_db.get_table_caption_cached() pour la version avec cache
+    Supabase + résolution auth/profil, utilisée par
+    correction_classifier.build_prerequisites_report().
+
+    Retourne None si la table n'existe pas / n'est pas accessible, ou en cas
+    d'erreur réseau — l'appelant doit alors retomber sur le dictionnaire
+    statique.
+    """
+    url = f"{_qc_base(tenant_id, environment, company_id)}/tableCaptions?$filter=tableId eq {int(table_id)}"
+    resp = requests.get(url, headers=_headers(token), timeout=15)
+    resp.raise_for_status()
+    values = resp.json().get("value", [])
+    if not values:
+        return None
+    caption = values[0].get("tableCaption", "")
+    return caption or None
+
+
 def get_packages_qc(
     tenant_id: str,
     environment: str,
