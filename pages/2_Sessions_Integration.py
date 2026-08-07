@@ -23,6 +23,7 @@ from app.core.correction_classifier import (
 )
 from app.db.metadata_db import (
     persist_gl_account_posting_fields, get_gl_account_posting_fields,
+    get_table_caption_cached,
 )
 from app.db.profiles_db import get_profile_by_code
 from app.core.bc_api import (
@@ -1056,6 +1057,24 @@ with tab_main:
                                 st.json(_dbg_std_result["raw"])
                             except Exception as _dbg_exc3b:
                                 st.error(f"Échec : {_dbg_exc3b}")
+                        # AJOUTÉ (07/08/2026) : teste la nouvelle résolution
+                        # dynamique de libellé de table (get_table_caption_cached)
+                        # sans avoir à relancer toute une analyse Stock complète.
+                        _dbg_table_id_test = st.text_input(
+                            "ID de table à tester (résolution libellé)", value="99000763",
+                            key="dbg_table_caption_input",
+                        )
+                        if st.button("Tester résolution libellé table", key="btn_debug_table_caption"):
+                            try:
+                                caption = get_table_caption_cached(
+                                    cfg.get("client_code", ""), cfg.get("company_id", ""), _dbg_table_id_test
+                                )
+                                if caption:
+                                    st.success(f"✅ Table {_dbg_table_id_test} résolue : \"{caption}\"")
+                                else:
+                                    st.warning(f"⚠️ Table {_dbg_table_id_test} non résolue (None) — AL pas encore republié, table inexistante, ou profil BC incomplet.")
+                            except Exception as _dbg_exc_cap:
+                                st.error(f"Échec : {type(_dbg_exc_cap).__name__}: {_dbg_exc_cap}")
                         if st.button("Tester recordValues (champ No., table 15)", key="btn_debug_recordvalues"):
                             try:
                                 _dbg_profile = get_profile_by_code(cfg.get("client_code", ""))
