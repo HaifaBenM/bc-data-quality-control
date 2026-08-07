@@ -912,6 +912,24 @@ with tab_main:
                     st.session_state.level_config = {}
                     st.warning(f"⚠️ Impossible de charger level_config : {e}")
 
+            # AJOUTÉ (07/08/2026) : level_config n'était rechargée qu'une fois
+            # par session navigateur — une modif SQL faite dans Supabase
+            # (nouvelle classification de table) restait invisible tant que
+            # l'utilisateur n'actualisait pas complètement la page (F5), y
+            # compris après un "Recommencer" qui ne vidait pas cette clé.
+            # Bouton explicite plutôt qu'un rechargement systématique à
+            # chaque run (coût Supabase superflu quand rien n'a changé).
+            if st.button("🔄 Recharger classification niveaux (level_config)", key="btn_reload_level_config"):
+                try:
+                    st.session_state.level_config = load_level_config(get_supabase_client())
+                    for _k in list(st.session_state.keys()):
+                        if _k.startswith("level_roadmap_"):
+                            del st.session_state[_k]
+                    st.success("Classification rechargée depuis Supabase.")
+                except Exception as e:
+                    st.error(f"Échec du rechargement : {e}")
+                st.rerun()
+
             _level_cfg = st.session_state.level_config
             _roadmap_key = f"level_roadmap_{cfg.get('pkg_code', '')}_{cfg.get('company_id', '')}_{cfg.get('file_name', '')}"
 
