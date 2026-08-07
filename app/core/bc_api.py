@@ -10,17 +10,37 @@ Credentials lus depuis la table client_profiles (Supabase) :
     bc_tenant_id, bc_client_id, bc_client_secret,
     bc_environment, bc_company_id, bc_url
 """
+import time
 import requests
 from urllib.parse import quote
 
 
 # ── Authentification ──────────────────────────────────────────────────────────
 
+# AJOUTÉ (07/08/2026) — cache mémoire process du token OAuth2, keyed par
+# (tenant_id, client_id). Corrige un vrai problème de performance : chaque
+# vérification de niveau (check_table_filled, résolution de libellé de
+# table...) redemandait un token Azure AD FRAIS, un aller-retour réseau
+# complet par niveau — jusqu'à 13+ échanges OAuth2 séquentiels pour
+# afficher une seule roadmap. Le token BC est valide ~1h (voir
+# "expires_in" de la réponse) ; on le réutilise avec une marge de sécurité
+# de 60s avant expiration plutôt que de le renouveler à chaque appel.
+_TOKEN_CACHE: dict[tuple[str, str], tuple[str, float]] = {}
+
+
 def get_access_token(tenant_id: str, client_id: str, client_secret: str) -> str:
     """
-    Obtient un Bearer token OAuth2 Azure AD pour l'API BC.
-    Raises requests.HTTPError si l'auth échoue.
+    Obtient un Bearer token OAuth2 Azure AD pour l'API BC — réutilisé depuis
+    le cache mémoire tant qu'il n'est pas expiré (voir _TOKEN_CACHE
+    ci-dessus). Raises requests.HTTPError si l'auth échoue.
     """
+    cache_key = (tenant_id, client_id)
+    cached = _TOKEN_CACHE.get(cache_key)
+    if cached is not None:
+        token, expires_at = cached
+        if time.time() < expires_at:
+            return token
+
     url = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
     resp = requests.post(
         url,
@@ -33,7 +53,11 @@ def get_access_token(tenant_id: str, client_id: str, client_secret: str) -> str:
         timeout=15,
     )
     resp.raise_for_status()
-    return resp.json()["access_token"]
+    payload = resp.json()
+    token = payload["access_token"]
+    expires_in = int(payload.get("expires_in", 3600))
+    _TOKEN_CACHE[cache_key] = (token, time.time() + expires_in - 60)
+    return token
 
 
 def _base_url(tenant_id: str, environment: str) -> str:
