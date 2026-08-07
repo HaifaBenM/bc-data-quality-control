@@ -79,21 +79,30 @@ def build_prerequisites_report(
     from app.core.master_data_config import get_table_label
 
     grouped: dict[tuple, dict] = {}
+    # CORRIGÉ (07/08/2026) : cache local par table_id, résolu UNE SEULE FOIS
+    # même si plusieurs valeurs manquantes distinctes existent pour la même
+    # table (ex. 14 codes différents pour Catégorie d'article) — avant ce
+    # fix, get_table_caption_cached() était appelée une fois par (table_id,
+    # valeur), causant un vrai ralentissement N+1 sur les gros fichiers.
+    _resolved_table_names: dict[str, str] = {}
     for a in anomalies:
         if a.get("Classification") != "PREALABLE_BC_REQUIS":
             continue
         table_id = str(a.get("Table référencée", ""))
         key = (table_id, a.get("Valeur", ""))
         if key not in grouped:
-            table_name = None
-            if profile_code and company_id and table_id:
-                try:
-                    from app.db.metadata_db import get_table_caption_cached
-                    table_name = get_table_caption_cached(profile_code, company_id, table_id)
-                except Exception:
-                    table_name = None  # BC injoignable — on retombe sur le statique juste en dessous
-            if not table_name:
-                table_name = get_table_label(table_id)
+            if table_id not in _resolved_table_names:
+                table_name = None
+                if profile_code and company_id and table_id:
+                    try:
+                        from app.db.metadata_db import get_table_caption_cached
+                        table_name = get_table_caption_cached(profile_code, company_id, table_id)
+                    except Exception:
+                        table_name = None  # BC injoignable — on retombe sur le statique juste en dessous
+                if not table_name:
+                    table_name = get_table_label(table_id)
+                _resolved_table_names[table_id] = table_name
+            table_name = _resolved_table_names[table_id]
 
             grouped[key] = {
                 "Table référencée BC": table_id,
