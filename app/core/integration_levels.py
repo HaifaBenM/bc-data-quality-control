@@ -276,9 +276,21 @@ def build_roadmap_from_prereqs(
         if info is not None and info.ignored:
             continue
         if info is None:
+            # CORRIGÉ (07/08/2026) : le vrai nom de table BC est déjà résolu
+            # par build_prerequisites_report (colonne "Nom table BC" de
+            # chaque ligne prereqs) — jamais utilisé ici jusqu'à présent,
+            # d'où "Table 94 (non classée)" au lieu de "Groupes compta.
+            # stock (non classée)". On le récupère depuis la première ligne
+            # de prereqs disponible pour cette table plutôt que d'inventer
+            # un libellé générique.
+            _real_name = next(
+                (r.get("Nom table BC") for r in prereqs_by_table.get(table_id, []) if r.get("Nom table BC")),
+                None,
+            )
+            _label = f"{_real_name} (non classée)" if _real_name else f"Table {table_id} (non classée)"
             info = LevelInfo(
                 table_id=table_id,
-                table_name=f"Table {table_id} (non classée)",
+                table_name=_label,
                 level=None,
                 sub_level=None,
                 note="Anomalie Axe B réelle sur cette table, absente de level_config — à classer, mais quand même vérifiée.",
@@ -389,7 +401,13 @@ def refresh_roadmap(
     entry.sub_anomalies pour affichage en sous-niveau dans la roadmap.
     """
     for e in roadmap:
-        if e.status == "validated" and e.level_info.table_id != 15:
+        # CORRIGÉ (07/08/2026) : un niveau déjà "validated" à tort (avant ce
+        # fix, ou par un futur bug similaire) restait gelé pour toujours ici
+        # — jamais réévalué. On skip seulement si validated ET sans
+        # sub_anomalies résiduelles, pour permettre l'auto-correction au
+        # prochain Revérifier sans re-questionner les niveaux réellement
+        # propres à chaque appel (coût BC live).
+        if e.status == "validated" and e.level_info.table_id != 15 and not getattr(e, "sub_anomalies", None):
             continue
         if not is_level_unlocked(e.level_info.level, roadmap):
             continue
@@ -426,8 +444,17 @@ def refresh_roadmap(
                 e.status = "pending"  # comptes existent mais champs vides (ou contrôle en échec) — jamais validé
             continue
 
-        if result == "filled":
+        if result == "filled" and not getattr(e, "sub_anomalies", None):
             e.status = "validated"
+        elif getattr(e, "sub_anomalies", None):
+            # CORRIGÉ (07/08/2026) : généralisation du fix du 04/08 (jusque-là
+            # réservé à la table 15). N'importe quel niveau pouvait être
+            # validé à tort dès que check_table_filled voyait des données,
+            # sans jamais regarder sub_anomalies (constaté sur Table 94 :
+            # ✓ validée avec 723 occurrences d'erreurs de référence non
+            # résolues toujours affichées dessous). Un niveau avec des
+            # sub_anomalies non vides n'est plus jamais marqué validated.
+            e.status = "pending"
     return roadmap
 
 
