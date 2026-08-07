@@ -1225,6 +1225,28 @@ with tab_main:
                         st.error("🔧 DIAGNOSTIC — erreur capturée dans la boucle d'affichage de la roadmap :")
                         st.code(traceback.format_exc())
 
+                    # AJOUTÉ (07/08/2026) : export consolidé de TOUS les niveaux en
+                    # un seul fichier — jusqu'ici chaque niveau n'était téléchargeable
+                    # qu'individuellement via l'icône native du st.dataframe, obligeant
+                    # à recopier/exporter niveau par niveau pour construire un
+                    # comparatif complet contre les erreurs BC réelles.
+                    _all_sub_anomalies = []
+                    for _e in _roadmap:
+                        _e_sub = getattr(_e, "sub_anomalies", None)
+                        if _e_sub:
+                            for _a in _e_sub:
+                                _row = dict(_a)
+                                _row["Niveau"] = _e.level_info.table_name
+                                _all_sub_anomalies.append(_row)
+                    if _all_sub_anomalies:
+                        st.download_button(
+                            "⬇️ Toutes les anomalies (tous niveaux)",
+                            data=build_prerequisites_excel(_all_sub_anomalies),
+                            file_name="anomalies_tous_niveaux.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            key="dl_all_sub_anomalies",
+                        )
+
                     _levels_ok = all_validated(_roadmap)
                     if not _levels_ok:
                         st.info("🔒 L'analyse qualité reste verrouillée tant que tous les niveaux ne sont pas validés dans BC.")

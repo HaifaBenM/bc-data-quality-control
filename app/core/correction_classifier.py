@@ -114,7 +114,7 @@ def build_prerequisites_report(
 
 _PREREQ_COLUMNS = [
     "Table référencée BC", "Nom table BC", "Code manquant",
-    "Champs concernés", "Occurrences",
+    "Champs concernés", "Occurrences", "Niveau",
 ]
 
 
@@ -529,7 +529,7 @@ def build_prerequisites_excel(prereqs: list[dict]) -> bytes:
                     start_color="F5F3FF", end_color="F5F3FF", fill_type="solid"
                 )
 
-    widths = [18, 26, 34, 34, 12]
+    widths = [18, 26, 34, 34, 12, 22]
     for i, w in enumerate(widths, start=1):
         ws.column_dimensions[chr(64 + i)].width = w
 
