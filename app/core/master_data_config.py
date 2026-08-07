@@ -65,6 +65,10 @@ REFERENCE_TABLES = {
     "291": "Transporteurs",
     "292": "Conditions de relance",
     "308": "Souches de n°",
+    # Ajouté 07/08/2026 — confirmé Microsoft Learn (ID 6502, namespace
+    # Microsoft.Inventory.Tracking). Cohérent avec le champ "Code
+    # traçabilité" déjà rencontré dans les anomalies MDD-Stock.
+    "6502": "Code de traçabilité",
     # ⚠️ NON confirmé dans metadata_db._TABLE_BC_ENTITY — libellé conservé
     # tel quel depuis les sessions précédentes, pas re-vérifié cette session.
     "322": "Groupes taxes",
