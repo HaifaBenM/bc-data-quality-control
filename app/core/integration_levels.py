@@ -19,6 +19,7 @@ Différences avec la V1 :
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 # ── Config niveau (dynamique — chargée depuis Supabase, rien en dur ici) ─────
@@ -399,25 +400,62 @@ def refresh_roadmap(
     titre que check_table_filled — les deux doivent être propres. Le
     détail (quels comptes, quels champs) est stocké dans
     entry.sub_anomalies pour affichage en sous-niveau dans la roadmap.
+
+    CORRIGÉ (07/08/2026) — PERFORMANCE : chaque niveau faisait son appel
+    BC live l'un après l'autre (jusqu'à 13+ appels séquentiels, plusieurs
+    secondes cumulées rien que pour afficher la roadmap). Les résultats
+    BC (check_table_filled + gl_account_check) sont maintenant tous
+    récupérés EN PARALLÈLE (ThreadPoolExecutor, appels réseau
+    indépendants). La logique de déverrouillage en cascade — un niveau
+    validé débloque le suivant DANS LA MÊME passe — reste appliquée
+    ENSUITE, en séquence, sans coût réseau (juste de la logique en
+    mémoire) : le comportement observable est identique à avant, seule la
+    collecte des données est parallélisée.
     """
+    to_check = [
+        e for e in roadmap
+        if not (e.status == "validated" and e.level_info.table_id != 15 and not getattr(e, "sub_anomalies", None))
+    ]
+
+    fill_results: dict[int, str] = {}
+    gl_results: dict[int, list[dict] | Exception] = {}
+
+    def _fetch_fill(entry: RoadmapEntry) -> tuple[int, str]:
+        return id(entry), check_table_filled(profile_code, company_id, entry.level_info.table_id)
+
+    def _fetch_gl(entry: RoadmapEntry):
+        try:
+            return id(entry), gl_account_check(), None
+        except Exception as exc:
+            return id(entry), None, exc
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        futures = [pool.submit(_fetch_fill, e) for e in to_check]
+        if gl_account_check is not None:
+            gl_entries = [e for e in to_check if e.level_info.table_id == 15]
+            futures += [pool.submit(_fetch_gl, e) for e in gl_entries]
+        for fut in as_completed(futures):
+            res = fut.result()
+            if len(res) == 2:
+                eid, result = res
+                fill_results[eid] = result
+            else:
+                eid, gl_res, gl_exc = res
+                gl_results[eid] = gl_exc if gl_exc is not None else gl_res
+
     for e in roadmap:
-        # CORRIGÉ (07/08/2026) : un niveau déjà "validated" à tort (avant ce
-        # fix, ou par un futur bug similaire) restait gelé pour toujours ici
-        # — jamais réévalué. On skip seulement si validated ET sans
-        # sub_anomalies résiduelles, pour permettre l'auto-correction au
-        # prochain Revérifier sans re-questionner les niveaux réellement
-        # propres à chaque appel (coût BC live).
         if e.status == "validated" and e.level_info.table_id != 15 and not getattr(e, "sub_anomalies", None):
             continue
         if not is_level_unlocked(e.level_info.level, roadmap):
             continue
-        result = check_table_filled(profile_code, company_id, e.level_info.table_id)
+        result = fill_results.get(id(e))
+        if result is None:
+            continue  # pas dans to_check (ne devrait pas arriver ici, sécurité)
         e.last_check = result
 
         if e.level_info.table_id == 15 and gl_account_check is not None:
-            try:
-                e.sub_anomalies = gl_account_check()
-            except Exception as _gl_exc:
+            gl_outcome = gl_results.get(id(e))
+            if isinstance(gl_outcome, Exception):
                 # CORRIGÉ (04/08/2026) : au lieu de None (invisible, et qui
                 # validait à tort la table 15 — voir plus bas), on rend
                 # l'erreur réelle visible dans sub_anomalies. L'UI affiche
@@ -427,10 +465,12 @@ def refresh_roadmap(
                 e.sub_anomalies = [{
                     "Table référencée BC": "15",
                     "Nom table BC": "Compte général",
-                    "Code manquant": f"⚠️ Contrôle GL Account indisponible : {type(_gl_exc).__name__}: {_gl_exc}",
+                    "Code manquant": f"⚠️ Contrôle GL Account indisponible : {type(gl_outcome).__name__}: {gl_outcome}",
                     "Champs concernés": "",
                     "Occurrences": 1,
                 }]
+            else:
+                e.sub_anomalies = gl_outcome
             # `not None` et `not []` valent tous les deux True en Python —
             # le code précédent validait à tort la table 15 quand
             # gl_account_check() plantait silencieusement, exactement
