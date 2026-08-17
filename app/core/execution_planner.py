@@ -222,11 +222,9 @@ def build_plan_from_bc(
     except Exception:
         return build_default_plan(package_code)
 
-    for pt in pkg_tables:
+    valid_tables = [pt for pt in pkg_tables if pt.get("tableId", 0)]
+    for pt in valid_tables:
         tid = pt.get("tableId", 0)
-        if not tid:
-            continue
-
         plan.tables[tid] = TablePlan(
             table_id         = tid,
             table_name       = pt.get("tableName", str(tid)),
@@ -235,10 +233,34 @@ def build_plan_from_bc(
             delete_before    = bool(pt.get("deleteBeforeProcessing", False)),
         )
 
+    # AJOUTÉ (07/08/2026) — PERFORMANCE : get_package_fields_qc était
+    # appelée une fois par table, en séquence (7+ appels BC l'un après
+    # l'autre pour un package Stock, avant même qu'Axe A/B démarrent —
+    # gros contributeur à la lenteur du "chargement du prérequis"). Chaque
+    # table est indépendante des autres : récupération en parallèle
+    # (ThreadPoolExecutor), puis remplissage des dicts du plan en séquence
+    # (rapide, pas de coût réseau) — comportement identique, juste la
+    # collecte parallélisée.
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    def _fetch_fields(tid: int):
         try:
-            pkg_fields = get_package_fields_qc(
+            return tid, get_package_fields_qc(
                 tenant_id, environment, company_id, package_code, tid, token
-            )
+            ), None
+        except Exception as exc:
+            return tid, None, exc
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        futures = [pool.submit(_fetch_fields, pt.get("tableId", 0)) for pt in valid_tables]
+        for fut in as_completed(futures):
+            tid, pkg_fields, exc = fut.result()
+            if exc is not None or pkg_fields is None:
+                plan.fields[tid]           = {}
+                plan.fields_ref[tid]       = {}
+                plan.fields_ref_field[tid] = {}
+                plan.fields_meta[tid]      = {}
+                continue
 
             plan.fields[tid] = {
                 pf.get("fieldCaption", ""): bool(pf.get("validateField", True))
@@ -261,12 +283,6 @@ def build_plan_from_bc(
                 if fm:
                     meta_map[fm.field_name] = fm
             plan.fields_meta[tid] = meta_map
-
-        except Exception:
-            plan.fields[tid]           = {}
-            plan.fields_ref[tid]       = {}
-            plan.fields_ref_field[tid] = {}
-            plan.fields_meta[tid]      = {}
 
     return plan
 
