@@ -47,6 +47,41 @@ def validate_axe_b(
         table_id_int = 0
 
     if execution_plan and table_id_int:
+        # AJOUTÉ (07/08/2026) — PERFORMANCE : avant ce fix, chaque colonne
+        # validée déclenchait son propre appel get_reference_values_by_table_id
+        # l'un après l'autre (jusqu'à 15+ appels séquentiels sur un onglet
+        # comme "27 Article", dont plusieurs à froid = vrais allers-retours
+        # BC live). On identifie d'abord TOUTES les (ref_tid, ref_fid)
+        # distinctes nécessaires pour cet onglet, on les récupère EN
+        # PARALLÈLE (ThreadPoolExecutor), puis la boucle ligne par ligne
+        # ci-dessous consulte ce dict au lieu de rappeler la fonction —
+        # comportement identique, juste la collecte réseau parallélisée.
+        # Ne change RIEN à l'ordre de traitement des onglets eux-mêmes
+        # (sim_context reste alimenté séquentiellement, dans l'ordre BC).
+        _needed: dict[tuple[int, int], None] = {}
+        for col in df.columns:
+            if not execution_plan.validate_field_for(table_id_int, col):
+                continue
+            ref_tid = execution_plan.get_ref_table_id(table_id_int, col)
+            if not ref_tid:
+                continue
+            ref_fid = execution_plan.get_ref_field_id(table_id_int, col)
+            _needed[(ref_tid, ref_fid)] = None
+
+        _ref_cache: dict[tuple[int, int], tuple[set, bool]] = {}
+        if _needed:
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+
+            def _fetch_ref(key: tuple[int, int]):
+                tid, fid = key
+                return key, get_reference_values_by_table_id(profile_code, company_id, tid, fid)
+
+            with ThreadPoolExecutor(max_workers=8) as pool:
+                futures = [pool.submit(_fetch_ref, k) for k in _needed]
+                for fut in as_completed(futures):
+                    key, res = fut.result()
+                    _ref_cache[key] = res
+
         for col in df.columns:
             if not execution_plan.validate_field_for(table_id_int, col):
                 continue
@@ -58,10 +93,9 @@ def validate_axe_b(
             # refFieldId — PK de la table relation (nouveau)
             ref_fid = execution_plan.get_ref_field_id(table_id_int, col)
 
-            # Codes valides : lazy load BC + simulation context intra-fichier
-            bc_codes, found = get_reference_values_by_table_id(
-                profile_code, company_id, ref_tid, ref_fid
-            )
+            # Codes valides : lazy load BC (pré-récupéré en parallèle
+            # ci-dessus) + simulation context intra-fichier
+            bc_codes, found = _ref_cache.get((ref_tid, ref_fid), (set(), False))
             sim_codes   = sim_context.get_values(ref_tid) if sim_context else set()
             valid_codes = bc_codes | sim_codes
 
