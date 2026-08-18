@@ -16,7 +16,7 @@ from app.core.integration_levels import (
 from app.db.supabase_client import get_supabase_client
 from app.core.simulation_context import SimulationContext
 from app.core.metadata_loader import MetadataLoader
-from app.core.correction_generator import apply_corrections
+from app.core.correction_generator import apply_corrections, clear_id_reference_columns
 from app.core.correction_classifier import (
     build_prerequisites_report, build_prerequisites_excel,
     check_gl_account_prerequisites, extract_gl_account_posting_fields,
@@ -568,6 +568,12 @@ def display_correction_workflow(merged: dict, cfg: dict, pr: dict):
                 ]
                 try:
                     generated_bytes = apply_corrections(original_bytes, corrections)
+                    # AJOUTÉ (18/08/2026) : les colonnes "ID X" (SystemId BC)
+                    # ne sont jamais portables d'une société à l'autre — BC
+                    # rejette l'import sur ces colonnes même quand le Code
+                    # associé est correct. On les vide pour laisser BC
+                    # résoudre uniquement via Code à l'import.
+                    generated_bytes = clear_id_reference_columns(generated_bytes)
                     st.session_state["generated_file_bytes"] = generated_bytes
                     st.session_state["generated_file_name"]  = (
                         f"CORRIGE_{cfg.get('file_name', 'fichier.xlsx')}"

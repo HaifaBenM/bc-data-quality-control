@@ -230,3 +230,81 @@ def apply_corrections(original_bytes: bytes, corrections: list[dict]) -> bytes:
 
     src.close()
     return out_buf.getvalue()
+
+
+_ID_COLUMN_PREFIX = "ID "  # colonnes de résolution interne BC (SystemId) — non portables entre sociétés
+
+
+def clear_id_reference_columns(excel_bytes: bytes) -> bytes:
+    """
+    Vide les colonnes "ID X" (SystemId interne BC : ID unité, ID groupe compta.
+    stock, ID groupe compta. produit, ID catégorie article, etc.) sur toutes
+    les feuilles de données.
+
+    AJOUTÉ (18/08/2026) : ces colonnes contiennent le SystemId de l'enregistrement
+    résolu au moment de l'export BC d'origine. Un SystemId est unique à sa
+    société/base — il ne correspond à AUCUN enregistrement dans une société
+    différente, même si le Code associé existe avec la même valeur. BC rejette
+    donc systématiquement l'import (« Le champ ID X... contient une valeur qui
+    ne peut pas être trouvée ») dès que le fichier a été exporté depuis une
+    société différente de la cible, même quand les données Code sont
+    correctes. Vider ces colonnes laisse BC résoudre uniquement via le champ
+    Code (résolution RapidStart standard), qui lui est portable entre sociétés.
+
+    Même technique d'édition texte brut que apply_corrections (voir docstring
+    du module) : seule la sous-chaîne exacte de chaque cellule ciblée est
+    remplacée, rien d'autre n'est reparsé/réinjecté. Pas encore testé contre
+    un import BC réel — à valider comme apply_corrections avant démo.
+    """
+    src    = zipfile.ZipFile(io.BytesIO(excel_bytes), "r")
+    shared = _shared_strings(src)
+
+    modified_bytes: dict[str, bytes] = {}
+
+    wb_root   = ET.fromstring(src.read("xl/workbook.xml"))
+    sheets_el = wb_root.find(_q("sheets"))
+    sheet_names = [s.get("name") for s in sheets_el] if sheets_el is not None else []
+
+    for sheet_name in sheet_names:
+        sheet_path = _sheet_xml_path(src, sheet_name)
+        if not sheet_path or sheet_path not in src.namelist():
+            continue
+
+        raw_bytes  = src.read(sheet_path)
+        header_map = _build_header_map(ET.fromstring(raw_bytes), shared)
+
+        id_cols = {name: col for name, col in header_map.items() if name.startswith(_ID_COLUMN_PREFIX)}
+        if not id_cols:
+            continue
+
+        xml_text = raw_bytes.decode("utf-8")
+
+        # Toutes les lignes de données (row > HEADER_ROW), pas seulement les
+        # lignes corrigées — ici on vide sur TOUT le fichier.
+        row_numbers = sorted({
+            int(m.group(1))
+            for m in re.finditer(r'<(?:\w+:)?row\b[^>]*\br="(\d+)"', xml_text)
+            if int(m.group(1)) > HEADER_ROW
+        })
+
+        for row_num in row_numbers:
+            span = _find_row_span(xml_text, row_num)
+            if not span:
+                continue
+            start, end = span
+            row_xml = xml_text[start:end]
+            for col_letter in id_cols.values():
+                cell_ref = f"{col_letter}{row_num}"
+                row_xml = _replace_cell_in_row(row_xml, cell_ref, "")
+            xml_text = xml_text[:start] + row_xml + xml_text[end:]
+
+        modified_bytes[sheet_path] = xml_text.encode("utf-8")
+
+    out_buf = io.BytesIO()
+    with zipfile.ZipFile(out_buf, "w", zipfile.ZIP_DEFLATED) as dst:
+        for item in src.infolist():
+            data = modified_bytes.get(item.filename, src.read(item.filename))
+            dst.writestr(item, data)
+
+    src.close()
+    return out_buf.getvalue()
