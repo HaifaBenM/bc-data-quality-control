@@ -950,16 +950,26 @@ with tab_main:
 
                 if _roadmap_key not in st.session_state:
                     try:
+                        import time as _perf_time
+                        _t_start = _perf_time.time()
+                        _perf_log = []
+
                         client_code = cfg.get("client_code", "")
                         _exec_plan = get_execution_plan(
                             profile_code=client_code,
                             company_id=cfg.get("company_id", ""),
                             package_code=cfg.get("pkg_code", ""),
                         )
+                        _perf_log.append(("get_execution_plan", _perf_time.time() - _t_start))
+                        _t = _perf_time.time()
+
                         _meta_loader = MetadataLoader(client_code, cfg.get("company_id", ""))
                         _sim_ctx     = SimulationContext()
                         with st.spinner("⏳ Analyse des prérequis BC..."):
                             _axe_a = validate_file_axe_a(pr, execution_plan=_exec_plan)
+                            _perf_log.append(("validate_file_axe_a", _perf_time.time() - _t))
+                            _t = _perf_time.time()
+
                             _axe_b = validate_file_axe_b(
                                 pr,
                                 profile_code    = client_code,
@@ -968,6 +978,8 @@ with tab_main:
                                 metadata_loader = _meta_loader,
                                 execution_plan  = _exec_plan,
                             )
+                            _perf_log.append(("validate_file_axe_b", _perf_time.time() - _t))
+                            _t = _perf_time.time()
                         # Mis en cache pour réutilisation au clic "Lancer l'analyse" —
                         # évite de relancer Axe A/Axe B une seconde fois pour rien.
                         st.session_state[_early_axeb_key] = {
@@ -978,6 +990,8 @@ with tab_main:
                         _prereqs = build_prerequisites_report(
                             _real, profile_code=client_code, company_id=cfg.get("company_id", "")
                         )
+                        _perf_log.append(("build_prerequisites_report", _perf_time.time() - _t))
+                        _t = _perf_time.time()
                         # Contrôle croisé GL Account <-> groupes comptables (92/93/94...).
                         # Voir app.core.correction_classifier.check_gl_account_prerequisites.
                         # Confirmé nécessaire par test réel du 23-24/07/2026 (compte
@@ -999,6 +1013,8 @@ with tab_main:
                         # page AL pas encore publiée, etc.).
                         _company_id = cfg.get("company_id", "")
                         _gl_live = _try_live_gl_account(client_code, _company_id)
+                        _perf_log.append(("_try_live_gl_account", _perf_time.time() - _t))
+                        _t = _perf_time.time()
                         if _gl_live:
                             persist_gl_account_posting_fields(client_code, _company_id, _gl_live)
                             _gl_anomalies = check_gl_account_prerequisites(pr, _gl_live, prefer_fallback=True)
@@ -1010,6 +1026,8 @@ with tab_main:
                             else:
                                 _gl_fallback = get_gl_account_posting_fields(client_code, _company_id)
                             _gl_anomalies = check_gl_account_prerequisites(pr, _gl_fallback)
+                        _perf_log.append(("check_gl_account_prerequisites", _perf_time.time() - _t))
+                        _t = _perf_time.time()
                         _prereqs = _prereqs + _gl_anomalies
                         # build_roadmap_from_prereqs regroupe désormais génériquement
                         # les lignes de _prereqs par table et les attache en
@@ -1017,6 +1035,9 @@ with tab_main:
                         # Account) — demandé par Rami le 27/07 : plusieurs tables
                         # prérequis doivent chacune afficher leur propre détail.
                         st.session_state[_roadmap_key] = build_roadmap_from_prereqs(_prereqs, _level_cfg)
+                        _perf_log.append(("build_roadmap_from_prereqs", _perf_time.time() - _t))
+                        _perf_log.append(("TOTAL", _perf_time.time() - _t_start))
+                        st.session_state["_perf_log_prereqs"] = _perf_log
                     except Exception as e:
                         st.session_state[_roadmap_key] = []
                         st.warning(f"⚠️ Détection des niveaux impossible pour l'instant : {e}")
@@ -1221,6 +1242,16 @@ with tab_main:
 
                     st.markdown(f"**Progression — {_pct}%**")
                     st.progress(_pct / 100)
+
+                    # AJOUTÉ (07/08/2026) — DIAGNOSTIC TEMPORAIRE : chronométrage
+                    # précis de chaque étape du chargement des prérequis, pour
+                    # identifier objectivement le vrai goulot plutôt que de deviner
+                    # après plusieurs fixes qui n'ont pas suffi. À retirer une fois
+                    # la cause confirmée et réglée.
+                    if "_perf_log_prereqs" in st.session_state:
+                        with st.expander("⏱️ Chronométrage chargement prérequis (temporaire)", expanded=True):
+                            for _label, _dur in st.session_state["_perf_log_prereqs"]:
+                                st.code(f"{_label} : {_dur:.2f}s", language=None)
 
                     try:
                         for _entry in _roadmap:
