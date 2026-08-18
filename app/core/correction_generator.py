@@ -235,11 +235,14 @@ def apply_corrections(original_bytes: bytes, corrections: list[dict]) -> bytes:
 _ID_COLUMN_PREFIX = "ID "  # colonnes de résolution interne BC (SystemId) — non portables entre sociétés
 
 
-def clear_id_reference_columns(excel_bytes: bytes) -> bytes:
+def clear_id_reference_columns(
+    excel_bytes: bytes,
+    guid_column_names: dict[str, set[str]] | None = None,
+) -> bytes:
     """
-    Vide les colonnes "ID X" (SystemId interne BC : ID unité, ID groupe compta.
-    stock, ID groupe compta. produit, ID catégorie article, etc.) sur toutes
-    les feuilles de données.
+    Vide les colonnes de type Guid (SystemId interne BC : ID unité, ID groupe
+    compta. stock, ID groupe compta. produit, ID catégorie article, etc.) sur
+    toutes les feuilles de données.
 
     AJOUTÉ (18/08/2026) : ces colonnes contiennent le SystemId de l'enregistrement
     résolu au moment de l'export BC d'origine. Un SystemId est unique à sa
@@ -250,6 +253,18 @@ def clear_id_reference_columns(excel_bytes: bytes) -> bytes:
     société différente de la cible, même quand les données Code sont
     correctes. Vider ces colonnes laisse BC résoudre uniquement via le champ
     Code (résolution RapidStart standard), qui lui est portable entre sociétés.
+
+    RÉVISÉ (18/08/2026, 2e passe) : critère fiable = le TYPE AL du champ
+    (Guid), pas son nom — un champ Guid avec TableRelation = Table.SystemId
+    est un pattern standard Microsoft, aussi bien sur un champ BC natif que
+    sur un champ d'extension (Talan ou client), puisque BC expose fieldType
+    de la même façon pour les deux. `guid_column_names` (optionnel) :
+    {sheet_name: {noms de colonnes Guid}}, calculé côté appelant depuis
+    execution_plan.get_field_defs_for_table() (voir 2_Sessions_Integration.py).
+    Si non fourni (plan indisponible), repli sur l'ancien préfixe "ID " —
+    moins précis (risque de collision avec un futur champ métier nommé "ID
+    ..." ou de rater un champ Guid d'extension nommé autrement) mais mieux
+    que rien.
 
     Même technique d'édition texte brut que apply_corrections (voir docstring
     du module) : seule la sous-chaîne exacte de chaque cellule ciblée est
@@ -273,7 +288,11 @@ def clear_id_reference_columns(excel_bytes: bytes) -> bytes:
         raw_bytes  = src.read(sheet_path)
         header_map = _build_header_map(ET.fromstring(raw_bytes), shared)
 
-        id_cols = {name: col for name, col in header_map.items() if name.startswith(_ID_COLUMN_PREFIX)}
+        _guid_names = guid_column_names.get(sheet_name) if guid_column_names else None
+        if _guid_names is not None:
+            id_cols = {name: col for name, col in header_map.items() if name in _guid_names}
+        else:
+            id_cols = {name: col for name, col in header_map.items() if name.startswith(_ID_COLUMN_PREFIX)}
         if not id_cols:
             continue
 

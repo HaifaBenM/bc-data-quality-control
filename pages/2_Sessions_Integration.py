@@ -568,12 +568,39 @@ def display_correction_workflow(merged: dict, cfg: dict, pr: dict):
                 ]
                 try:
                     generated_bytes = apply_corrections(original_bytes, corrections)
-                    # AJOUTÉ (18/08/2026) : les colonnes "ID X" (SystemId BC)
+                    # RÉVISÉ (18/08/2026, 2e passe) : calcule les colonnes de
+                    # type Guid par feuille depuis l'execution_plan déjà en
+                    # cache (early_axeab_*), plutôt que de deviner par le nom
+                    # "ID X" — extension-agnostique (voir docstring de
+                    # clear_id_reference_columns). Repli automatique sur
+                    # l'ancien préfixe si le plan est indisponible.
+                    _guid_cols_by_sheet: dict[str, set[str]] | None = None
+                    _early_key = (
+                        f"early_axeab_{cfg.get('pkg_code', '')}_"
+                        f"{cfg.get('company_id', '')}_{cfg.get('file_name', '')}"
+                    )
+                    _cached_plan = st.session_state.get(_early_key, {}).get("exec_plan")
+                    if _cached_plan is not None:
+                        try:
+                            from app.core.bc_excel_processor import extract_sheets_info
+                            _sheets_info = extract_sheets_info(original_bytes)
+                            _guid_cols_by_sheet = {}
+                            for _si in _sheets_info:
+                                _tid = int(_si["table_id"]) if str(_si["table_id"]).isdigit() else 0
+                                if not _tid:
+                                    continue
+                                _defs = _cached_plan.get_field_defs_for_table(_tid)
+                                _guid_names = {n for n, fm in _defs.items() if fm.al_type == "Guid"}
+                                if _guid_names:
+                                    _guid_cols_by_sheet[_si["sheet_name"]] = _guid_names
+                        except Exception:
+                            _guid_cols_by_sheet = None  # repli silencieux sur l'heuristique par nom
+                    # AJOUTÉ (18/08/2026) : les colonnes Guid (SystemId BC)
                     # ne sont jamais portables d'une société à l'autre — BC
                     # rejette l'import sur ces colonnes même quand le Code
                     # associé est correct. On les vide pour laisser BC
                     # résoudre uniquement via Code à l'import.
-                    generated_bytes = clear_id_reference_columns(generated_bytes)
+                    generated_bytes = clear_id_reference_columns(generated_bytes, _guid_cols_by_sheet)
                     st.session_state["generated_file_bytes"] = generated_bytes
                     st.session_state["generated_file_name"]  = (
                         f"CORRIGE_{cfg.get('file_name', 'fichier.xlsx')}"
