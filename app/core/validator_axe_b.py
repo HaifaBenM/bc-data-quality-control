@@ -60,6 +60,18 @@ def validate_axe_b(
         # (sim_context reste alimenté séquentiellement, dans l'ordre BC).
         _needed: dict[tuple[int, int], None] = {}
         for col in df.columns:
+            # AJOUTÉ (18/08/2026) : les colonnes "ID X" (ex. "ID groupe
+            # compta. produit") contiennent le SystemId BC de l'enregistrement,
+            # pas un code lisible — elles ne peuvent structurellement jamais
+            # matcher les codes valides retournés pour la table référencée
+            # (toujours des Code, jamais des GUID). Les valider produisait un
+            # faux positif garanti à 100% sur chaque ligne, indépendamment de
+            # la validité réelle des données (cf. export 251 du 18/08 :
+            # 18 groupes confirmés existants côté BC, anomalie quand même
+            # levée). Voir aussi clear_id_reference_columns() dans
+            # correction_generator.py (même diagnostic, côté fichier de sortie).
+            if col.startswith("ID "):
+                continue
             if not execution_plan.validate_field_for(table_id_int, col):
                 continue
             ref_tid = execution_plan.get_ref_table_id(table_id_int, col)
@@ -92,6 +104,8 @@ def validate_axe_b(
                     _ref_cache[key] = res
 
         for col in df.columns:
+            if col.startswith("ID "):  # AJOUTÉ (18/08/2026) — voir commentaire ci-dessus
+                continue
             if not execution_plan.validate_field_for(table_id_int, col):
                 continue
 
