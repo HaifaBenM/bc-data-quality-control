@@ -69,6 +69,15 @@ def validate_axe_b(
             _needed[(ref_tid, ref_fid)] = None
 
         _ref_cache: dict[tuple[int, int], tuple[set, bool]] = {}
+        # AJOUTÉ (07/08/2026) — PERFORMANCE, LE VRAI GOULOT : classify_reference_
+        # anomaly() (fuzzy matching difflib contre TOUS les codes valides) était
+        # appelée une fois PAR LIGNE, pas une fois par valeur distincte. Sur
+        # Emplacement (3617 lignes) ou Article (791 lignes × colonnes), une même
+        # valeur invalide répétée des centaines de fois relançait le même calcul
+        # coûteux à chaque occurrence — le vrai facteur d'échelle des 5 minutes.
+        # Mémorisé par (table référencée, valeur) : calculé une seule fois par
+        # valeur distincte, réutilisé pour toutes ses répétitions.
+        _classification_cache: dict[tuple[int, str], dict] = {}
         if _needed:
             from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -167,7 +176,10 @@ def validate_axe_b(
 
                 if value not in valid_codes:
                     examples = sorted(valid_codes)[:3] if valid_codes else []
-                    cls = classify_reference_anomaly(value, valid_codes)
+                    _cls_key = (ref_tid, value)
+                    if _cls_key not in _classification_cache:
+                        _classification_cache[_cls_key] = classify_reference_anomaly(value, valid_codes)
+                    cls = _classification_cache[_cls_key]
 
                     if cls["classification"] == "VALEUR_CORRIGIBLE":
                         best_code, best_score = cls["suggestions"][0]
@@ -272,6 +284,23 @@ def validate_file_axe_b(
         data_tables + ref_tables, metadata
     )
 
+    # AJOUTÉ (07/08/2026) — FIX PERF MAJEUR : bc_cache_fn (passée au Trigger
+    # Simulator) était appelée SANS AUCUNE mémorisation, une fois par
+    # (ligne × règle OnInsert) — sur Article (791 lignes) ou Emplacement
+    # (3617 lignes), ça fait des milliers d'appels réseau redondants pour
+    # les MÊMES tables de référence répétées. Confirmé responsable de 354s
+    # sur 368s de temps total mesuré (chronométrage du 07/08). Mémorisé une
+    # fois par table de référence distincte, partagé sur tout le fichier
+    # (pas juste un onglet), sans changer le résultat retourné.
+    _trigger_bc_cache: dict[int, set] = {}
+
+    def _cached_bc_cache_fn(tid: int) -> set:
+        if tid not in _trigger_bc_cache:
+            _trigger_bc_cache[tid] = get_reference_values_by_table_id(
+                profile_code, company_id, tid
+            )[0]
+        return _trigger_bc_cache[tid]
+
     for sheet_name in tables_to_validate:
         df = all_sheets.get(sheet_name)
         if df is None or df.empty:
@@ -316,9 +345,7 @@ def validate_file_axe_b(
                         table_id    = int(table_id),
                         sheet_name  = sheet_name,
                         df          = df,
-                        bc_cache_fn = lambda tid: get_reference_values_by_table_id(
-                            profile_code, company_id, tid
-                        )[0],
+                        bc_cache_fn = _cached_bc_cache_fn,
                     )
                     for ta in trigger_anom:
                         anomalies.append({
