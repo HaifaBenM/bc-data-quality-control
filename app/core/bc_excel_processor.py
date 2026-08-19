@@ -65,8 +65,21 @@ def validate_bc_excel(excel_bytes: bytes) -> tuple[bool, str]:
 
 
 def extract_sheets_info(excel_bytes: bytes) -> list[dict]:
-    """Lit les métadonnées et headers de chaque onglet (openpyxl, avant manipulation)."""
-    wb = openpyxl.load_workbook(io.BytesIO(excel_bytes), data_only=True)
+    """Lit les métadonnées et headers de chaque onglet (openpyxl, avant manipulation).
+
+    RÉVISÉ (19/08/2026) : read_only=True ajouté. Cette fonction ne lit que
+    3 lignes par onglet (métadonnées + en-têtes), mais sans read_only,
+    openpyxl charge le classeur ENTIER en mémoire (styles, toutes les
+    lignes de données) — coûteux sur un fichier MDD-Stock réel (Article
+    791×200 colonnes, Emplacement 3617 lignes). Signalé lent par Rami le
+    19/08 sur "Générer le fichier corrigé", qui appelle désormais cette
+    fonction (voir 2_Sessions_Integration.py, calcul guid_cols_by_sheet).
+    read_only=True fait un parsing en flux, sans construire le DOM complet
+    — ws.cell(row, col) reste utilisable en lecture, aucun autre
+    changement de comportement pour les deux appelants existants
+    (clear_bc_excel_data ici, et le calcul des colonnes Guid).
+    """
+    wb = openpyxl.load_workbook(io.BytesIO(excel_bytes), data_only=True, read_only=True)
     sheets_info = []
     for ws in wb.worksheets:
         row1  = [ws.cell(1, c).value for c in range(1, 4)]
