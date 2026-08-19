@@ -34,7 +34,7 @@ from app.db.sessions_db import (
     save_session, update_session, delete_session,
     get_all_sessions, SESSION_STATUSES, STATUS_COLORS, STATUS_ICONS,
     get_sessions_for_company, build_sessions_tree,
-    resolve_parent_candidates, get_descendant_table_ids,
+    resolve_parent_candidates, get_descendant_table_ids, can_close_session,
 )
 
 require_role()
@@ -1629,6 +1629,7 @@ with tab_main:
                         "table_id":            _sel_table_id,
                         "parent_session_id":   _sel_parent_id,
                         "is_root":             _node_kind == "Racine (socle complet)",
+                        "pkg_code":            cfg.get("pkg_code", ""),
                     })
                     if ok:
                         st.session_state.saved_session_id = res
@@ -1660,6 +1661,11 @@ with tab_ses:
     # une vue arbre par société, reflétant parent_session_id. Les deux
     # coexistent — décision actée avec Rami (04-07/08) de garder la vue
     # consolidée en plus de l'arbre, pas à sa place.
+    # AJOUTÉ (19/08/2026, 2e passe) — même valeur que _CLOSED_STATUS dans
+    # sessions_db.py (can_close_session) ; dupliquée ici en constante locale
+    # plutôt que d'importer un nom privé (préfixé _) d'un autre module.
+    _CLOSED_STATUS_LABEL = "Terminée"
+
     _view_mode = st.radio(
         "Affichage", ["📋 Liste consolidée", "🌳 Vue arbre (par société)"],
         key="ses_view_mode", horizontal=True, label_visibility="collapsed",
@@ -1692,6 +1698,7 @@ with tab_ses:
                     _sc     = STATUS_COLORS.get(_status, "#64748B")
                     _si     = STATUS_ICONS.get(_status, "")
                     _tid    = node.get("table_id")
+                    _pkg    = node.get("pkg_code", "")
                     _tname  = (
                         "📁 Racine du socle" if node.get("is_root")
                         else (f"{_tid} — {_lvl_cfg_view[_tid].table_name}" if _tid in _lvl_cfg_view else f"Table {_tid}")
@@ -1701,13 +1708,14 @@ with tab_ses:
                     st.markdown(
                         f'<div style="margin-left:{depth*24}px">'
                         f'<span style="color:#94A3B8">{prefix}</span>'
-                        f'<b>{node.get("name", "")}</b> · {_tname} · '
+                        f'<b>{node.get("name", "")}</b> · {_tname}'
+                        f'{" · 📦 " + _pkg if _pkg else ""} · '
                         f'<span style="color:{_sc}">{_si} {_status}</span>'
                         f'</div>',
                         unsafe_allow_html=True,
                     )
                     if not node.get("is_root") and _tid:
-                        rc1, rc2 = st.columns([1, 5])
+                        rc1, rc2 = st.columns([1, 1])
                         with rc1:
                             if st.button("🔄 Revérifier ce sous-arbre", key=f"scope_reverif_{_nid}"):
                                 _scope = get_descendant_table_ids(_nid, _tree_sessions_view)
@@ -1730,6 +1738,43 @@ with tab_ses:
                                         "ouvre d'abord l'Étape 3 (Sessions) pour cette société, "
                                         "puis reviens revérifier ce sous-arbre."
                                     )
+                        with rc2:
+                            # AJOUTÉ (19/08/2026, 2e passe) — clôture conditionnelle :
+                            # une session fille ne peut passer "Terminée" que si son
+                            # propre contrôle est propre ET tous ses enfants directs
+                            # sont déjà "Terminée" (can_close_session, sessions_db.py).
+                            if _status == _CLOSED_STATUS_LABEL:
+                                st.caption("✅ Déjà clôturée")
+                            elif st.button("🔒 Clôturer", key=f"close_{_nid}"):
+                                _ok, _reasons = can_close_session(_nid, _tree_sessions_view)
+                                if _ok:
+                                    _uok, _uerr = update_session(_nid, {"status": _CLOSED_STATUS_LABEL})
+                                    if _uok:
+                                        st.success("Session clôturée.")
+                                        st.rerun()
+                                    else:
+                                        st.error(f"Échec de la clôture : {_uerr}")
+                                else:
+                                    st.warning("Impossible de clôturer :\n" + "\n".join(f"- {r}" for r in _reasons))
+                    elif node.get("is_root"):
+                        # Clôture du socle entier — même règle, appliquée à la racine :
+                        # bloquée tant que le socle lui-même a des anomalies ou qu'une
+                        # SEULE de ses filles directes n'est pas encore "Terminée"
+                        # (chaque fille "Terminée" garantit déjà la propreté de SA
+                        # propre branche, récursivement — voir can_close_session).
+                        if _status == _CLOSED_STATUS_LABEL:
+                            st.success("🏁 Socle clôturé — tous les niveaux et sous-niveaux sont vérifiés.")
+                        elif st.button("🏁 Clôturer le socle", key=f"close_root_{_nid}"):
+                            _ok, _reasons = can_close_session(_nid, _tree_sessions_view)
+                            if _ok:
+                                _uok, _uerr = update_session(_nid, {"status": _CLOSED_STATUS_LABEL})
+                                if _uok:
+                                    st.success("Socle clôturé.")
+                                    st.rerun()
+                                else:
+                                    st.error(f"Échec de la clôture : {_uerr}")
+                            else:
+                                st.warning("Le socle ne peut pas encore être clôturé :\n" + "\n".join(f"- {r}" for r in _reasons))
                     for child in node.get("children", []):
                         _render_node(child, depth + 1)
 

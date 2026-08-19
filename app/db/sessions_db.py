@@ -30,6 +30,12 @@ level_config, cf. décisions Rami du 18-19/08) — 3 colonnes supplémentaires :
      table précis — deux tables du même niveau, comme 204 Unité et 5722
      Catégorie article, ne dépendent pas forcément l'une de l'autre, donc
      l'automatisme ne peut pas toujours trancher seul).
+
+⚠️ AJOUTÉ (19/08/2026, 2e passe) — le code BC du package (`cfg["pkg_code"]`)
+existait déjà en mémoire pendant la session mais n'était JAMAIS sauvegardé
+en base : une session rechargée depuis Supabase n'avait donc aucune trace
+de quel package BC elle représentait. Colonne supplémentaire :
+   ALTER TABLE qc_sessions ADD COLUMN pkg_code text;
 """
 import uuid
 from datetime import datetime, timezone
@@ -107,6 +113,7 @@ def save_session(data: dict) -> tuple[bool, str]:
             "table_id":              data.get("table_id"),
             "parent_session_id":     data.get("parent_session_id"),
             "is_root":               data.get("is_root", False),
+            "pkg_code":              data.get("pkg_code", ""),
             "created_at":            now,
             "updated_at":            now,
         }
@@ -300,3 +307,59 @@ def get_descendant_table_ids(session_id: str, session_list: list) -> set[int]:
             result.add(tid)
         queue.extend(children_by_parent.get(sid, []))
     return result
+
+
+_CLOSED_STATUS = "Terminée"
+
+
+def can_close_session(session_id: str, session_list: list) -> tuple[bool, list[str]]:
+    """
+    AJOUTÉ (19/08/2026, 2e passe) — règle de clôture actée avec Rami : un
+    socle (session racine) ne se clôture qu'une fois TOUS ses niveaux et
+    sous-niveaux vérifiés — la clôture remonte de bas en haut. Une session
+    (racine ou fille) ne peut passer à l'état "Terminée" que si :
+
+      1. son PROPRE contrôle est propre : total_anomalies == 0 sur cette
+         session (le fichier de cette table/ce socle n'a plus d'erreur
+         corrigible restante) ;
+      2. ET TOUS ses enfants directs sont eux-mêmes déjà "Terminée"
+         (vérifié récursivement — un enfant "Terminée" est supposé avoir
+         déjà satisfait cette même règle pour SES propres enfants, donc
+         pas besoin de redescendre plus bas que les enfants directs ici).
+
+    Retourne (peut_clôturer: bool, raisons_bloquantes: list[str]) — la
+    liste de raisons est TOUJOURS informative même quand peut_clôturer est
+    True (liste vide dans ce cas), pour affichage direct côté UI sans
+    logique supplémentaire à écrire dans la page.
+
+    Ne modifie rien en base — la fonction appelante décide d'appeler
+    update_session(status="Terminée") seulement si can_close_session
+    retourne True. Séparé exprès du update_session lui-même : permet de
+    prévisualiser "pourquoi c'est bloqué" sans effet de bord, et d'écrire
+    un test unitaire sans toucher Supabase (même principe que
+    resolve_parent_candidates / get_descendant_table_ids ci-dessus).
+    """
+    by_id = {s["id"]: s for s in session_list}
+    session = by_id.get(session_id)
+    if session is None:
+        return False, [f"Session {session_id} introuvable."]
+
+    reasons: list[str] = []
+
+    total_anomalies = session.get("total_anomalies", 0) or 0
+    if total_anomalies > 0:
+        reasons.append(
+            f"« {session.get('name', session_id)} » a encore "
+            f"{total_anomalies} anomalie(s) non corrigée(s)."
+        )
+
+    children = [s for s in session_list if s.get("parent_session_id") == session_id]
+    for child in children:
+        if child.get("status") != _CLOSED_STATUS:
+            reasons.append(
+                f"Session fille « {child.get('name', child['id'])} » "
+                f"(table {child.get('table_id', '?')}) pas encore Terminée "
+                f"(statut actuel : {child.get('status', 'Nouvelle')})."
+            )
+
+    return (len(reasons) == 0), reasons
