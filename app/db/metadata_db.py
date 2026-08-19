@@ -55,6 +55,45 @@ def save_reference_data(
         return False, str(e)
 
 
+def clear_reference_cache(
+    profile_code: str,
+    company_id:   str,
+    ref_table_id: int | None = None,
+) -> tuple[bool, str]:
+    """
+    AJOUTÉ (19/08/2026) : vide le cache Supabase (bc_metadata_cache,
+    entity_type='reference') d'une table référencée précise, ou de TOUTES
+    les tables référencées si ref_table_id est None.
+
+    Pourquoi : get_reference_values_by_table_id() n'a AUCUNE expiration
+    (TTL) — une fois une entrée en cache, elle reste utilisée indéfiniment,
+    même si BC a changé depuis (mêmes symptômes que le cache
+    gl_account_posting_fields périmé du 28/07, ici sur les tables de
+    référence Axe B/Trigger Simulator : ex. table 251 Groupe compta.
+    produit répondant "introuvable" pour des groupes pourtant créés dans
+    BC après la mise en cache initiale). Pas de solution automatique de
+    fraîcheur pour l'instant — vidage manuel à la demande, même logique que
+    le bouton "🔄 Recharger classification niveaux" déjà en place pour
+    level_config.
+    """
+    try:
+        client = get_supabase_client()
+        query = (
+            client.table("bc_metadata_cache")
+            .delete()
+            .eq("profile_code", profile_code)
+            .eq("company_id",   company_id)
+            .eq("entity_type",  "reference")
+        )
+        if ref_table_id is not None:
+            cache_key = _REF_TABLE_CACHE_KEYS.get(ref_table_id, f"table_{ref_table_id}")
+            query = query.eq("entity_name", cache_key)
+        query.execute()
+        return True, ""
+    except Exception as e:
+        return False, str(e)
+
+
 def get_cached_metadata(
     profile_code: str,
     company_id:   str,

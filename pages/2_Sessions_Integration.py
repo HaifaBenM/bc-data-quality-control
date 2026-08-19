@@ -23,7 +23,7 @@ from app.core.correction_classifier import (
 )
 from app.db.metadata_db import (
     persist_gl_account_posting_fields, get_gl_account_posting_fields,
-    get_table_caption_cached,
+    get_table_caption_cached, clear_reference_cache,
 )
 from app.db.profiles_db import get_profile_by_code
 from app.core.bc_api import (
@@ -551,64 +551,75 @@ def display_correction_workflow(merged: dict, cfg: dict, pr: dict):
                 (edited["Appliquer"] == True)
                 & (edited["Nouvelle valeur"].astype(str).str.strip() != "")
             ]
-            if selected.empty:
-                st.warning(
-                    "Aucune ligne cochée avec une valeur non vide — rien à générer. "
-                    "Coche « Appliquer » et vérifie que « Nouvelle valeur » n'est pas vide."
+            # RÉVISÉ (19/08/2026) : le vidage des colonnes Guid
+            # (clear_id_reference_columns) est indépendant des corrections
+            # de valeur — il ne devrait pas être bloqué par "aucune ligne
+            # cochée". Avant ce fix, le bouton refusait purement et
+            # simplement de générer un fichier s'il n'y avait rien à
+            # corriger, empêchant de tester le nettoyage Guid seul (cas
+            # Rami du 19/08 : 251 déjà correct dans BC, rien à corriger,
+            # mais besoin de télécharger le fichier nettoyé quand même).
+            corrections = [
+                {
+                    "sheet":       row["Onglet"],
+                    "excel_row":   int(row["Ligne"]),
+                    "column_name": row["Champ"],
+                    "new_value":   row["Nouvelle valeur"],
+                }
+                for _, row in selected.iterrows()
+            ]
+            try:
+                generated_bytes = (
+                    apply_corrections(original_bytes, corrections)
+                    if corrections else original_bytes
                 )
-            else:
-                corrections = [
-                    {
-                        "sheet":       row["Onglet"],
-                        "excel_row":   int(row["Ligne"]),
-                        "column_name": row["Champ"],
-                        "new_value":   row["Nouvelle valeur"],
-                    }
-                    for _, row in selected.iterrows()
-                ]
-                try:
-                    generated_bytes = apply_corrections(original_bytes, corrections)
-                    # RÉVISÉ (18/08/2026, 2e passe) : calcule les colonnes de
-                    # type Guid par feuille depuis l'execution_plan déjà en
-                    # cache (early_axeab_*), plutôt que de deviner par le nom
-                    # "ID X" — extension-agnostique (voir docstring de
-                    # clear_id_reference_columns). Repli automatique sur
-                    # l'ancien préfixe si le plan est indisponible.
-                    _guid_cols_by_sheet: dict[str, set[str]] | None = None
-                    _early_key = (
-                        f"early_axeab_{cfg.get('pkg_code', '')}_"
-                        f"{cfg.get('company_id', '')}_{cfg.get('file_name', '')}"
-                    )
-                    _cached_plan = st.session_state.get(_early_key, {}).get("exec_plan")
-                    if _cached_plan is not None:
-                        try:
-                            from app.core.bc_excel_processor import extract_sheets_info
-                            _sheets_info = extract_sheets_info(original_bytes)
-                            _guid_cols_by_sheet = {}
-                            for _si in _sheets_info:
-                                _tid = int(_si["table_id"]) if str(_si["table_id"]).isdigit() else 0
-                                if not _tid:
-                                    continue
-                                _defs = _cached_plan.get_field_defs_for_table(_tid)
-                                _guid_names = {n for n, fm in _defs.items() if fm.al_type == "Guid"}
-                                if _guid_names:
-                                    _guid_cols_by_sheet[_si["sheet_name"]] = _guid_names
-                        except Exception:
-                            _guid_cols_by_sheet = None  # repli silencieux sur l'heuristique par nom
-                    # AJOUTÉ (18/08/2026) : les colonnes Guid (SystemId BC)
-                    # ne sont jamais portables d'une société à l'autre — BC
-                    # rejette l'import sur ces colonnes même quand le Code
-                    # associé est correct. On les vide pour laisser BC
-                    # résoudre uniquement via Code à l'import.
-                    generated_bytes = clear_id_reference_columns(generated_bytes, _guid_cols_by_sheet)
-                    st.session_state["generated_file_bytes"] = generated_bytes
-                    st.session_state["generated_file_name"]  = (
-                        f"CORRIGE_{cfg.get('file_name', 'fichier.xlsx')}"
-                    )
-                    st.session_state["prerequisites_report"] = prereqs
+                # RÉVISÉ (18/08/2026, 2e passe) : calcule les colonnes de
+                # type Guid par feuille depuis l'execution_plan déjà en
+                # cache (early_axeab_*), plutôt que de deviner par le nom
+                # "ID X" — extension-agnostique (voir docstring de
+                # clear_id_reference_columns). Repli automatique sur
+                # l'ancien préfixe si le plan est indisponible.
+                _guid_cols_by_sheet: dict[str, set[str]] | None = None
+                _early_key = (
+                    f"early_axeab_{cfg.get('pkg_code', '')}_"
+                    f"{cfg.get('company_id', '')}_{cfg.get('file_name', '')}"
+                )
+                _cached_plan = st.session_state.get(_early_key, {}).get("exec_plan")
+                if _cached_plan is not None:
+                    try:
+                        from app.core.bc_excel_processor import extract_sheets_info
+                        _sheets_info = extract_sheets_info(original_bytes)
+                        _guid_cols_by_sheet = {}
+                        for _si in _sheets_info:
+                            _tid = int(_si["table_id"]) if str(_si["table_id"]).isdigit() else 0
+                            if not _tid:
+                                continue
+                            _defs = _cached_plan.get_field_defs_for_table(_tid)
+                            _guid_names = {n for n, fm in _defs.items() if fm.al_type == "Guid"}
+                            if _guid_names:
+                                _guid_cols_by_sheet[_si["sheet_name"]] = _guid_names
+                    except Exception:
+                        _guid_cols_by_sheet = None  # repli silencieux sur l'heuristique par nom
+                # AJOUTÉ (18/08/2026) : les colonnes Guid (SystemId BC)
+                # ne sont jamais portables d'une société à l'autre — BC
+                # rejette l'import sur ces colonnes même quand le Code
+                # associé est correct. On les vide pour laisser BC
+                # résoudre uniquement via Code à l'import.
+                generated_bytes = clear_id_reference_columns(generated_bytes, _guid_cols_by_sheet)
+                st.session_state["generated_file_bytes"] = generated_bytes
+                st.session_state["generated_file_name"]  = (
+                    f"CORRIGE_{cfg.get('file_name', 'fichier.xlsx')}"
+                )
+                st.session_state["prerequisites_report"] = prereqs
+                if corrections:
                     st.success(f"✅ Fichier généré avec {len(corrections)} correction(s) appliquée(s).")
-                except Exception as e:
-                    st.error(f"❌ Erreur lors de la génération : {e}")
+                else:
+                    st.success(
+                        "✅ Fichier généré sans correction de valeur — colonnes Guid (SystemId) "
+                        "vidées uniquement."
+                    )
+            except Exception as e:
+                st.error(f"❌ Erreur lors de la génération : {e}")
 
     if st.session_state.get("generated_file_bytes"):
         st.download_button(
@@ -962,6 +973,29 @@ with tab_main:
                 except Exception as e:
                     st.error(f"Échec du rechargement : {e}")
                 st.rerun()
+
+            # AJOUTÉ (19/08/2026) : get_reference_values_by_table_id() n'a
+            # aucune expiration — une entrée en cache reste utilisée
+            # indéfiniment même si BC a changé depuis (ex. 251 Groupe compta.
+            # produit signalé "introuvable" par le Trigger Simulator alors
+            # que les groupes existent bien dans BC, si le cache date d'avant
+            # leur création). Bouton consultant, même logique que celui de
+            # level_config ci-dessus — vidage manuel à la demande, pas de
+            # rafraîchissement automatique.
+            if is_consultant():
+                if st.button("🔄 Vider le cache des valeurs de référence (Supabase)", key="btn_clear_ref_cache"):
+                    try:
+                        ok, err = clear_reference_cache(
+                            profile_code = cfg.get("client_code", ""),
+                            company_id   = cfg.get("company_id", ""),
+                        )
+                        if ok:
+                            st.success("Cache des tables de référence vidé — sera rechargé depuis BC au prochain contrôle.")
+                        else:
+                            st.error(f"Échec du vidage : {err}")
+                    except Exception as e:
+                        st.error(f"Échec du vidage : {e}")
+                    st.rerun()
 
             _level_cfg = st.session_state.level_config
             _roadmap_key = f"level_roadmap_{cfg.get('pkg_code', '')}_{cfg.get('company_id', '')}_{cfg.get('file_name', '')}"
