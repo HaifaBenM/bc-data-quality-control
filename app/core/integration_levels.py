@@ -310,6 +310,34 @@ def build_roadmap_from_prereqs(
     return roadmap
 
 
+# AJOUTÉ (19/08/2026) — cas Souches de n° (table 308) : la vérification Axe B
+# lève une anomalie "Souches de n° non résolvable" dès que la colonne du
+# fichier est vide, MÊME quand BC a une souche par défaut correctement
+# configurée pour résoudre ça tout seul à l'import (documenté dans le
+# commentaire de validator_axe_b.py : "pas une anomalie corrigible en soi" —
+# rien à corriger dans le fichier, le fix est entièrement côté paramétrage
+# BC). Problème concret rencontré (Rami, 19/08) : cette anomalie ne peut
+# JAMAIS tomber à zéro en réanalysant le même fichier, donc le niveau 308
+# restait bloqué "pending" indéfiniment même après la correction BC réelle
+# confirmée (check_table_filled="filled") — sub_anomalies non vide gagnait
+# toujours contre le check BC live. Ces entrées restent affichées (utile
+# comme information), mais ne bloquent plus la validation du niveau.
+_NON_BLOCKING_SUB_ANOMALY_TYPES = {"Souches de n° non résolvable"}
+
+
+def _has_blocking_sub_anomalies(sub_anomalies: list[dict] | None) -> bool:
+    """True si au moins une sub_anomaly doit réellement bloquer la
+    validation du niveau — exclut les types listés dans
+    _NON_BLOCKING_SUB_ANOMALY_TYPES (informationnels, non corrigibles via le
+    fichier, dépendent uniquement de check_table_filled/l'état réel BC)."""
+    if not sub_anomalies:
+        return False
+    return any(
+        a.get("Type d'anomalie") not in _NON_BLOCKING_SUB_ANOMALY_TYPES
+        for a in sub_anomalies
+    )
+
+
 # ── Règles de déblocage (inchangées dans leur logique) ───────────────────────
 
 def is_level_unlocked(level: int | None, roadmap: list[RoadmapEntry]) -> bool:
@@ -471,15 +499,15 @@ def refresh_roadmap(
             # indisponible (ou en échec) ne doit JAMAIS valider — seule
             # une liste vide RÉELLEMENT retournée (contrôle exécuté avec
             # succès, rien trouvé) le peut.
-            if result == "filled" and not e.sub_anomalies:
+            if result == "filled" and not _has_blocking_sub_anomalies(e.sub_anomalies):
                 e.status = "validated"
-            elif e.sub_anomalies:
+            elif _has_blocking_sub_anomalies(e.sub_anomalies):
                 e.status = "pending"  # comptes existent mais champs vides (ou contrôle en échec) — jamais validé
             continue
 
-        if result == "filled" and not getattr(e, "sub_anomalies", None):
+        if result == "filled" and not _has_blocking_sub_anomalies(getattr(e, "sub_anomalies", None)):
             e.status = "validated"
-        elif getattr(e, "sub_anomalies", None):
+        elif _has_blocking_sub_anomalies(getattr(e, "sub_anomalies", None)):
             # CORRIGÉ (07/08/2026) : généralisation du fix du 04/08 (jusque-là
             # réservé à la table 15). N'importe quel niveau pouvait être
             # validé à tort dès que check_table_filled voyait des données,
@@ -487,6 +515,11 @@ def refresh_roadmap(
             # ✓ validée avec 723 occurrences d'erreurs de référence non
             # résolues toujours affichées dessous). Un niveau avec des
             # sub_anomalies non vides n'est plus jamais marqué validated.
+            #
+            # AFFINÉ (19/08/2026) : "non vides" est maintenant filtré par
+            # _has_blocking_sub_anomalies — le cas Souches de n° vide
+            # (table 308, non corrigible via le fichier) ne bloque plus
+            # à lui seul, voir la fonction plus haut dans ce module.
             e.status = "pending"
     return roadmap
 
