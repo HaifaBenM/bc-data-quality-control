@@ -32,7 +32,9 @@ from app.core.bc_api import (
 )
 from app.db.sessions_db import (
     save_session, update_session, delete_session,
-    get_all_sessions, SESSION_STATUSES, STATUS_COLORS, STATUS_ICONS
+    get_all_sessions, SESSION_STATUSES, STATUS_COLORS, STATUS_ICONS,
+    get_sessions_for_company, build_sessions_tree,
+    resolve_parent_candidates, get_descendant_table_ids,
 )
 
 require_role()
@@ -1541,6 +1543,63 @@ with tab_main:
                     unsafe_allow_html=True
                 )
             else:
+                # AJOUTÉ (19/08/2026) — architecture mère/fille : rattache
+                # cette session soit comme racine d'un socle, soit comme
+                # session fille pour une table précise de la roadmap, avec
+                # résolution automatique du parent quand un seul candidat
+                # existe (voir resolve_parent_candidates, sessions_db.py).
+                _tree_sessions = get_sessions_for_company(
+                    cfg.get("client_code", ""), cfg.get("company_id", "")
+                )
+                _lvl_cfg = st.session_state.get("level_config", {})
+                _orig_b = st.session_state.get("original_file_bytes")
+                _table_options: list[tuple[int, str]] = []
+                if _orig_b:
+                    try:
+                        from app.core.bc_excel_processor import extract_sheets_info
+                        for _si in extract_sheets_info(_orig_b):
+                            _tid = int(_si["table_id"]) if str(_si["table_id"]).isdigit() else 0
+                            if _tid:
+                                _tname = (
+                                    _lvl_cfg[_tid].table_name if _tid in _lvl_cfg
+                                    else _si.get("table_name", str(_tid))
+                                )
+                                _table_options.append((_tid, f"{_tid} — {_tname}"))
+                    except Exception:
+                        _table_options = []
+
+                _node_kind = st.radio(
+                    "Type de session",
+                    ["Racine (socle complet)", "Fille (une table de la roadmap)"],
+                    key="node_kind_radio",
+                    horizontal=True,
+                )
+                _sel_table_id: int | None = None
+                _sel_parent_id: str | None = None
+                if _node_kind == "Fille (une table de la roadmap)" and _table_options:
+                    _sel_table_id = st.selectbox(
+                        "Table traitée par cette session",
+                        options=[t[0] for t in _table_options],
+                        format_func=lambda tid: dict(_table_options).get(tid, str(tid)),
+                        key="node_table_select",
+                    )
+                    _candidates = resolve_parent_candidates(_tree_sessions, _sel_table_id, _lvl_cfg)
+                    if len(_candidates) == 1:
+                        _sel_parent_id = _candidates[0]["id"]
+                        st.caption(f"↳ Rattachée automatiquement à : **{_candidates[0].get('name', '')}**")
+                    elif len(_candidates) > 1:
+                        _parent_names = {c["id"]: c.get("name", c["id"]) for c in _candidates}
+                        _sel_parent_id = st.selectbox(
+                            "Plusieurs sessions candidates au même niveau — choisis la session parente",
+                            options=list(_parent_names.keys()),
+                            format_func=lambda pid: _parent_names.get(pid, pid),
+                            key="node_parent_select",
+                        )
+                    else:
+                        st.caption("↳ Aucune session de niveau inférieur trouvée — rattachée à la racine du socle.")
+                elif _node_kind == "Fille (une table de la roadmap)":
+                    st.warning("Aucune table détectée dans le fichier chargé — impossible de créer une session fille.")
+
                 if st.button("💾 Sauvegarder la session", type="primary", use_container_width=True):
                     original_bytes  = st.session_state.get("original_file_bytes")
                     generated_bytes = st.session_state.get("generated_file_bytes")
@@ -1566,6 +1625,10 @@ with tab_main:
                         ),
                         "generated_file_name": st.session_state.get("generated_file_name", ""),
                         "prerequisites_report": st.session_state.get("prerequisites_report") or [],
+                        # AJOUTÉ (19/08/2026) — architecture mère/fille.
+                        "table_id":            _sel_table_id,
+                        "parent_session_id":   _sel_parent_id,
+                        "is_root":             _node_kind == "Racine (socle complet)",
                     })
                     if ok:
                         st.session_state.saved_session_id = res
@@ -1592,129 +1655,211 @@ with tab_ses:
     sessions = get_all_sessions(profile_code=active_client)
     st.markdown("---")
 
-    if not sessions:
-        st.info("Aucune session. Créez-en une et cliquez sur **💾 Sauvegarder**.")
-    else:
-        st.markdown(f"**{len(sessions)} session(s)**")
-        for s in sessions:
-            sid    = s.get("id", "")
-            status = s.get("status", "Nouvelle")
-            sc     = STATUS_COLORS.get(status, "#64748B")
-            si     = STATUS_ICONS.get(status, "")
-            tot_a  = s.get("total_anomalies", 0)
-            maj_a  = s.get("major_anomalies", 0)
-            min_a  = s.get("minor_anomalies", 0)
-            crd    = s.get("created_at", "")[:16].replace("T", " ") if s.get("created_at") else ""
-            upd    = s.get("updated_at", "")[:16].replace("T", " ") if s.get("updated_at") else ""
-            fn     = s.get("file_name", "")
-            gen_fn = s.get("generated_file_name", "")
-            prereq_list = s.get("prerequisites_report") or []
-            an_s   = (
-                f'<span style="color:#993C1D">🔴 {maj_a} majeures</span> · '
-                f'<span style="color:#854F0B">🟠 {min_a} mineures</span>'
-                if tot_a > 0 else
-                '<span style="color:#0F6E56">✅ Aucune anomalie</span>'
+    # AJOUTÉ (19/08/2026) — architecture mère/fille : bascule entre la vue
+    # consolidée existante (inchangée, toutes sociétés/clients confondus) et
+    # une vue arbre par société, reflétant parent_session_id. Les deux
+    # coexistent — décision actée avec Rami (04-07/08) de garder la vue
+    # consolidée en plus de l'arbre, pas à sa place.
+    _view_mode = st.radio(
+        "Affichage", ["📋 Liste consolidée", "🌳 Vue arbre (par société)"],
+        key="ses_view_mode", horizontal=True, label_visibility="collapsed",
+    )
+
+    if _view_mode == "🌳 Vue arbre (par société)":
+        _companies = sorted({
+            (s.get("company_id", ""), s.get("company_name", "") or s.get("company_id", ""))
+            for s in sessions if s.get("company_id")
+        }, key=lambda c: c[1])
+        if not _companies:
+            st.info("Aucune session rattachée à une société pour l'instant.")
+        else:
+            _company_labels = {cid: f"{cname} ({cid})" for cid, cname in _companies}
+            _sel_company = st.selectbox(
+                "Société", options=[c[0] for c in _companies],
+                format_func=lambda cid: _company_labels.get(cid, cid),
+                key="ses_tree_company",
             )
+            _tree_sessions_view = get_sessions_for_company(active_client or "", _sel_company)
+            _tree = build_sessions_tree(_tree_sessions_view)
+            if not _tree:
+                st.info("Aucune session pour cette société.")
+            else:
+                _lvl_cfg_view = st.session_state.get("level_config", {})
 
-            ci, ca = st.columns([7, 3])
-            with ci:
-                st.markdown(
-                    f'<div class="card-session">'
-                    f'<p class="session-name">{s.get("name", "")}</p>'
-                    f'<p class="session-meta">Client : <b>{s.get("profile_code", "")}</b> · '
-                    f'<span style="color:{sc};font-weight:500">{si} {status}</span></p>'
-                    f'<p class="session-meta">{an_s}</p>'
-                    f'<p class="session-meta">{"📄 " + fn + " · " if fn else ""}🕐 {crd}'
-                    f'{"  ·  ✏️ " + upd if upd != crd else ""}</p>'
-                    f'{"<p class=" + chr(34) + "session-meta" + chr(34) + ">📦 Fichier généré : " + gen_fn + "</p>" if gen_fn else ""}'
-                    f'{"<p class=" + chr(34) + "session-meta" + chr(34) + ">🟣 " + str(len(prereq_list)) + " prérequis BC</p>" if prereq_list else ""}'
-                    f'</div>',
-                    unsafe_allow_html=True
-                )
-
-                # Téléchargements : fichier chargé, fichier généré, rapport prérequis.
-                orig_b64 = s.get("original_file_b64", "")
-                gen_b64  = s.get("generated_file_b64", "")
-                dcol1, dcol2, dcol3 = st.columns(3)
-                with dcol1:
-                    if orig_b64:
-                        st.download_button(
-                            "⬇️ Fichier chargé", data=base64.b64decode(orig_b64),
-                            file_name=fn or "fichier_charge.xlsx",
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                            key=f"dl_orig_{sid}", use_container_width=True,
-                        )
-                with dcol2:
-                    if gen_b64:
-                        st.download_button(
-                            "⬇️ Fichier corrigé", data=base64.b64decode(gen_b64),
-                            file_name=gen_fn or "fichier_corrige.xlsx",
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                            key=f"dl_gen_{sid}", use_container_width=True,
-                        )
-                with dcol3:
-                    if prereq_list:
-                        st.download_button(
-                            "⬇️ Prérequis BC", data=build_prerequisites_excel(prereq_list),
-                            file_name=f"prerequis_bc_{sid}.xlsx",
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                            key=f"dl_prereq_{sid}", use_container_width=True,
-                        )
-            with ca:
-                st.markdown("<div style='padding-top:14px'>", unsafe_allow_html=True)
-                ce, cd = st.columns(2)
-                with ce:
-                    if st.button("✏️ Éditer", key=f"es_{sid}", use_container_width=True):
-                        st.session_state.edit_session_id    = sid
-                        st.session_state.confirm_delete_ses = None
-                with cd:
-                    if st.button("🗑️", key=f"ds_{sid}", use_container_width=True):
-                        st.session_state.confirm_delete_ses = sid
-                        st.session_state.edit_session_id    = None
-                st.markdown("</div>", unsafe_allow_html=True)
-
-            if st.session_state.edit_session_id == sid:
-                st.markdown("---")
-                st.markdown(f"**✏️ Modifier — {s.get('name', '')}**")
-                e1, e2 = st.columns(2)
-                with e1:
-                    nn = st.text_input("Nom", value=s.get("name", ""), key=f"en_{sid}")
-                    ns = st.selectbox(
-                        "Statut", SESSION_STATUSES,
-                        index=SESSION_STATUSES.index(status) if status in SESSION_STATUSES else 0,
-                        key=f"est_{sid}"
+                def _render_node(node: dict, depth: int = 0):
+                    _nid    = node["id"]
+                    _status = node.get("status", "Nouvelle")
+                    _sc     = STATUS_COLORS.get(_status, "#64748B")
+                    _si     = STATUS_ICONS.get(_status, "")
+                    _tid    = node.get("table_id")
+                    _tname  = (
+                        "📁 Racine du socle" if node.get("is_root")
+                        else (f"{_tid} — {_lvl_cfg_view[_tid].table_name}" if _tid in _lvl_cfg_view else f"Table {_tid}")
                     )
-                with e2:
-                    no = st.text_area("Notes", value=s.get("notes", ""), height=100, key=f"eno_{sid}")
-                sv1, sv2, _ = st.columns([2, 2, 6])
-                with sv1:
-                    if st.button("💾 Enregistrer", key=f"esv_{sid}", type="primary", use_container_width=True):
-                        ok, err = update_session(sid, {"name": nn.strip(), "status": ns, "notes": no.strip()})
-                        if ok:
-                            st.success("✅ Mis à jour !")
+                    indent = "&nbsp;&nbsp;&nbsp;&nbsp;" * depth
+                    prefix = "└─ " if depth > 0 else ""
+                    st.markdown(
+                        f'<div style="margin-left:{depth*24}px">'
+                        f'<span style="color:#94A3B8">{prefix}</span>'
+                        f'<b>{node.get("name", "")}</b> · {_tname} · '
+                        f'<span style="color:{_sc}">{_si} {_status}</span>'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
+                    if not node.get("is_root") and _tid:
+                        rc1, rc2 = st.columns([1, 5])
+                        with rc1:
+                            if st.button("🔄 Revérifier ce sous-arbre", key=f"scope_reverif_{_nid}"):
+                                _scope = get_descendant_table_ids(_nid, _tree_sessions_view)
+                                _roadmap_key_guess = None
+                                for k in st.session_state.keys():
+                                    if isinstance(k, str) and k.startswith("level_roadmap_") and _sel_company in k:
+                                        _roadmap_key_guess = k
+                                        break
+                                if _roadmap_key_guess and st.session_state.get(_roadmap_key_guess):
+                                    st.session_state[_roadmap_key_guess] = refresh_roadmap(
+                                        profile_code=active_client or "",
+                                        company_id=_sel_company,
+                                        roadmap=st.session_state[_roadmap_key_guess],
+                                        scope_table_ids=_scope,
+                                    )
+                                    st.success(f"Sous-arbre revérifié ({len(_scope)} table(s)).")
+                                else:
+                                    st.warning(
+                                        "Aucune roadmap chargée en mémoire pour cette société — "
+                                        "ouvre d'abord l'Étape 3 (Sessions) pour cette société, "
+                                        "puis reviens revérifier ce sous-arbre."
+                                    )
+                    for child in node.get("children", []):
+                        _render_node(child, depth + 1)
+
+                for _root in _tree:
+                    _render_node(_root)
+                    st.markdown("---")
+    else:
+        if not sessions:
+            st.info("Aucune session. Créez-en une et cliquez sur **💾 Sauvegarder**.")
+        else:
+            st.markdown(f"**{len(sessions)} session(s)**")
+            for s in sessions:
+                sid    = s.get("id", "")
+                status = s.get("status", "Nouvelle")
+                sc     = STATUS_COLORS.get(status, "#64748B")
+                si     = STATUS_ICONS.get(status, "")
+                tot_a  = s.get("total_anomalies", 0)
+                maj_a  = s.get("major_anomalies", 0)
+                min_a  = s.get("minor_anomalies", 0)
+                crd    = s.get("created_at", "")[:16].replace("T", " ") if s.get("created_at") else ""
+                upd    = s.get("updated_at", "")[:16].replace("T", " ") if s.get("updated_at") else ""
+                fn     = s.get("file_name", "")
+                gen_fn = s.get("generated_file_name", "")
+                prereq_list = s.get("prerequisites_report") or []
+                an_s   = (
+                    f'<span style="color:#993C1D">🔴 {maj_a} majeures</span> · '
+                    f'<span style="color:#854F0B">🟠 {min_a} mineures</span>'
+                    if tot_a > 0 else
+                    '<span style="color:#0F6E56">✅ Aucune anomalie</span>'
+                )
+    
+                ci, ca = st.columns([7, 3])
+                with ci:
+                    st.markdown(
+                        f'<div class="card-session">'
+                        f'<p class="session-name">{s.get("name", "")}</p>'
+                        f'<p class="session-meta">Client : <b>{s.get("profile_code", "")}</b> · '
+                        f'<span style="color:{sc};font-weight:500">{si} {status}</span></p>'
+                        f'<p class="session-meta">{an_s}</p>'
+                        f'<p class="session-meta">{"📄 " + fn + " · " if fn else ""}🕐 {crd}'
+                        f'{"  ·  ✏️ " + upd if upd != crd else ""}</p>'
+                        f'{"<p class=" + chr(34) + "session-meta" + chr(34) + ">📦 Fichier généré : " + gen_fn + "</p>" if gen_fn else ""}'
+                        f'{"<p class=" + chr(34) + "session-meta" + chr(34) + ">🟣 " + str(len(prereq_list)) + " prérequis BC</p>" if prereq_list else ""}'
+                        f'</div>',
+                        unsafe_allow_html=True
+                    )
+    
+                    # Téléchargements : fichier chargé, fichier généré, rapport prérequis.
+                    orig_b64 = s.get("original_file_b64", "")
+                    gen_b64  = s.get("generated_file_b64", "")
+                    dcol1, dcol2, dcol3 = st.columns(3)
+                    with dcol1:
+                        if orig_b64:
+                            st.download_button(
+                                "⬇️ Fichier chargé", data=base64.b64decode(orig_b64),
+                                file_name=fn or "fichier_charge.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                key=f"dl_orig_{sid}", use_container_width=True,
+                            )
+                    with dcol2:
+                        if gen_b64:
+                            st.download_button(
+                                "⬇️ Fichier corrigé", data=base64.b64decode(gen_b64),
+                                file_name=gen_fn or "fichier_corrige.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                key=f"dl_gen_{sid}", use_container_width=True,
+                            )
+                    with dcol3:
+                        if prereq_list:
+                            st.download_button(
+                                "⬇️ Prérequis BC", data=build_prerequisites_excel(prereq_list),
+                                file_name=f"prerequis_bc_{sid}.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                key=f"dl_prereq_{sid}", use_container_width=True,
+                            )
+                with ca:
+                    st.markdown("<div style='padding-top:14px'>", unsafe_allow_html=True)
+                    ce, cd = st.columns(2)
+                    with ce:
+                        if st.button("✏️ Éditer", key=f"es_{sid}", use_container_width=True):
+                            st.session_state.edit_session_id    = sid
+                            st.session_state.confirm_delete_ses = None
+                    with cd:
+                        if st.button("🗑️", key=f"ds_{sid}", use_container_width=True):
+                            st.session_state.confirm_delete_ses = sid
+                            st.session_state.edit_session_id    = None
+                    st.markdown("</div>", unsafe_allow_html=True)
+    
+                if st.session_state.edit_session_id == sid:
+                    st.markdown("---")
+                    st.markdown(f"**✏️ Modifier — {s.get('name', '')}**")
+                    e1, e2 = st.columns(2)
+                    with e1:
+                        nn = st.text_input("Nom", value=s.get("name", ""), key=f"en_{sid}")
+                        ns = st.selectbox(
+                            "Statut", SESSION_STATUSES,
+                            index=SESSION_STATUSES.index(status) if status in SESSION_STATUSES else 0,
+                            key=f"est_{sid}"
+                        )
+                    with e2:
+                        no = st.text_area("Notes", value=s.get("notes", ""), height=100, key=f"eno_{sid}")
+                    sv1, sv2, _ = st.columns([2, 2, 6])
+                    with sv1:
+                        if st.button("💾 Enregistrer", key=f"esv_{sid}", type="primary", use_container_width=True):
+                            ok, err = update_session(sid, {"name": nn.strip(), "status": ns, "notes": no.strip()})
+                            if ok:
+                                st.success("✅ Mis à jour !")
+                                st.session_state.edit_session_id = None
+                                st.rerun()
+                            else:
+                                st.error(f"❌ {err}")
+                    with sv2:
+                        if st.button("Annuler", key=f"eca_{sid}", use_container_width=True):
                             st.session_state.edit_session_id = None
                             st.rerun()
-                        else:
-                            st.error(f"❌ {err}")
-                with sv2:
-                    if st.button("Annuler", key=f"eca_{sid}", use_container_width=True):
-                        st.session_state.edit_session_id = None
-                        st.rerun()
-                st.markdown("---")
-
-            if st.session_state.confirm_delete_ses == sid:
-                st.warning(f"⚠️ Supprimer **{s.get('name', '')}** ? Action irréversible.")
-                dy, dn, _ = st.columns([2, 2, 6])
-                with dy:
-                    if st.button("✅ Confirmer", key=f"dcy_{sid}", type="primary"):
-                        ok, err = delete_session(sid)
-                        if ok:
-                            st.success("Supprimée.")
+                    st.markdown("---")
+    
+                if st.session_state.confirm_delete_ses == sid:
+                    st.warning(f"⚠️ Supprimer **{s.get('name', '')}** ? Action irréversible.")
+                    dy, dn, _ = st.columns([2, 2, 6])
+                    with dy:
+                        if st.button("✅ Confirmer", key=f"dcy_{sid}", type="primary"):
+                            ok, err = delete_session(sid)
+                            if ok:
+                                st.success("Supprimée.")
+                                st.session_state.confirm_delete_ses = None
+                                st.rerun()
+                            else:
+                                st.error(err)
+                    with dn:
+                        if st.button("❌ Annuler", key=f"dcn_{sid}"):
                             st.session_state.confirm_delete_ses = None
-                            st.rerun()
-                        else:
-                            st.error(err)
-                with dn:
-                    if st.button("❌ Annuler", key=f"dcn_{sid}"):
-                        st.session_state.confirm_delete_ses = None
                         st.rerun()

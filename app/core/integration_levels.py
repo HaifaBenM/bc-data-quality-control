@@ -376,6 +376,7 @@ def refresh_roadmap(
     company_id: str,
     roadmap: list[RoadmapEntry],
     gl_account_check: Callable[[], list[dict]] | None = None,
+    scope_table_ids: set[int] | None = None,
 ) -> list[RoadmapEntry]:
     """
     Bouton "Revérifier" — relance le check BC pour chaque entrée débloquée
@@ -389,33 +390,25 @@ def refresh_roadmap(
     correction_classifier.check_gl_account_prerequisites — champs Groupe
     compta. marché/produit vides sur des comptes référencés par 92/93/94).
 
-    CORRIGÉ (27/07/2026) : avant cette version, le contrôle croisé GL
-    Account était calculé (dans display_correction_workflow, Phase B) mais
-    JAMAIS reconnecté à l'état "validated" du niveau — la table 15 passait
-    à 100% dès que check_table_filled la voyait "filled" (des comptes
-    existent), sans jamais vérifier que leurs champs Groupe compta. étaient
-    remplis. Rami : "ça progresse sans avoir rien fait côté BC." Corrigé :
-    si gl_account_check est fourni et que le niveau correspond à la table
-    15, son résultat conditionne désormais le statut "validated" au même
-    titre que check_table_filled — les deux doivent être propres. Le
-    détail (quels comptes, quels champs) est stocké dans
-    entry.sub_anomalies pour affichage en sous-niveau dans la roadmap.
-
-    CORRIGÉ (07/08/2026) — PERFORMANCE : chaque niveau faisait son appel
-    BC live l'un après l'autre (jusqu'à 13+ appels séquentiels, plusieurs
-    secondes cumulées rien que pour afficher la roadmap). Les résultats
-    BC (check_table_filled + gl_account_check) sont maintenant tous
-    récupérés EN PARALLÈLE (ThreadPoolExecutor, appels réseau
-    indépendants). La logique de déverrouillage en cascade — un niveau
-    validé débloque le suivant DANS LA MÊME passe — reste appliquée
-    ENSUITE, en séquence, sans coût réseau (juste de la logique en
-    mémoire) : le comportement observable est identique à avant, seule la
-    collecte des données est parallélisée.
+    scope_table_ids (AJOUTÉ 19/08/2026) : si fourni, ne revérifie QUE les
+    entrées dont table_id est dans cet ensemble — les autres entrées de la
+    roadmap sont laissées inchangées (ni touchées, ni retirées du retour).
+    Sert le bouton "Revérifier" d'une session fille dans l'architecture
+    mère/fille : cliquer sur une session ne doit revalider que son propre
+    sous-arbre (table + descendants), pas toute la société — deux branches
+    indépendantes (ex. 251 Groupe compta. produit vs 204 Unité) n'ont
+    aucune raison d'être retouchées l'une par l'autre, et repartir sur
+    toute la société à chaque clic reproduirait le même type de goulot que
+    le fix Trigger Simulator du 07/08 a spécifiquement réglé. None (défaut)
+    = comportement inchangé, toute la société — c'est le bouton "Revérifier
+    tout le socle" réservé à la session racine.
     """
     to_check = [
         e for e in roadmap
         if not (e.status == "validated" and e.level_info.table_id != 15 and not getattr(e, "sub_anomalies", None))
     ]
+    if scope_table_ids is not None:
+        to_check = [e for e in to_check if e.level_info.table_id in scope_table_ids]
 
     fill_results: dict[int, str] = {}
     gl_results: dict[int, list[dict] | Exception] = {}
