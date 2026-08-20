@@ -311,31 +311,48 @@ def build_roadmap_from_prereqs(
 
 
 # AJOUTÉ (19/08/2026) — cas Souches de n° (table 308) : la vérification Axe B
-# lève une anomalie "Souches de n° non résolvable" dès que la colonne du
-# fichier est vide, MÊME quand BC a une souche par défaut correctement
-# configurée pour résoudre ça tout seul à l'import (documenté dans le
-# commentaire de validator_axe_b.py : "pas une anomalie corrigible en soi" —
-# rien à corriger dans le fichier, le fix est entièrement côté paramétrage
-# BC). Problème concret rencontré (Rami, 19/08) : cette anomalie ne peut
-# JAMAIS tomber à zéro en réanalysant le même fichier, donc le niveau 308
-# restait bloqué "pending" indéfiniment même après la correction BC réelle
-# confirmée (check_table_filled="filled") — sub_anomalies non vide gagnait
-# toujours contre le check BC live. Ces entrées restent affichées (utile
-# comme information), mais ne bloquent plus la validation du niveau.
-_NON_BLOCKING_SUB_ANOMALY_TYPES = {"Souches de n° non résolvable"}
+# lève une anomalie dès que la colonne du fichier est vide, MÊME quand BC a
+# une souche par défaut correctement configurée pour résoudre ça tout seul
+# à l'import (documenté dans le commentaire de validator_axe_b.py : "pas une
+# anomalie corrigible en soi" — rien à corriger dans le fichier, le fix est
+# entièrement côté paramétrage BC). Problème concret rencontré (Rami, 19/08) :
+# cette anomalie ne peut JAMAIS tomber à zéro en réanalysant le même fichier,
+# donc le niveau 308 restait bloqué "pending" indéfiniment même après la
+# correction BC réelle confirmée (check_table_filled="filled") —
+# sub_anomalies non vide gagnait toujours contre le check BC live.
+#
+# CORRIGÉ (19/08/2026, 2e passe) : la 1ère version de ce filtre cherchait une
+# clé "Type d'anomalie" qui n'existe PAS dans sub_anomalies — cette liste
+# n'est pas les anomalies Axe B brutes, mais la sortie GROUPÉE de
+# build_prerequisites_report() (voir correction_classifier.py), avec un
+# schéma différent : "Table référencée BC", "Nom table BC", "Code manquant",
+# "Champs concernés", "Occurrences". Confirmé via un diagnostic en direct
+# dans l'app (Rami, 19/08) : sub_anomalies bloquantes retournait toujours
+# True, rendant le fix précédent un no-op complet malgré le déploiement.
+# Le bon discriminant : "Code manquant" == "" (build_prerequisites_report
+# groupe par (table_id, Valeur), et l'anomalie "Souches de n° non
+# résolvable" fixe toujours Valeur="" en dur — voir validator_axe_b.py). Un
+# vrai mauvais code souche produit une ligne groupée SÉPARÉE avec un "Code
+# manquant" non vide (via l'anomalie "Code de référence invalide" en plus),
+# qui elle continue de bloquer normalement.
+_NO_SERIES_TABLE_ID_STR = "308"
 
 
 def _has_blocking_sub_anomalies(sub_anomalies: list[dict] | None) -> bool:
     """True si au moins une sub_anomaly doit réellement bloquer la
-    validation du niveau — exclut les types listés dans
-    _NON_BLOCKING_SUB_ANOMALY_TYPES (informationnels, non corrigibles via le
-    fichier, dépendent uniquement de check_table_filled/l'état réel BC)."""
+    validation du niveau — exclut le cas Souches de n° (table 308) avec
+    Code manquant vide (informationnel, non corrigible via le fichier,
+    dépend uniquement de check_table_filled/l'état réel BC)."""
     if not sub_anomalies:
         return False
-    return any(
-        a.get("Type d'anomalie") not in _NON_BLOCKING_SUB_ANOMALY_TYPES
-        for a in sub_anomalies
-    )
+    for a in sub_anomalies:
+        is_souche_vide = (
+            str(a.get("Table référencée BC", "")) == _NO_SERIES_TABLE_ID_STR
+            and not str(a.get("Code manquant", "")).strip()
+        )
+        if not is_souche_vide:
+            return True
+    return False
 
 
 # ── Règles de déblocage (inchangées dans leur logique) ───────────────────────
