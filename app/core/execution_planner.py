@@ -107,6 +107,14 @@ _KEY_FIELD: dict[str, str] = {
 }
 
 
+def get_default_key_field(table_id: int) -> str:
+    """AJOUTÉ (20/08/2026) — même table que ExecutionPlan.get_key_field(),
+    exposée en fonction de module pour être utilisable SANS instancier un
+    ExecutionPlan complet (ex. extraction de la mémoire inter-sessions à la
+    sauvegarde d'une session, où aucun plan BC n'a forcément été chargé)."""
+    return _KEY_FIELD.get(str(table_id), _KEY_FIELD["default"])
+
+
 @dataclass
 class FieldMeta:
     field_name:    str

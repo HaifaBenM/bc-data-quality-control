@@ -1764,6 +1764,31 @@ with tab_main:
                     })
                     if ok:
                         st.session_state.saved_session_id = res
+                        # AJOUTÉ (20/08/2026) — mémoire inter-sessions : les
+                        # lignes de CE fichier (préférence au fichier généré,
+                        # corrections déjà appliquées — sinon repli sur
+                        # l'original) représentent des enregistrements que le
+                        # client s'apprête à faire exister dans BC. D'autres
+                        # sessions de la même société pourront désormais les
+                        # reconnaître comme "en attente" plutôt que
+                        # "introuvable" (voir check_table_filled_and_codes).
+                        # Best-effort : un échec ici ne bloque jamais la
+                        # sauvegarde de session elle-même, déjà confirmée.
+                        try:
+                            _bytes_for_memory = generated_bytes or original_bytes
+                            if _bytes_for_memory:
+                                from app.core.bc_excel_processor import extract_key_values_by_table
+                                from app.db.metadata_db import save_pending_codes
+                                _codes_by_table = extract_key_values_by_table(_bytes_for_memory)
+                                if _codes_by_table:
+                                    save_pending_codes(
+                                        session_id=res,
+                                        profile_code=cfg["client_code"],
+                                        company_id=cfg.get("company_id", ""),
+                                        codes_by_table=_codes_by_table,
+                                    )
+                        except Exception:
+                            pass  # mémoire inter-sessions : jamais bloquant pour la sauvegarde
                         st.success("✅ Sauvegardée !")
                         st.rerun()
                     else:

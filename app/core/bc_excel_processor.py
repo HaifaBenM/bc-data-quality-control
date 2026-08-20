@@ -7,6 +7,8 @@ en ré-injectant les fichiers BC-spécifiques après les modifications openpyxl.
 import io
 import re
 import zipfile
+import openpyxl
+from app.core.execution_planner import get_default_key_field
 
 # ── Exemples par table/champ ──────────────────────────────────────────────────
 _FIELD_EXAMPLES: dict[int, dict[str, list[str]]] = {
@@ -444,3 +446,64 @@ def write_corrected_data(
                 zout.writestr(item, data)
 
     return out_buf.getvalue()
+
+
+def extract_key_values_by_table(excel_bytes: bytes) -> dict[int, set[str]]:
+    """
+    AJOUTÉ (20/08/2026) — mémoire inter-sessions (architecture proposée
+    Rami/Claude, 20/08). Pour chaque onglet du fichier, extrait les valeurs
+    de la colonne clé métier (N°, Code — voir execution_planner.get_default_
+    key_field) sur toutes les lignes de données. Retourne {table_id: {codes}}.
+
+    Sert à peupler session_pending_codes à la sauvegarde d'une session : les
+    lignes de CE fichier représentent des enregistrements que le client
+    s'apprête à faire exister dans BC (via ce package), même si l'import
+    réel n'a pas encore eu lieu. Une AUTRE session de la même société, dont
+    le fichier référence ces mêmes codes (ex. un compte GL créé dans le
+    fichier MDD Comptabilité, référencé par le fichier MDD Stock), doit
+    pouvoir les reconnaître comme "en attente" plutôt que "introuvable".
+
+    Ne filtre PAS par table_id connu de level_config — extrait TOUTES les
+    tables présentes dans le fichier, y compris celles non classées :
+    l'extraction ne conditionne rien côté roadmap, elle alimente seulement
+    la mémoire disponible pour d'AUTRES sessions.
+    """
+    wb = openpyxl.load_workbook(io.BytesIO(excel_bytes), data_only=True, read_only=True)
+    result: dict[int, set[str]] = {}
+    for ws in wb.worksheets:
+        row1 = [ws.cell(1, c).value for c in range(1, 4)]
+        table_id_raw = str(row1[2]).split(".")[0] if row1[2] is not None else ""
+        if not table_id_raw.isdigit():
+            continue
+        table_id = int(table_id_raw)
+
+        headers = []
+        col = 1
+        while True:
+            v = ws.cell(3, col).value
+            if v is None and col > 5:
+                break
+            headers.append(str(v) if v is not None else "")
+            col += 1
+
+        key_field = get_default_key_field(table_id)
+        if key_field not in headers:
+            continue
+        key_col = headers.index(key_field) + 1
+
+        codes: set[str] = set()
+        # RÉVISÉ (20/08/2026) : ws.max_row peut être None en mode read_only
+        # (quirk connu openpyxl — dimensions pas toujours déclarées dans le
+        # XML source). iter_rows() ne dépend pas de cette métadonnée.
+        for row in ws.iter_rows(min_row=4, min_col=key_col, max_col=key_col, values_only=True):
+            v = row[0] if row else None
+            if v is None:
+                continue
+            s = str(v).strip()
+            if s:
+                codes.add(s)
+
+        if codes:
+            result.setdefault(table_id, set()).update(codes)
+
+    return result

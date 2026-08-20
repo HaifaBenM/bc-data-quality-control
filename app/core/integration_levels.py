@@ -459,6 +459,7 @@ def check_table_filled(profile_code: str, company_id: str, table_id: int) -> str
 
 def check_table_filled_and_codes(
     profile_code: str, company_id: str, table_id: int,
+    exclude_session_id: str | None = None,
 ) -> tuple[str, set[str]]:
     """
     AJOUTÉ (19/08/2026) — même logique que check_table_filled(), mais
@@ -483,14 +484,30 @@ def check_table_filled_and_codes(
     supplémentaire — get_reference_values_by_table_id est déjà appelée une
     fois par entrée dans refresh_roadmap, on récupère juste les deux
     informations du même appel au lieu d'en jeter la moitié).
+
+    RÉVISÉ (20/08/2026) — mémoire inter-sessions : les codes retournés sont
+    désormais BC live ∪ codes en attente des AUTRES sessions de la même
+    société (get_pending_codes). Scénario visé : une session MDD Stock qui
+    référence un compte GL créé dans le fichier d'une session MDD
+    Comptabilité non encore intégrée dans BC ne doit pas afficher une
+    erreur — la valeur existe déjà "dans l'intention", même si BC ne la
+    connaît pas encore (Rami, 20/08, PV démo du 19/08). `exclude_session_id`
+    évite qu'une session se compte elle-même par erreur en revalidant son
+    propre fichier. best_effort : si la lecture Supabase échoue, on
+    continue avec les seuls codes BC (voir get_pending_codes, jamais
+    bloquant).
     """
-    from app.db.metadata_db import get_reference_values_by_table_id
+    from app.db.metadata_db import get_reference_values_by_table_id, get_pending_codes
 
     try:
         codes, found = get_reference_values_by_table_id(profile_code, company_id, table_id)
     except Exception:
-        return "unknown", set()
-    if not found:
+        codes, found = set(), False
+
+    pending = get_pending_codes(profile_code, company_id, table_id, exclude_session_id)
+    codes = (codes or set()) | pending
+
+    if not found and not pending:
         return "unknown", set()
     return ("filled" if codes else "empty"), codes
 
@@ -501,6 +518,7 @@ def refresh_roadmap(
     roadmap: list[RoadmapEntry],
     gl_account_check: Callable[[], list[dict]] | None = None,
     scope_table_ids: set[int] | None = None,
+    exclude_session_id: str | None = None,
 ) -> list[RoadmapEntry]:
     """
     Bouton "Revérifier" — relance le check BC pour chaque entrée débloquée
@@ -508,6 +526,11 @@ def refresh_roadmap(
     "empty" et "unknown" laissent le niveau "pending" mais avec un motif
     différent (à afficher distinctement côté UI : "pas encore rempli"
     vs "vérification impossible pour le moment").
+
+    exclude_session_id (AJOUTÉ 20/08/2026) : transmis à
+    check_table_filled_and_codes pour que la mémoire inter-sessions ne
+    compte jamais la session en cours de revalidation comme sa propre
+    preuve d'existence (voir docstring check_table_filled_and_codes).
 
     gl_account_check : callable optionnel, sans argument, qui retourne la
     liste d'anomalies du contrôle croisé GL Account (voir
@@ -545,7 +568,10 @@ def refresh_roadmap(
     # au lieu de discriminer par longueur (len(res)==2) — les deux résultats
     # ont maintenant 4 éléments chacun.
     def _fetch_fill(entry: RoadmapEntry) -> tuple[int, str, str, set[str]]:
-        status, codes = check_table_filled_and_codes(profile_code, company_id, entry.level_info.table_id)
+        status, codes = check_table_filled_and_codes(
+            profile_code, company_id, entry.level_info.table_id,
+            exclude_session_id=exclude_session_id,
+        )
         return id(entry), "fill", status, codes
 
     def _fetch_gl(entry: RoadmapEntry):

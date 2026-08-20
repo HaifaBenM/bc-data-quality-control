@@ -585,3 +585,115 @@ def get_table_caption_cached(
         return caption
     except Exception:
         return None
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# AJOUTÉ (20/08/2026) — MÉMOIRE INTER-SESSIONS (architecture proposée
+# Rami/Claude, 20/08, cf. PV démo du 19/08). Principe : une valeur créée
+# dans le fichier d'une session, même si cette session n'a pas encore été
+# intégrée dans BC, doit être reconnue comme "connue" par les AUTRES
+# sessions de la même société — pas seulement l'état BC en direct.
+#
+# ⚠️ Nécessite la création d'une table Supabase avant déploiement :
+#    CREATE TABLE session_pending_codes (
+#        id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+#        session_id    text NOT NULL,
+#        profile_code  text NOT NULL,
+#        company_id    text NOT NULL,
+#        table_id      integer NOT NULL,
+#        code          text NOT NULL,
+#        created_at    timestamptz NOT NULL DEFAULT now(),
+#        UNIQUE (session_id, table_id, code)
+#    );
+#    CREATE INDEX idx_session_pending_codes_lookup
+#        ON session_pending_codes (profile_code, company_id, table_id);
+#
+# Design volontairement séparé du cache de référence BC (bc_metadata_cache)
+# ci-dessus, plutôt que fusionné dedans : sémantique différente (données
+# BC confirmées vs codes en attente d'intégration, jamais la même garantie
+# — voir distinction visuelle prévue côté UI), et durée de vie différente
+# (une entrée ici doit pouvoir être retirée quand une session est
+# supprimée/régénérée, sans toucher au cache BC réel).
+# ══════════════════════════════════════════════════════════════════════════
+
+def save_pending_codes(
+    session_id:   str,
+    profile_code: str,
+    company_id:   str,
+    codes_by_table: dict[int, set[str]],
+) -> tuple[bool, str]:
+    """
+    Remplace intégralement les codes en attente d'UNE session (delete puis
+    insert) — pas un ajout incrémental. Appelée à chaque régénération du
+    fichier corrigé d'une session : si une correction change entre-temps,
+    les anciens codes de cette session ne doivent pas persister à tort.
+    """
+    try:
+        client = get_supabase_client()
+        client.table("session_pending_codes").delete().eq("session_id", session_id).execute()
+        rows = [
+            {
+                "session_id":   session_id,
+                "profile_code": profile_code,
+                "company_id":   company_id,
+                "table_id":     table_id,
+                "code":         code,
+            }
+            for table_id, codes in codes_by_table.items()
+            for code in codes
+        ]
+        if rows:
+            # Supabase/PostgREST limite raisonnablement la taille d'un
+            # insert — découpe en lots de 500 lignes par sécurité (un
+            # fichier MDD-Stock réel peut dépasser 700 codes sur une seule
+            # table, voir extract_key_values_by_table).
+            for i in range(0, len(rows), 500):
+                client.table("session_pending_codes").insert(rows[i:i + 500]).execute()
+        return True, ""
+    except Exception as e:
+        return False, str(e)
+
+
+def get_pending_codes(
+    profile_code: str,
+    company_id:   str,
+    table_id:     int,
+    exclude_session_id: str | None = None,
+) -> set[str]:
+    """
+    Codes en attente d'intégration BC pour une table, toutes sessions de la
+    société confondues (hors une session à exclure explicitement — utile
+    pour ne pas se compter soi-même en train de revalider son propre
+    fichier). Best-effort : une erreur retourne un ensemble vide plutôt que
+    de faire planter le contrôle qualité qui l'appelle (même principe que
+    get_reference_values_by_table_id — la mémoire inter-sessions est un
+    complément, jamais un point de défaillance bloquant).
+    """
+    try:
+        client = get_supabase_client()
+        query = (
+            client.table("session_pending_codes")
+            .select("code")
+            .eq("profile_code", profile_code)
+            .eq("company_id",   company_id)
+            .eq("table_id",     table_id)
+        )
+        if exclude_session_id:
+            query = query.neq("session_id", exclude_session_id)
+        res = query.execute()
+        return {row["code"] for row in (res.data or [])}
+    except Exception:
+        return set()
+
+
+def delete_pending_codes_for_session(session_id: str) -> tuple[bool, str]:
+    """Nettoyage explicite — à appeler quand une session est supprimée, ou
+    marquée « intégrée » si on décide de ne plus la compter comme en
+    attente (choix laissé à l'appelant, cette fonction ne fait qu'exécuter
+    le retrait demandé)."""
+    try:
+        client = get_supabase_client()
+        client.table("session_pending_codes").delete().eq("session_id", session_id).execute()
+        return True, ""
+    except Exception as e:
+        return False, str(e)

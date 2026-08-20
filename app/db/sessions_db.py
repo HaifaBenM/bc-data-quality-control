@@ -150,6 +150,16 @@ def delete_session(session_id: str) -> tuple[bool, str]:
         client = get_supabase_client()
         client.table("qc_corrections").delete().eq("session_id", session_id).execute()
         client.table("qc_sessions").delete().eq("id", session_id).execute()
+        # AJOUTÉ (20/08/2026) : nettoie aussi la mémoire inter-sessions
+        # (session_pending_codes) — une session supprimée ne doit plus
+        # jamais compter comme "en attente" pour d'autres sessions de la
+        # société. Best-effort, importé localement pour éviter tout cycle
+        # d'import entre sessions_db.py et metadata_db.py.
+        try:
+            from app.db.metadata_db import delete_pending_codes_for_session
+            delete_pending_codes_for_session(session_id)
+        except Exception:
+            pass
         return True, ""
     except Exception as e:
         return False, f"Erreur : {str(e)}"
