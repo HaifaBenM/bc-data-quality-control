@@ -1024,6 +1024,43 @@ with tab_main:
                         except Exception as e:
                             st.error(f"Erreur pendant l'appel : {e}")
 
+                    # AJOUTÉ (19/08/2026, 3e passe) — test empirique du numéro
+                    # de champ AL, en appelant get_table_values() DIRECTEMENT
+                    # (contourne get_reference_values_by_table_id et son
+                    # cache/sa logique de repli) — pour vérifier quel field_no
+                    # retourne vraiment les codes attendus sur une table
+                    # donnée, sans se fier à la documentation Microsoft
+                    # générique (qui peut ne pas correspondre exactement au
+                    # numéro de champ réel de cette version/localisation BC).
+                    st.markdown("---")
+                    st.caption(
+                        "Test direct par numéro de champ AL (contourne le cache et la "
+                        "logique de repli) — utile pour trouver le bon fieldNo empiriquement "
+                        "sans se fier à la doc générique."
+                    )
+                    _diag_field_no = st.number_input(
+                        "Numéro de champ AL à tester", min_value=1, value=2, step=1, key="diag_field_no"
+                    )
+                    if st.button("Interroger get_table_values (field_no manuel)", key="btn_diag_field_no"):
+                        from app.db.profiles_db import get_profile_by_code
+                        from app.core.bc_api import get_access_token, get_table_values
+                        try:
+                            _diag_p = get_profile_by_code(cfg.get("client_code", ""))
+                            _diag_tok = get_access_token(
+                                _diag_p.get("bc_tenant_id", "").strip(),
+                                _diag_p.get("bc_client_id", "").strip(),
+                                _diag_p.get("bc_client_secret", "").strip(),
+                            )
+                            _diag_vals = get_table_values(
+                                _diag_p.get("bc_tenant_id", "").strip(),
+                                _diag_p.get("bc_environment", "").strip(),
+                                cfg.get("company_id", ""),
+                                int(_diag_tid), int(_diag_field_no), _diag_tok,
+                            )
+                            st.write(f"**field_no={_diag_field_no}** -> {sorted(_diag_vals) if _diag_vals else '(vide)'}")
+                        except Exception as e:
+                            st.error(f"Erreur pendant l'appel : {e}")
+
             _level_cfg = st.session_state.level_config
             _roadmap_key = f"level_roadmap_{cfg.get('pkg_code', '')}_{cfg.get('company_id', '')}_{cfg.get('file_name', '')}"
 
