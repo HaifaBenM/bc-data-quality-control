@@ -999,6 +999,30 @@ with tab_main:
                         st.error(f"Échec du vidage : {e}")
                     st.rerun()
 
+                # AJOUTÉ (19/08/2026) — diagnostic direct : affiche EXACTEMENT
+                # ce que get_reference_values_by_table_id() voit pour une
+                # table donnée (cache Supabase vidé ou non, résultat live BC
+                # inclus), pour trancher sans deviner pourquoi un niveau
+                # reste bloqué malgré une correction BC confirmée (ex. 308
+                # Souches de n° signalé "empty" après création de la souche
+                # ARTICLE et vidage du cache — ce diagnostic dit directement
+                # si le souci est le cache, le lookup live, ou autre chose).
+                with st.expander("🔬 Diagnostic — voir les valeurs de référence détectées pour une table"):
+                    _diag_tid = st.number_input(
+                        "Table ID à inspecter", min_value=1, value=308, step=1, key="diag_ref_table_id"
+                    )
+                    if st.button("Interroger get_reference_values_by_table_id", key="btn_diag_ref_values"):
+                        from app.db.metadata_db import get_reference_values_by_table_id
+                        try:
+                            _codes, _found = get_reference_values_by_table_id(
+                                cfg.get("client_code", ""), cfg.get("company_id", ""), int(_diag_tid)
+                            )
+                            st.write(f"**found** = {_found}")
+                            st.write(f"**Nombre de codes trouvés** = {len(_codes)}")
+                            st.write(sorted(_codes) if _codes else "(aucun code)")
+                        except Exception as e:
+                            st.error(f"Erreur pendant l'appel : {e}")
+
             _level_cfg = st.session_state.level_config
             _roadmap_key = f"level_roadmap_{cfg.get('pkg_code', '')}_{cfg.get('company_id', '')}_{cfg.get('file_name', '')}"
 
