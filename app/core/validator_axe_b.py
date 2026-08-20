@@ -60,17 +60,29 @@ def validate_axe_b(
         # (sim_context reste alimenté séquentiellement, dans l'ordre BC).
         _needed: dict[tuple[int, int], None] = {}
         for col in df.columns:
-            # AJOUTÉ (18/08/2026) : les colonnes "ID X" (ex. "ID groupe
-            # compta. produit") contiennent le SystemId BC de l'enregistrement,
-            # pas un code lisible — elles ne peuvent structurellement jamais
-            # matcher les codes valides retournés pour la table référencée
-            # (toujours des Code, jamais des GUID). Les valider produisait un
-            # faux positif garanti à 100% sur chaque ligne, indépendamment de
-            # la validité réelle des données (cf. export 251 du 18/08 :
+            # RÉVISÉ (18/08/2026) : critère fiable = le TYPE AL du champ
+            # (Guid), pas son nom. Documenté par Microsoft comme pattern
+            # standard de référence par SystemId (ex. `field(x; "Brand Id";
+            # Guid) { TableRelation = "Car Brand".SystemId; }`) — vaut aussi
+            # bien pour un champ standard BC que pour un champ d'extension,
+            # puisque get_package_fields_qc() expose fieldType de la même
+            # façon pour les deux, sans distinction à coder. Ces champs
+            # contiennent le SystemId BC de l'enregistrement, pas un code
+            # lisible — ils ne peuvent structurellement jamais matcher les
+            # codes valides retournés pour la table référencée (toujours des
+            # Code, jamais des GUID). Les valider produisait un faux positif
+            # garanti à 100% sur chaque ligne (cf. export 251 du 18/08 :
             # 18 groupes confirmés existants côté BC, anomalie quand même
-            # levée). Voir aussi clear_id_reference_columns() dans
+            # levée). Repli sur le préfixe "ID " si le type n'est pas
+            # disponible (plan par défaut / hors contexte BC), pour ne pas
+            # perdre la protection dans ce cas — moins précis mais mieux que
+            # rien. Voir aussi clear_id_reference_columns() dans
             # correction_generator.py (même diagnostic, côté fichier de sortie).
-            if col.startswith("ID "):
+            _fmeta = execution_plan.get_field_def(table_id_int, col)
+            if _fmeta is not None:
+                if _fmeta.al_type == "Guid":
+                    continue
+            elif col.startswith("ID "):
                 continue
             if not execution_plan.validate_field_for(table_id_int, col):
                 continue
@@ -104,7 +116,13 @@ def validate_axe_b(
                     _ref_cache[key] = res
 
         for col in df.columns:
-            if col.startswith("ID "):  # AJOUTÉ (18/08/2026) — voir commentaire ci-dessus
+            # RÉVISÉ (18/08/2026) — même critère type Guid que ci-dessus,
+            # repli sur préfixe "ID " si le type est indisponible.
+            _fmeta2 = execution_plan.get_field_def(table_id_int, col)
+            if _fmeta2 is not None:
+                if _fmeta2.al_type == "Guid":
+                    continue
+            elif col.startswith("ID "):
                 continue
             if not execution_plan.validate_field_for(table_id_int, col):
                 continue
@@ -126,6 +144,7 @@ def validate_axe_b(
                 anomalies.append({
                     "Ligne":               0,
                     "Onglet":              sheet_name,
+                    "N° fonctionnel":      "",
                     "Champ":               col,
                     "Valeur":              "",
                     "Type d'anomalie":     "Code de référence non vérifiable",
@@ -150,8 +169,15 @@ def validate_axe_b(
             # complet : 5/5 items (1017, 1019, ACC001, ACC002, ACC003).
             NO_SERIES_TABLE_ID = 308
 
+            # AJOUTÉ (20/08/2026) : clé métier de la ligne (ex. N° article
+            # "ACC001"), calculée une fois avant la boucle — même logique que
+            # validator_axe_a.py, pour que chaque anomalie Axe B soit
+            # identifiable sans réouvrir le fichier Excel (demande Rami).
+            _key_field_b = execution_plan.get_key_field(table_id_int) if execution_plan else "N°"
+
             # Valider chaque ligne
             for row_idx, row in df.iterrows():
+                _key_val_b = str(row.get(_key_field_b, "") or "").strip() if _key_field_b in df.columns else ""
                 value = str(row.get(col, "") or "").strip()
                 is_val_empty = not value or value.lower() in ("nan", "none", "")
                 is_zero_guid = value == "{00000000-0000-0000-0000-000000000000}"
@@ -165,6 +191,7 @@ def validate_axe_b(
                         anomalies.append({
                             "Ligne":               int(row_idx) + 4,
                             "Onglet":              sheet_name,
+                            "N° fonctionnel":      _key_val_b,
                             "Champ":               col,
                             "Valeur":              "",
                             "Type d'anomalie":     "Souches de n° non résolvable",
@@ -215,6 +242,7 @@ def validate_axe_b(
                     anomalies.append({
                         "Ligne":               int(row_idx) + 4,
                         "Onglet":              sheet_name,
+                        "N° fonctionnel":      _key_val_b,
                         "Champ":               col,
                         "Valeur":              value,
                         "Type d'anomalie":     "Code de référence invalide",
@@ -252,6 +280,7 @@ def validate_axe_b(
     anomalies.append({
         "Ligne":               0,
         "Onglet":              sheet_name,
+        "N° fonctionnel":      "",
         "Champ":               "",
         "Valeur":              "",
         "Type d'anomalie":     "Validation références non disponible",
@@ -365,6 +394,12 @@ def validate_file_axe_b(
                         anomalies.append({
                             "Ligne":               ta.row_number,
                             "Onglet":              ta.sheet_name,
+                            # AJOUTÉ (20/08/2026) : vide ici — TriggerAnomaly
+                            # (trigger_simulator.py) ne porte pas encore la
+                            # clé métier de la ligne. Laissé en suivi futur
+                            # si ce détail s'avère nécessaire pour ce cas
+                            # précis ; n'empêche pas l'affichage de la colonne.
+                            "N° fonctionnel":      "",
                             "Champ":               ta.field_name,
                             "Valeur":              ta.value,
                             "Type d'anomalie":     f"Trigger {ta.trigger_type}",

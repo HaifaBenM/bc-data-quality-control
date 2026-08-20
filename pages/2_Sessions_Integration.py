@@ -404,7 +404,7 @@ def display_unified_results(merged: dict, axe_c: dict, pr: dict = None):
                 ]
 
                 if filtered:
-                    cols_to_show = ["Ligne", "Champ", "Valeur", "Type d'anomalie", "Sévérité", "Classification", "Message", "Correction suggérée"]
+                    cols_to_show = ["Ligne", "N° fonctionnel", "Champ", "Valeur", "Type d'anomalie", "Sévérité", "Classification", "Message", "Correction suggérée"]
                     df_show      = pd.DataFrame([{c: a.get(c, "") for c in cols_to_show} for a in filtered])
 
                     def color_row(row):
@@ -519,6 +519,10 @@ def display_correction_workflow(merged: dict, cfg: dict, pr: dict):
             "Appliquer":       bool(str(a.get("Correction suggérée", "")).strip()),
             "Onglet":          a.get("Onglet", ""),
             "Ligne":           a.get("Ligne", 0),
+            # AJOUTÉ (20/08/2026) : clé métier (ex. N° article) — demande
+            # Rami : rend la ligne identifiable sans réouvrir le fichier,
+            # pour proposer une correction en connaissance de cause.
+            "N° fonctionnel":  a.get("N° fonctionnel", ""),
             "Champ":           a.get("Champ", ""),
             "Valeur actuelle": a.get("Valeur", ""),
             "Nouvelle valeur": a.get("Correction suggérée", ""),
@@ -529,7 +533,7 @@ def display_correction_workflow(merged: dict, cfg: dict, pr: dict):
         pd.DataFrame(edit_rows),
         use_container_width=True,
         hide_index=True,
-        disabled=["Onglet", "Ligne", "Champ", "Valeur actuelle"],
+        disabled=["Onglet", "Ligne", "N° fonctionnel", "Champ", "Valeur actuelle"],
         column_config={
             "Appliquer": st.column_config.CheckboxColumn(
                 help="Cocher pour inclure cette ligne dans le fichier généré"
@@ -1464,8 +1468,16 @@ with tab_main:
                             # st.session_state (construit par une version antérieure du
                             # code, avant l'ajout de ce champ) n'a pas sub_anomalies —
                             # confirmé par l'AttributeError remontée par Rami le 27/07.
+                            #
+                            # AJOUTÉ (20/08/2026) : une fois le niveau validé (✓), le
+                            # détail des anomalies ne s'affiche plus — Rami : "une fois
+                            # un niveau validé les erreurs ne doivent plus être
+                            # affichées". sub_anomalies reste figé (scan initial, jamais
+                            # recalculé par Revérifier — voir _has_blocking_sub_anomalies)
+                            # donc continuer à l'afficher après validation montrerait des
+                            # anomalies déjà résolues comme si elles étaient encore là.
                             _sub_anomalies = getattr(_entry, "sub_anomalies", None)
-                            if _sub_anomalies:
+                            if _sub_anomalies and _entry.status != "validated":
                                 with st.expander(
                                     f"⚠️ {len(_sub_anomalies)} champ(s) manquant(s) sur des comptes référencés",
                                     expanded=False,

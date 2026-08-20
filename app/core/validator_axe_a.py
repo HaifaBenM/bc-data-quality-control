@@ -147,6 +147,14 @@ def validate_axe_a(
         # ce qui rendait le rapport d'anomalies incohérent pour l'utilisateur.
         line_num = int(row_idx) + 4
 
+        # AJOUTÉ (20/08/2026) : calculé ici, en tête de boucle, pour être
+        # disponible à CHAQUE appel _anomaly() de cette ligne — clé métier
+        # (ex. N° article "ACC001") ajoutée à chaque anomalie pour que la
+        # ligne soit identifiable sans devoir rouvrir le fichier Excel à la
+        # ligne technique indiquée (demande Rami : proposer une correction
+        # doit être clair sans aller-retour fichier).
+        key_val = _to_str(row.get(key_field, "")) if key_field in df.columns else ""
+
         for col in df.columns:
             raw_val  = row.get(col)
             str_val  = _to_str(raw_val)
@@ -156,6 +164,7 @@ def validate_axe_a(
             # 1. Formule Excel
             if str_val.startswith("="):
                 anomalies.append(_anomaly(
+                    key_value=key_val,
                     line=line_num, field=col, value=str_val, sheet=sheet_name,
                     error_type="Formule Excel", severity="Majeure",
                     message=f"'{col}' contient une formule Excel. Convertir en valeur statique.",
@@ -165,6 +174,7 @@ def validate_axe_a(
             # 2. Champ obligatoire vide (bloque l'import BC)
             if fm and fm.is_required and is_empty:
                 anomalies.append(_anomaly(
+                    key_value=key_val,
                     line=line_num, field=col, value="", sheet=sheet_name,
                     error_type="Champ obligatoire vide", severity="Majeure",
                     message=f"'{col}' est obligatoire et ne peut pas être vide.",
@@ -179,6 +189,7 @@ def validate_axe_a(
             # comptabilisation tant qu'il n'est pas renseigné.
             if fm and fm.is_posting_required and is_empty:
                 anomalies.append(_anomaly(
+                    key_value=key_val,
                     line=line_num, field=col, value="", sheet=sheet_name,
                     error_type="Champ requis pour comptabilisation", severity="Mineure",
                     message=(
@@ -206,6 +217,7 @@ def validate_axe_a(
                     )
                     key_val = _to_str(row.get(key_field, "")) if key_field in df.columns else ""
                     anomalies.append(_anomaly(
+                        key_value=key_val,
                         line=line_num, field=col, value=str_val, sheet=sheet_name,
                         error_type="Champ obligatoire (non-zéro) vide", severity="Majeure",
                         message=(
@@ -229,6 +241,7 @@ def validate_axe_a(
                 # car. > "max" 16 alors que BC ne signale rien sur ce champ).
                 if fm.max_length and fm.py_type == "Text" and len(str_val) > fm.max_length:
                     anomalies.append(_anomaly(
+                        key_value=key_val,
                         line=line_num, field=col, value=str_val, sheet=sheet_name,
                         error_type="Longueur maximale dépassée", severity="Majeure",
                         message=f"'{col}' : {len(str_val)} car. (max BC = {fm.max_length}).",
@@ -237,6 +250,7 @@ def validate_axe_a(
             else:
                 if len(str_val) > _DEFAULT_TEXT_MAX:
                     anomalies.append(_anomaly(
+                        key_value=key_val,
                         line=line_num, field=col, value=str_val[:40] + "…", sheet=sheet_name,
                         error_type="Longueur maximale dépassée", severity="Mineure",
                         message=f"'{col}' : {len(str_val)} car. dépasse {_DEFAULT_TEXT_MAX} (seuil générique).",
@@ -251,36 +265,42 @@ def validate_axe_a(
 
             if py_type == "Integer" and not _validate_integer(str_val):
                 anomalies.append(_anomaly(
+                    key_value=key_val,
                     line=line_num, field=col, value=str_val, sheet=sheet_name,
                     error_type="Type incorrect (entier attendu)", severity=sev_type,
                     message=f"'{col}' doit être un entier, valeur : '{str_val}'.",
                 ))
             elif py_type == "Decimal" and not _validate_decimal(str_val):
                 anomalies.append(_anomaly(
+                    key_value=key_val,
                     line=line_num, field=col, value=str_val, sheet=sheet_name,
                     error_type="Type incorrect (décimal attendu)", severity=sev_type,
                     message=f"'{col}' doit être un décimal, valeur : '{str_val}'. Séparateur : '.' ou ','.",
                 ))
             elif py_type == "Date" and not _validate_date(str_val):
                 anomalies.append(_anomaly(
+                    key_value=key_val,
                     line=line_num, field=col, value=str_val, sheet=sheet_name,
                     error_type="Format de date incorrect", severity=sev_type,
                     message=f"'{col}' : '{str_val}' n'est pas une date valide. Formats : JJ/MM/AAAA, AAAA-MM-JJ.",
                 ))
             elif py_type == "DateTime" and not _validate_datetime(str_val):
                 anomalies.append(_anomaly(
+                    key_value=key_val,
                     line=line_num, field=col, value=str_val, sheet=sheet_name,
                     error_type="Format de date-heure incorrect", severity=sev_type,
                     message=f"'{col}' : '{str_val}' n'est pas une date-heure valide. Format attendu : AAAA-MM-JJTHH:MM:SS(.ms)Z.",
                 ))
             elif py_type == "Boolean" and not _validate_boolean(str_val):
                 anomalies.append(_anomaly(
+                    key_value=key_val,
                     line=line_num, field=col, value=str_val, sheet=sheet_name,
                     error_type="Type incorrect (booléen attendu)", severity="Mineure",
                     message=f"'{col}' : '{str_val}' n'est pas un booléen. Valeurs : Oui/Non, True/False, 1/0.",
                 ))
             elif py_type == "Email" and not _validate_email(str_val):
                 anomalies.append(_anomaly(
+                    key_value=key_val,
                     line=line_num, field=col, value=str_val, sheet=sheet_name,
                     error_type="Format e-mail incorrect", severity="Mineure",
                     message=f"'{col}' : '{str_val}' n'est pas une adresse e-mail valide.",
@@ -289,6 +309,7 @@ def validate_axe_a(
                 if str_val not in fm.option_values:
                     allowed = ", ".join(f"'{v}'" for v in fm.option_values if v.strip())
                     anomalies.append(_anomaly(
+                        key_value=key_val,
                         line=line_num, field=col, value=str_val, sheet=sheet_name,
                         error_type="Valeur Option non autorisée", severity="Majeure",
                         message=f"'{col}' : '{str_val}' non autorisé. Valeurs BC : {allowed}.",
@@ -300,6 +321,7 @@ def validate_axe_a(
             if key_val:
                 if key_val in seen_keys:
                     anomalies.append(_anomaly(
+                        key_value=key_val,
                         line=line_num, field=key_field, value=key_val, sheet=sheet_name,
                         error_type="Doublon (clé primaire)", severity="Majeure",
                         message=f"'{key_field}' = '{key_val}' dupliqué. Déjà présent à la ligne {seen_keys[key_val]}.",
@@ -314,10 +336,17 @@ def _anomaly(
     line: int, field: str, value: str, sheet: str,
     error_type: str, severity: str, message: str,
     suggested_fix: str = None,
+    key_value: str = "",
 ) -> dict:
     return {
         "Ligne":               line,
         "Onglet":              sheet,
+        # AJOUTÉ (20/08/2026) : clé métier de la ligne (ex. N° article
+        # "ACC001", pas le numéro de ligne technique du fichier) — demande
+        # Rami : rend chaque ligne d'anomalie identifiable sans réouvrir le
+        # fichier Excel, utile en particulier dans le tableau des
+        # corrections (VALEUR_CORRIGIBLE).
+        "N° fonctionnel":      key_value,
         "Champ":               field,
         "Valeur":              value,
         "Type d'anomalie":     error_type,
