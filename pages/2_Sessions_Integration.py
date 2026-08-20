@@ -12,6 +12,7 @@ from app.core.execution_planner import get_execution_plan, build_plan_from_bc
 from app.core.integration_levels import (
     load_level_config, traverse_dependencies, build_roadmap, build_roadmap_from_prereqs,
     is_level_unlocked, refresh_roadmap, all_validated,
+    check_table_filled, _has_blocking_sub_anomalies,
 )
 from app.db.supabase_client import get_supabase_client
 from app.core.simulation_context import SimulationContext
@@ -1294,6 +1295,34 @@ with tab_main:
                                 st.code(_dbg_resp3.text[:2000])
                             except Exception as e:
                                 st.error(f"{type(e).__name__}: {e}")
+
+                # AJOUTÉ (19/08/2026, 2e passe) — diagnostic ciblé : affiche
+                # EXACTEMENT ce que refresh_roadmap voit pour UNE entrée
+                # précise du roadmap actuellement en mémoire (pas un nouveau
+                # calcul isolé comme le diagnostic get_reference_values_by_
+                # table_id ci-dessus — celui-ci lit le VRAI objet RoadmapEntry
+                # que le bouton "Revérifier" manipule), pour trancher sans
+                # deviner pourquoi un niveau reste non coché malgré une
+                # correction BC confirmée (cf. table 308, 19/08).
+                if _roadmap and is_consultant():
+                    with st.expander("🔬 Diagnostic — état exact d'une entrée du roadmap"):
+                        _diag_table_ids = [e.level_info.table_id for e in _roadmap]
+                        _diag_sel_tid = st.selectbox(
+                            "Table à inspecter", options=_diag_table_ids, key="diag_roadmap_entry_tid"
+                        )
+                        _diag_entry = next(e for e in _roadmap if e.level_info.table_id == _diag_sel_tid)
+                        st.write(f"**status actuel** = `{_diag_entry.status}`")
+                        st.write(f"**level** = `{_diag_entry.level_info.level}` "
+                                 f"| **is_level_unlocked** = `{is_level_unlocked(_diag_entry.level_info.level, _roadmap)}`")
+                        st.write(f"**last_check** (dernier résultat check_table_filled connu) = "
+                                 f"`{getattr(_diag_entry, 'last_check', '(jamais vérifié)')}`")
+                        st.write(f"**sub_anomalies bloquantes** = "
+                                 f"`{_has_blocking_sub_anomalies(getattr(_diag_entry, 'sub_anomalies', None))}`")
+                        st.write("**sub_anomalies brutes :**")
+                        st.write(getattr(_diag_entry, "sub_anomalies", None) or "(aucune)")
+                        if st.button("Appeler check_table_filled maintenant (contournant le cache d'affichage)", key="btn_diag_live_check"):
+                            _diag_live = check_table_filled(cfg["client_code"], cfg["company_id"], _diag_sel_tid)
+                            st.write(f"**check_table_filled live** = `{_diag_live}`")
 
                 if _roadmap:
                     st.markdown("---")
