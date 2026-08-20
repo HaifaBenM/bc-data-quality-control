@@ -307,8 +307,31 @@ def get_reference_values_by_table_id(
     # (found=False — vraiment non vérifiable, pas de faux positifs).
     source_reachable = False
 
+    # AJOUTÉ (19/08/2026) — table 349 (Dimension Value / Section analytique) :
+    # le champ 1 standard BC est "Dimension Code" (le code de l'AXE parent,
+    # ex. "SECTION"), PAS la valeur elle-même — "Code" (la vraie valeur, ex.
+    # "LOCATIONS DIVERSES") est le champ 2. Le repli générique "champ 1 si
+    # ref_field_id non résolu" (juste en dessous) est donc faux spécifiquement
+    # pour cette table : "Code Axe analytique principal 2" est une relation
+    # filtrée/composite (TableRelation = "Dimension Value".Code WHERE
+    # ("Dimension Code"=...)), et packageFields ne résout pas toujours un
+    # numéro de champ propre pour ce genre de relation — ref_field_id retombe
+    # à 0, et le champ 1 (le mauvais) est utilisé par défaut. Confirmé en
+    # direct (diagnostic Rami, 19/08) : la table 349 retournait "SECTION"
+    # (le code d'axe) au lieu des 3 valeurs réellement créées. Champ 2 forcé
+    # ici uniquement quand ref_field_id n'a pas pu être résolu autrement —
+    # un ref_field_id explicite et non nul (ex. venant vraiment de BC) reste
+    # toujours prioritaire, cette table n'est qu'un repli ciblé.
+    _DIMENSION_VALUE_TABLE_ID = 349
+    _DIMENSION_VALUE_CODE_FIELD_NO = 2
+
     # 2. Lazy load via AL tableValues
-    _field_no = ref_field_id if ref_field_id > 0 else 1
+    if ref_field_id > 0:
+        _field_no = ref_field_id
+    elif ref_table_id == _DIMENSION_VALUE_TABLE_ID:
+        _field_no = _DIMENSION_VALUE_CODE_FIELD_NO
+    else:
+        _field_no = 1
     if profile_code and company_id:
         codes, al_error = _fetch_via_al_extension(
             profile_code, company_id, ref_table_id, _field_no
