@@ -73,16 +73,22 @@ def validate_axe_b(
             # Code, jamais des GUID). Les valider produisait un faux positif
             # garanti à 100% sur chaque ligne (cf. export 251 du 18/08 :
             # 18 groupes confirmés existants côté BC, anomalie quand même
-            # levée). Repli sur le préfixe "ID " si le type n'est pas
-            # disponible (plan par défaut / hors contexte BC), pour ne pas
-            # perdre la protection dans ce cas — moins précis mais mieux que
-            # rien. Voir aussi clear_id_reference_columns() dans
+            # levée).
+            #
+            # CORRIGÉ (20/08/2026) : le repli par préfixe "ID " n'était
+            # atteint QUE si _fmeta était None (`elif`) — si BC renvoie une
+            # métadonnée pour la colonne mais avec un al_type incohérent
+            # (autre que "Guid", résolution qui varie empiriquement selon la
+            # table — confirmé : 251 "ID groupe compta. produit" correctement
+            # filtré par type, mais 94 "ID groupe compta. stock" toujours
+            # remonté en anomalie malgré ce fix, sur le même mécanisme), le
+            # repli par nom n'était JAMAIS tenté. Les deux checks sont
+            # désormais indépendants (OR, pas if/elif) — le nom sert de
+            # filet de sécurité même quand une métadonnée existe mais se
+            # trompe. Voir aussi clear_id_reference_columns() dans
             # correction_generator.py (même diagnostic, côté fichier de sortie).
             _fmeta = execution_plan.get_field_def(table_id_int, col)
-            if _fmeta is not None:
-                if _fmeta.al_type == "Guid":
-                    continue
-            elif col.startswith("ID "):
+            if (_fmeta is not None and _fmeta.al_type == "Guid") or col.startswith("ID "):
                 continue
             if not execution_plan.validate_field_for(table_id_int, col):
                 continue
@@ -116,13 +122,13 @@ def validate_axe_b(
                     _ref_cache[key] = res
 
         for col in df.columns:
-            # RÉVISÉ (18/08/2026) — même critère type Guid que ci-dessus,
-            # repli sur préfixe "ID " si le type est indisponible.
+            # RÉVISÉ (18/08/2026) — même critère type Guid que ci-dessus.
+            # CORRIGÉ (20/08/2026) — même fix que la boucle précédente : nom
+            # et type vérifiés indépendamment (OR), pas en if/elif, pour que
+            # le repli par nom fonctionne même quand une métadonnée existe
+            # mais rapporte un al_type incohérent.
             _fmeta2 = execution_plan.get_field_def(table_id_int, col)
-            if _fmeta2 is not None:
-                if _fmeta2.al_type == "Guid":
-                    continue
-            elif col.startswith("ID "):
+            if (_fmeta2 is not None and _fmeta2.al_type == "Guid") or col.startswith("ID "):
                 continue
             if not execution_plan.validate_field_for(table_id_int, col):
                 continue
