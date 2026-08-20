@@ -193,25 +193,17 @@ def _try_live_gl_account(client_code: str, company_id: str) -> dict:
     try:
         p = get_profile_by_code(client_code)
         if not p:
-            if is_consultant():
-                st.caption(f"🔧 [Debug consultant] Vérification live impossible : aucun profil trouvé pour '{client_code}'.")
             return {}
         tid = p.get("bc_tenant_id", "").strip()
         cid = p.get("bc_client_id", "").strip()
         cs  = p.get("bc_client_secret", "").strip()
         env = p.get("bc_environment", "").strip()
         if not all([tid, cid, cs, env, company_id]):
-            if is_consultant():
-                st.caption("🔧 [Debug consultant] Vérification live impossible : profil BC incomplet (tenant/client/secret/environnement/société).")
             return {}
         tok  = get_access_token(tid, cid, cs)
         live = get_gl_account_fields_live(tid, env, company_id, tok)
-        if is_consultant():
-            st.caption(f"🔧 [Debug consultant] Vérification live du plan comptable : {len(live)} compte(s) GL trouvé(s).")
         return live or {}
-    except Exception as e:
-        if is_consultant():
-            st.caption(f"🔧 [Debug consultant] Vérification live échouée : {type(e).__name__}: {e}")
+    except Exception:
         return {}
 
 
@@ -1004,67 +996,6 @@ with tab_main:
                         st.error(f"Échec du vidage : {e}")
                     st.rerun()
 
-                # AJOUTÉ (19/08/2026) — diagnostic direct : affiche EXACTEMENT
-                # ce que get_reference_values_by_table_id() voit pour une
-                # table donnée (cache Supabase vidé ou non, résultat live BC
-                # inclus), pour trancher sans deviner pourquoi un niveau
-                # reste bloqué malgré une correction BC confirmée (ex. 308
-                # Souches de n° signalé "empty" après création de la souche
-                # ARTICLE et vidage du cache — ce diagnostic dit directement
-                # si le souci est le cache, le lookup live, ou autre chose).
-                with st.expander("🔬 Diagnostic — voir les valeurs de référence détectées pour une table"):
-                    _diag_tid = st.number_input(
-                        "Table ID à inspecter", min_value=1, value=308, step=1, key="diag_ref_table_id"
-                    )
-                    if st.button("Interroger get_reference_values_by_table_id", key="btn_diag_ref_values"):
-                        from app.db.metadata_db import get_reference_values_by_table_id
-                        try:
-                            _codes, _found = get_reference_values_by_table_id(
-                                cfg.get("client_code", ""), cfg.get("company_id", ""), int(_diag_tid)
-                            )
-                            st.write(f"**found** = {_found}")
-                            st.write(f"**Nombre de codes trouvés** = {len(_codes)}")
-                            st.write(sorted(_codes) if _codes else "(aucun code)")
-                        except Exception as e:
-                            st.error(f"Erreur pendant l'appel : {e}")
-
-                    # AJOUTÉ (19/08/2026, 3e passe) — test empirique du numéro
-                    # de champ AL, en appelant get_table_values() DIRECTEMENT
-                    # (contourne get_reference_values_by_table_id et son
-                    # cache/sa logique de repli) — pour vérifier quel field_no
-                    # retourne vraiment les codes attendus sur une table
-                    # donnée, sans se fier à la documentation Microsoft
-                    # générique (qui peut ne pas correspondre exactement au
-                    # numéro de champ réel de cette version/localisation BC).
-                    st.markdown("---")
-                    st.caption(
-                        "Test direct par numéro de champ AL (contourne le cache et la "
-                        "logique de repli) — utile pour trouver le bon fieldNo empiriquement "
-                        "sans se fier à la doc générique."
-                    )
-                    _diag_field_no = st.number_input(
-                        "Numéro de champ AL à tester", min_value=1, value=2, step=1, key="diag_field_no"
-                    )
-                    if st.button("Interroger get_table_values (field_no manuel)", key="btn_diag_field_no"):
-                        from app.db.profiles_db import get_profile_by_code
-                        from app.core.bc_api import get_access_token, get_table_values
-                        try:
-                            _diag_p = get_profile_by_code(cfg.get("client_code", ""))
-                            _diag_tok = get_access_token(
-                                _diag_p.get("bc_tenant_id", "").strip(),
-                                _diag_p.get("bc_client_id", "").strip(),
-                                _diag_p.get("bc_client_secret", "").strip(),
-                            )
-                            _diag_vals = get_table_values(
-                                _diag_p.get("bc_tenant_id", "").strip(),
-                                _diag_p.get("bc_environment", "").strip(),
-                                cfg.get("company_id", ""),
-                                int(_diag_tid), int(_diag_field_no), _diag_tok,
-                            )
-                            st.write(f"**field_no={_diag_field_no}** -> {sorted(_diag_vals) if _diag_vals else '(vide)'}")
-                        except Exception as e:
-                            st.error(f"Erreur pendant l'appel : {e}")
-
             _level_cfg = st.session_state.level_config
             _roadmap_key = f"level_roadmap_{cfg.get('pkg_code', '')}_{cfg.get('company_id', '')}_{cfg.get('file_name', '')}"
 
@@ -1085,25 +1016,17 @@ with tab_main:
 
                 if _roadmap_key not in st.session_state:
                     try:
-                        import time as _perf_time
-                        _t_start = _perf_time.time()
-                        _perf_log = []
-
                         client_code = cfg.get("client_code", "")
                         _exec_plan = get_execution_plan(
                             profile_code=client_code,
                             company_id=cfg.get("company_id", ""),
                             package_code=cfg.get("pkg_code", ""),
                         )
-                        _perf_log.append(("get_execution_plan", _perf_time.time() - _t_start))
-                        _t = _perf_time.time()
 
                         _meta_loader = MetadataLoader(client_code, cfg.get("company_id", ""))
                         _sim_ctx     = SimulationContext()
                         with st.spinner("⏳ Analyse des prérequis BC..."):
                             _axe_a = validate_file_axe_a(pr, execution_plan=_exec_plan)
-                            _perf_log.append(("validate_file_axe_a", _perf_time.time() - _t))
-                            _t = _perf_time.time()
 
                             _axe_b = validate_file_axe_b(
                                 pr,
@@ -1113,8 +1036,6 @@ with tab_main:
                                 metadata_loader = _meta_loader,
                                 execution_plan  = _exec_plan,
                             )
-                            _perf_log.append(("validate_file_axe_b", _perf_time.time() - _t))
-                            _t = _perf_time.time()
                         # Mis en cache pour réutilisation au clic "Lancer l'analyse" —
                         # évite de relancer Axe A/Axe B une seconde fois pour rien.
                         st.session_state[_early_axeb_key] = {
@@ -1125,8 +1046,6 @@ with tab_main:
                         _prereqs = build_prerequisites_report(
                             _real, profile_code=client_code, company_id=cfg.get("company_id", "")
                         )
-                        _perf_log.append(("build_prerequisites_report", _perf_time.time() - _t))
-                        _t = _perf_time.time()
                         # Contrôle croisé GL Account <-> groupes comptables (92/93/94...).
                         # Voir app.core.correction_classifier.check_gl_account_prerequisites.
                         # Confirmé nécessaire par test réel du 23-24/07/2026 (compte
@@ -1148,8 +1067,6 @@ with tab_main:
                         # page AL pas encore publiée, etc.).
                         _company_id = cfg.get("company_id", "")
                         _gl_live = _try_live_gl_account(client_code, _company_id)
-                        _perf_log.append(("_try_live_gl_account", _perf_time.time() - _t))
-                        _t = _perf_time.time()
                         if _gl_live:
                             persist_gl_account_posting_fields(client_code, _company_id, _gl_live)
                             _gl_anomalies = check_gl_account_prerequisites(pr, _gl_live, prefer_fallback=True)
@@ -1161,8 +1078,6 @@ with tab_main:
                             else:
                                 _gl_fallback = get_gl_account_posting_fields(client_code, _company_id)
                             _gl_anomalies = check_gl_account_prerequisites(pr, _gl_fallback)
-                        _perf_log.append(("check_gl_account_prerequisites", _perf_time.time() - _t))
-                        _t = _perf_time.time()
                         _prereqs = _prereqs + _gl_anomalies
                         # build_roadmap_from_prereqs regroupe désormais génériquement
                         # les lignes de _prereqs par table et les attache en
@@ -1183,216 +1098,11 @@ with tab_main:
                         st.session_state[_roadmap_key] = build_roadmap_from_prereqs(
                             _prereqs, _level_cfg, previous_table_ids=_previous_table_ids
                         )
-                        _perf_log.append(("build_roadmap_from_prereqs", _perf_time.time() - _t))
-                        _perf_log.append(("TOTAL", _perf_time.time() - _t_start))
-                        st.session_state["_perf_log_prereqs"] = _perf_log
                     except Exception as e:
                         st.session_state[_roadmap_key] = []
                         st.warning(f"⚠️ Détection des niveaux impossible pour l'instant : {e}")
 
                 _roadmap = st.session_state[_roadmap_key]
-
-                if is_consultant():
-                    with st.expander("🔧 Diagnostic recordValues (consultant)"):
-                        st.caption(
-                            "Teste directement l'endpoint live recordValues pour ce client/société, "
-                            "sans rien configurer en local — utilise les mêmes identifiants que l'outil."
-                        )
-                        # AJOUTÉ (04/08/2026) : dump brut de /api/v2.0/companies pour
-                        # comparer sans ambiguïté le nom affiché ("TEST-GL-VALIDATION")
-                        # à l'ID (systemId) réellement utilisé par company_id — sert à
-                        # trancher entre "mauvaise société sélectionnée" et "vrai bug
-                        # de scoping côté extension AL" quand le nom semble correct
-                        # mais que le plan comptable retourné ne correspond pas.
-                        if st.button("Lister sociétés BC (brut)", key="btn_debug_companies_raw"):
-                            try:
-                                _dbg_profile0 = get_profile_by_code(cfg.get("client_code", ""))
-                                _dbg_tid0 = _dbg_profile0.get("bc_tenant_id", "").strip()
-                                _dbg_cid0 = _dbg_profile0.get("bc_client_id", "").strip()
-                                _dbg_cs0  = _dbg_profile0.get("bc_client_secret", "").strip()
-                                _dbg_env0 = _dbg_profile0.get("bc_environment", "").strip()
-                                _dbg_tok0 = get_access_token(_dbg_tid0, _dbg_cid0, _dbg_cs0)
-                                _dbg_companies_raw = get_companies(_dbg_tid0, _dbg_env0, _dbg_tok0)
-                                st.write(f"**company_id actuel de cette session : `{cfg.get('company_id', '')}`**")
-                                st.json(_dbg_companies_raw)
-                            except Exception as _dbg_exc0:
-                                st.error(f"Échec : {_dbg_exc0}")
-                        # AJOUTÉ (04/08/2026) : isole plateforme BC vs extension
-                        # talan/qctools — interroge l'API STANDARD BC (pas notre
-                        # extension) sur un compte précis, pour trancher un écart
-                        # constaté entre le client web BC (à jour) et l'API.
-                        _dbg_acc_test = st.text_input(
-                            "N° de compte à tester (API standard)", value="77110001",
-                            key="dbg_acc_no_input",
-                        )
-                        if st.button("Tester API standard (accounts)", key="btn_debug_std_api"):
-                            try:
-                                _dbg_profile3b = get_profile_by_code(cfg.get("client_code", ""))
-                                _dbg_tid3b = _dbg_profile3b.get("bc_tenant_id", "").strip()
-                                _dbg_cid3b = _dbg_profile3b.get("bc_client_id", "").strip()
-                                _dbg_cs3b  = _dbg_profile3b.get("bc_client_secret", "").strip()
-                                _dbg_env3b = _dbg_profile3b.get("bc_environment", "").strip()
-                                _dbg_company3b = cfg.get("company_id", "")
-                                _dbg_tok3b = get_access_token(_dbg_tid3b, _dbg_cid3b, _dbg_cs3b)
-                                _dbg_std_result = diagnose_standard_api_account(
-                                    _dbg_tid3b, _dbg_env3b, _dbg_company3b, _dbg_acc_test, _dbg_tok3b
-                                )
-                                if _dbg_std_result["found"]:
-                                    st.success(f"✅ API standard TROUVE le compte {_dbg_acc_test} — le souci est spécifique à l'extension talan/qctools, pas la plateforme.")
-                                else:
-                                    st.warning(f"⚠️ API standard NE TROUVE PAS le compte {_dbg_acc_test} non plus — probable délai de réplication côté plateforme BC, pas un bug de code.")
-                                st.json(_dbg_std_result["raw"])
-                            except Exception as _dbg_exc3b:
-                                st.error(f"Échec : {_dbg_exc3b}")
-                        # AJOUTÉ (07/08/2026) : teste la nouvelle résolution
-                        # dynamique de libellé de table (get_table_caption_cached)
-                        # sans avoir à relancer toute une analyse Stock complète.
-                        _dbg_table_id_test = st.text_input(
-                            "ID de table à tester (résolution libellé)", value="99000763",
-                            key="dbg_table_caption_input",
-                        )
-                        if st.button("Tester résolution libellé table", key="btn_debug_table_caption"):
-                            try:
-                                caption = get_table_caption_cached(
-                                    cfg.get("client_code", ""), cfg.get("company_id", ""), _dbg_table_id_test
-                                )
-                                if caption:
-                                    st.success(f"✅ Table {_dbg_table_id_test} résolue : \"{caption}\"")
-                                else:
-                                    st.warning(f"⚠️ Table {_dbg_table_id_test} non résolue (None) — AL pas encore republié, table inexistante, ou profil BC incomplet.")
-                            except Exception as _dbg_exc_cap:
-                                st.error(f"Échec : {type(_dbg_exc_cap).__name__}: {_dbg_exc_cap}")
-                        if st.button("Tester recordValues (champ No., table 15)", key="btn_debug_recordvalues"):
-                            try:
-                                _dbg_profile = get_profile_by_code(cfg.get("client_code", ""))
-                                _dbg_tid = _dbg_profile.get("bc_tenant_id", "").strip()
-                                _dbg_cid = _dbg_profile.get("bc_client_id", "").strip()
-                                _dbg_cs  = _dbg_profile.get("bc_client_secret", "").strip()
-                                _dbg_env = _dbg_profile.get("bc_environment", "").strip()
-                                _dbg_company = cfg.get("company_id", "")
-                                _dbg_tok = get_access_token(_dbg_tid, _dbg_cid, _dbg_cs)
-                                _dbg_result = get_gl_account_fields_live(_dbg_tid, _dbg_env, _dbg_company, _dbg_tok)
-                                st.write(f"**{len(_dbg_result)} compte(s) GL trouvé(s) au total.**")
-                                # CORRIGÉ (04/08/2026) : st.json(...[:10]) masquait
-                                # silencieusement tout compte au-delà des 10 premiers
-                                # triés — a fait perdre plusieurs heures de diagnostic
-                                # sur 77110001/76310001 (jamais dans les 10 premiers
-                                # d'une liste de 351 comptes). Recherche ciblée par
-                                # numéro de compte en plus de l'échantillon.
-                                _dbg_lookup = st.text_input(
-                                    "Chercher un/des compte(s) précis (séparés par virgule)",
-                                    value="77110001, 76310001",
-                                    key="dbg_gl_lookup_input",
-                                )
-                                if _dbg_lookup.strip():
-                                    _dbg_targets = [t.strip() for t in _dbg_lookup.split(",") if t.strip()]
-                                    _dbg_found = {t: _dbg_result.get(t, "❌ ABSENT du live") for t in _dbg_targets}
-                                    st.json(_dbg_found)
-                                st.caption("Échantillon (10 premiers comptes, triés) :")
-                                st.json(dict(list(_dbg_result.items())[:10]))
-                            except Exception as e:
-                                st.error(f"{type(e).__name__}: {e}")
-                                _dbg_resp = getattr(e, "response", None)
-                                if _dbg_resp is not None:
-                                    st.code(f"HTTP {_dbg_resp.status_code}\n{_dbg_resp.text[:1500]}")
-
-                        st.divider()
-                        st.caption(
-                            "Test 2 — contourne complètement la résolution par nom de champ : "
-                            "interroge fieldNo=1 en brut (le champ 1 est presque toujours la clé "
-                            "primaire sur une table BC standard). Si ça remonte aussi 0, le "
-                            "problème n'est PAS dans la réflexion par nom mais plus en amont "
-                            "(société vide, table mal ouverte, réponse OData mal formée...)."
-                        )
-                        if st.button("Tester recordValues (fieldNo=1 brut, sans résolution par nom)", key="btn_debug_recordvalues_raw"):
-                            try:
-                                _dbg_profile2 = get_profile_by_code(cfg.get("client_code", ""))
-                                _dbg_tid2 = _dbg_profile2.get("bc_tenant_id", "").strip()
-                                _dbg_cid2 = _dbg_profile2.get("bc_client_id", "").strip()
-                                _dbg_cs2  = _dbg_profile2.get("bc_client_secret", "").strip()
-                                _dbg_env2 = _dbg_profile2.get("bc_environment", "").strip()
-                                _dbg_company2 = cfg.get("company_id", "")
-                                _dbg_tok2 = get_access_token(_dbg_tid2, _dbg_cid2, _dbg_cs2)
-                                import requests as _dbg_requests
-                                from app.core.bc_api import _qc_base as _dbg_qc_base, _headers as _dbg_headers
-                                _dbg_url = f"{_dbg_qc_base(_dbg_tid2, _dbg_env2, _dbg_company2)}/recordValues?$filter=tableId eq 15 and fieldNo eq 1"
-                                st.code(_dbg_url)
-                                _dbg_resp2 = _dbg_requests.get(_dbg_url, headers=_dbg_headers(_dbg_tok2), timeout=30)
-                                st.write(f"**HTTP {_dbg_resp2.status_code}**")
-                                st.code(_dbg_resp2.text[:2000])
-                            except Exception as e:
-                                st.error(f"{type(e).__name__}: {e}")
-
-                        st.divider()
-                        st.caption(
-                            "Test 3 — même requête que le Test 1 (fieldNameFilter='No.'), mais "
-                            "en URL brute construite ici, sans passer par get_record_values_qc. "
-                            "Historique : confirmé cassé côté AL (comparaison FldRef.Name) — "
-                            "contourné depuis via resolve_field_no_via_package(). Conservé ici à "
-                            "titre de comparaison si le comportement AL changeait un jour."
-                        )
-                        if st.button("Tester recordValues (fieldNameFilter='No.' brut)", key="btn_debug_recordvalues_rawname"):
-                            try:
-                                _dbg_profile3 = get_profile_by_code(cfg.get("client_code", ""))
-                                _dbg_tid3 = _dbg_profile3.get("bc_tenant_id", "").strip()
-                                _dbg_cid3 = _dbg_profile3.get("bc_client_id", "").strip()
-                                _dbg_cs3  = _dbg_profile3.get("bc_client_secret", "").strip()
-                                _dbg_env3 = _dbg_profile3.get("bc_environment", "").strip()
-                                _dbg_company3 = cfg.get("company_id", "")
-                                _dbg_tok3 = get_access_token(_dbg_tid3, _dbg_cid3, _dbg_cs3)
-                                import requests as _dbg_requests3
-                                from app.core.bc_api import _qc_base as _dbg_qc_base3, _headers as _dbg_headers3
-                                _dbg_url3 = f"{_dbg_qc_base3(_dbg_tid3, _dbg_env3, _dbg_company3)}/recordValues?$filter=tableId eq 15 and fieldNameFilter eq 'No.'"
-                                st.code(_dbg_url3)
-                                _dbg_resp3 = _dbg_requests3.get(_dbg_url3, headers=_dbg_headers3(_dbg_tok3), timeout=30)
-                                st.write(f"**HTTP {_dbg_resp3.status_code}**")
-                                st.code(_dbg_resp3.text[:2000])
-                            except Exception as e:
-                                st.error(f"{type(e).__name__}: {e}")
-
-                # AJOUTÉ (19/08/2026, 2e passe) — diagnostic ciblé : affiche
-                # EXACTEMENT ce que refresh_roadmap voit pour UNE entrée
-                # précise du roadmap actuellement en mémoire (pas un nouveau
-                # calcul isolé comme le diagnostic get_reference_values_by_
-                # table_id ci-dessus — celui-ci lit le VRAI objet RoadmapEntry
-                # que le bouton "Revérifier" manipule), pour trancher sans
-                # deviner pourquoi un niveau reste non coché malgré une
-                # correction BC confirmée (cf. table 308, 19/08).
-                if _roadmap and is_consultant():
-                    with st.expander("🔬 Diagnostic — état exact d'une entrée du roadmap"):
-                        _diag_table_ids = [e.level_info.table_id for e in _roadmap]
-                        _diag_sel_tid = st.selectbox(
-                            "Table à inspecter", options=_diag_table_ids, key="diag_roadmap_entry_tid"
-                        )
-                        _diag_entry = next(e for e in _roadmap if e.level_info.table_id == _diag_sel_tid)
-                        st.write(f"**status actuel** = `{_diag_entry.status}`")
-                        st.write(f"**level** = `{_diag_entry.level_info.level}` "
-                                 f"| **is_level_unlocked** = `{is_level_unlocked(_diag_entry.level_info.level, _roadmap)}`")
-                        st.write(f"**last_check** (dernier résultat check_table_filled connu) = "
-                                 f"`{getattr(_diag_entry, 'last_check', '(jamais vérifié)')}`")
-                        st.write(f"**sub_anomalies bloquantes** = "
-                                 f"`{_has_blocking_sub_anomalies(getattr(_diag_entry, 'sub_anomalies', None))}`")
-                        st.write("**sub_anomalies brutes :**")
-                        st.write(getattr(_diag_entry, "sub_anomalies", None) or "(aucune)")
-                        # AJOUTÉ (19/08/2026, 3e passe) — repr() explicite de
-                        # chaque champ décisif, pour détecter un type ou un
-                        # caractère invisible que l'affichage JSON normal de
-                        # Streamlit pourrait masquer (espace, None affiché
-                        # comme vide, type non-str, etc.).
-                        st.write("**Détail repr() par entrée (pour détecter un caractère/type inattendu) :**")
-                        for _i, _a in enumerate(getattr(_diag_entry, "sub_anomalies", None) or []):
-                            _tref = _a.get("Table référencée BC", "")
-                            _cman = _a.get("Code manquant", "")
-                            st.code(
-                                f"[{_i}] Table référencée BC = {_tref!r} (type {type(_tref).__name__})\n"
-                                f"[{_i}] Code manquant       = {_cman!r} (type {type(_cman).__name__})\n"
-                                f"[{_i}] str(Table)=='308'   = {str(_tref) == '308'}\n"
-                                f"[{_i}] not str(Code).strip() = {not str(_cman).strip()}",
-                                language=None,
-                            )
-                        if st.button("Appeler check_table_filled maintenant (contournant le cache d'affichage)", key="btn_diag_live_check"):
-                            _diag_live = check_table_filled(cfg["client_code"], cfg["company_id"], _diag_sel_tid)
-                            st.write(f"**check_table_filled live** = `{_diag_live}`")
 
                 if _roadmap:
                     st.markdown("---")
@@ -1434,16 +1144,6 @@ with tab_main:
 
                     st.markdown(f"**Progression — {_pct}%**")
                     st.progress(_pct / 100)
-
-                    # AJOUTÉ (07/08/2026) — DIAGNOSTIC TEMPORAIRE : chronométrage
-                    # précis de chaque étape du chargement des prérequis, pour
-                    # identifier objectivement le vrai goulot plutôt que de deviner
-                    # après plusieurs fixes qui n'ont pas suffi. À retirer une fois
-                    # la cause confirmée et réglée.
-                    if "_perf_log_prereqs" in st.session_state:
-                        with st.expander("⏱️ Chronométrage chargement prérequis (temporaire)", expanded=True):
-                            for _label, _dur in st.session_state["_perf_log_prereqs"]:
-                                st.code(f"{_label} : {_dur:.2f}s", language=None)
 
                     try:
                         for _entry in _roadmap:
@@ -1518,22 +1218,19 @@ with tab_main:
                     _levels_ok = all_validated(_roadmap)
                     if not _levels_ok:
                         st.info("🔒 L'analyse qualité reste verrouillée tant que tous les niveaux ne sont pas validés dans BC.")
-                        # Contournement TEMPORAIRE, consultant uniquement — le temps que
-                        # les tables "Non classé" soient examinées avec Shema et classées
-                        # dans level_config (niveau réel ou ignored=true). Ne doit jamais
-                        # être visible ni utilisable par un client. Affiché UNIQUEMENT s'il
-                        # existe réellement des entrées level=None dans la roadmap — pas
-                        # à chaque fois qu'un niveau correctement classé attend juste
-                        # d'être rempli dans BC (ça, c'est le fonctionnement normal du
-                        # gate, aucun rapport avec une classification manquante).
-                        _has_unclassified = any(e.level_info.level is None for e in _roadmap)
-                        if _has_unclassified and is_consultant():
+                        # RÉVISÉ (20/08/2026) : contournement désormais toujours visible
+                        # pour les consultants, pas seulement si des tables "Non classé"
+                        # existent — demande explicite de Rami pour pouvoir tester la
+                        # partie corrections sans attendre que tout le socle soit validé
+                        # dans BC. Ne doit jamais être visible ni utilisable par un client
+                        # (condition is_consultant() conservée).
+                        if is_consultant():
                             st.warning(
-                                "🔧 Consultant — des tables restent non classées dans level_config. "
-                                "Ce contournement passe outre la vérification, uniquement pour "
-                                "continuer les tests le temps de la classification."
+                                "🔧 Consultant — passage direct à l'analyse qualité sans "
+                                "attendre la validation de tous les niveaux. Pour les tests "
+                                "uniquement, jamais visible côté client."
                             )
-                            if st.checkbox("Ignorer temporairement le verrouillage (consultant, test uniquement)", key="bypass_levels"):
+                            if st.checkbox("Passer directement aux corrections (consultant, test uniquement)", key="bypass_levels"):
                                 _levels_ok = True
                 # _roadmap vide => aucune dépendance de niveau détectée => _levels_ok reste True (analyse directe)
             # level_config vide/non chargée : ne bloque pas l'analyse — à corriger si level_config
