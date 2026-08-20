@@ -1320,6 +1320,22 @@ with tab_main:
                                  f"`{_has_blocking_sub_anomalies(getattr(_diag_entry, 'sub_anomalies', None))}`")
                         st.write("**sub_anomalies brutes :**")
                         st.write(getattr(_diag_entry, "sub_anomalies", None) or "(aucune)")
+                        # AJOUTÉ (19/08/2026, 3e passe) — repr() explicite de
+                        # chaque champ décisif, pour détecter un type ou un
+                        # caractère invisible que l'affichage JSON normal de
+                        # Streamlit pourrait masquer (espace, None affiché
+                        # comme vide, type non-str, etc.).
+                        st.write("**Détail repr() par entrée (pour détecter un caractère/type inattendu) :**")
+                        for _i, _a in enumerate(getattr(_diag_entry, "sub_anomalies", None) or []):
+                            _tref = _a.get("Table référencée BC", "")
+                            _cman = _a.get("Code manquant", "")
+                            st.code(
+                                f"[{_i}] Table référencée BC = {_tref!r} (type {type(_tref).__name__})\n"
+                                f"[{_i}] Code manquant       = {_cman!r} (type {type(_cman).__name__})\n"
+                                f"[{_i}] str(Table)=='308'   = {str(_tref) == '308'}\n"
+                                f"[{_i}] not str(Code).strip() = {not str(_cman).strip()}",
+                                language=None,
+                            )
                         if st.button("Appeler check_table_filled maintenant (contournant le cache d'affichage)", key="btn_diag_live_check"):
                             _diag_live = check_table_filled(cfg["client_code"], cfg["company_id"], _diag_sel_tid)
                             st.write(f"**check_table_filled live** = `{_diag_live}`")
