@@ -573,7 +573,19 @@ def refresh_roadmap(
     for e in roadmap:
         if e.status == "validated" and e.level_info.table_id != 15 and not getattr(e, "sub_anomalies", None):
             continue
-        if not is_level_unlocked(e.level_info.level, roadmap):
+        # RÉVISÉ (19/08/2026) : G/L Account (table 15, niveau 0) contourne
+        # désormais le verrouillage en cascade — demandé par Rami : il est
+        # certain que GL Account est propre dans BC et veut le voir coché
+        # même si le niveau -1 n'est pas encore intégralement terminé
+        # (Code traçabilité, En-tête gamme encore en cours). Le blocage
+        # métier réel (GL Account dépend fonctionnellement des groupes
+        # comptables niveau -1) n'est pas remis en cause : son propre
+        # contrôle (check_table_filled + gl_account_check) continue de
+        # s'exécuter et de décider seul s'il est réellement propre — on
+        # retire juste l'attente artificielle du reste du niveau -1 pour
+        # AFFICHER ce résultat. Aucune autre table ne bénéficie de ce
+        # contournement — la cascade normale s'applique partout ailleurs.
+        if e.level_info.table_id != 15 and not is_level_unlocked(e.level_info.level, roadmap):
             continue
         result = fill_results.get(id(e))
         if result is None:
