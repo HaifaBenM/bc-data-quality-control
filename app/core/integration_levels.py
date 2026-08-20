@@ -267,8 +267,23 @@ def build_roadmap_from_prereqs(
 
     table_ids: set[int] = set(prereqs_by_table.keys())
 
+    # RÉVISÉ (19/08/2026) : avant, seul le niveau 0 (G/L Account, règle
+    # métier absolue) était forcé à toujours apparaître — toute autre table
+    # sans anomalie détectée disparaissait du roadmap plutôt que de
+    # s'afficher cochée. Ça masquait la progression réelle : une fois 349
+    # (Section analytique) corrigée dans BC, elle disparaissait purement et
+    # simplement de l'écran au lieu de montrer ✓ — mauvais pour suivre
+    # visuellement l'avancement (Rami, 19/08, préparation démo).
+    #
+    # Élargi à TOUTES les tables classées dans level_config (pas
+    # spécifiquement niveau -1 ou 0) : contrairement à la traversée par
+    # jointures abandonnée le 27/07 (qui générait ~40 tables techniques de
+    # bruit en suivant tout le schéma BC), level_config reste une liste
+    # COURTE et choisie à la main par le consultant — l'inclure en entier
+    # ne réintroduit pas ce bruit, ce n'est qu'une vingtaine de tables
+    # délibérément classées, pas le schéma BC complet.
     for _tid, _info in level_config.items():
-        if _info.level == 0 and not _info.ignored:
+        if not _info.ignored:
             table_ids.add(_tid)
 
     roadmap: list[RoadmapEntry] = []
@@ -338,11 +353,30 @@ def build_roadmap_from_prereqs(
 _NO_SERIES_TABLE_ID_STR = "308"
 
 
-def _has_blocking_sub_anomalies(sub_anomalies: list[dict] | None) -> bool:
+def _has_blocking_sub_anomalies(
+    sub_anomalies: list[dict] | None,
+    live_codes: set[str] | None = None,
+) -> bool:
     """True si au moins une sub_anomaly doit réellement bloquer la
-    validation du niveau — exclut le cas Souches de n° (table 308) avec
-    Code manquant vide (informationnel, non corrigible via le fichier,
-    dépend uniquement de check_table_filled/l'état réel BC)."""
+    validation du niveau.
+
+    Deux cas non-bloquants :
+      1. Table 308 (Souches de n°) avec Code manquant vide — informationnel,
+         non corrigible via le fichier, dépend uniquement de
+         check_table_filled/l'état réel BC (voir docstring plus haut).
+      2. GÉNÉRALISÉ (19/08/2026, 2e vague) : n'importe quelle sub_anomaly
+         dont le "Code manquant" figure maintenant dans `live_codes` (les
+         codes BC en direct pour CETTE table, via
+         check_table_filled_and_codes) — la donnée existait manquante
+         quand le fichier a été scanné, mais a été créée dans BC depuis.
+         sub_anomalies n'est jamais recalculé par "Revérifier" (il vient du
+         scan initial, figé) — sans ce croisement, un niveau resterait
+         bloqué indéfiniment même après correction BC confirmée sur CETTE
+         valeur précise (constaté sur 349 Section analytique, Rami 19/08,
+         après que le fix ciblé sur 308 seul se soit révélé insuffisant
+         pour toute autre table). `live_codes=None` (repli, ex. appel sans
+         ce contexte) désactive ce croisement — comportement identique à
+         avant pour ne rien casser côté appelants qui ne le fournissent pas."""
     if not sub_anomalies:
         return False
     for a in sub_anomalies:
@@ -350,8 +384,12 @@ def _has_blocking_sub_anomalies(sub_anomalies: list[dict] | None) -> bool:
             str(a.get("Table référencée BC", "")) == _NO_SERIES_TABLE_ID_STR
             and not str(a.get("Code manquant", "")).strip()
         )
-        if not is_souche_vide:
-            return True
+        if is_souche_vide:
+            continue
+        _code_manquant = str(a.get("Code manquant", "")).strip()
+        if live_codes is not None and _code_manquant and _code_manquant in live_codes:
+            continue  # désormais résolu côté BC — plus bloquant
+        return True
     return False
 
 
@@ -416,6 +454,44 @@ def check_table_filled(profile_code: str, company_id: str, table_id: int) -> str
     return "filled" if codes else "empty"
 
 
+def check_table_filled_and_codes(
+    profile_code: str, company_id: str, table_id: int,
+) -> tuple[str, set[str]]:
+    """
+    AJOUTÉ (19/08/2026) — même logique que check_table_filled(), mais
+    expose AUSSI l'ensemble des codes live trouvés dans BC — nécessaire
+    pour croiser chaque entrée de sub_anomalies (voir _has_blocking_sub_anomalies)
+    contre l'état RÉEL actuel de BC, pas seulement contre l'état du fichier
+    au moment de son scan initial.
+
+    Contexte du bug corrigé : le fix précédent (cas 308, Code manquant vide)
+    ne traitait qu'un cas particulier. Pour toute autre table (349, 204,
+    5722, 9, 5404, 18...), sub_anomalies contient un vrai "Code manquant"
+    non vide (ex. "LOCATIONS DIVERSES") — ce texte reste IDENTIQUE après un
+    clic sur "Revérifier", puisque sub_anomalies n'est jamais recalculé par
+    ce bouton (il vient du scan initial du fichier, figé). Résultat avant
+    ce fix : même après avoir créé la valeur manquante dans BC et confirmé
+    check_table_filled="filled", le niveau restait bloqué "pending" parce
+    que sub_anomalies affichait toujours l'ancienne anomalie, jamais
+    revérifiée individuellement. Concret : 349 (Section analytique) resté
+    bloqué malgré la création des 3 valeurs, confirmé par Rami le 19/08.
+
+    Réutilise le même appel réseau que check_table_filled (aucun coût
+    supplémentaire — get_reference_values_by_table_id est déjà appelée une
+    fois par entrée dans refresh_roadmap, on récupère juste les deux
+    informations du même appel au lieu d'en jeter la moitié).
+    """
+    from app.db.metadata_db import get_reference_values_by_table_id
+
+    try:
+        codes, found = get_reference_values_by_table_id(profile_code, company_id, table_id)
+    except Exception:
+        return "unknown", set()
+    if not found:
+        return "unknown", set()
+    return ("filled" if codes else "empty"), codes
+
+
 def refresh_roadmap(
     profile_code: str,
     company_id: str,
@@ -456,16 +532,24 @@ def refresh_roadmap(
         to_check = [e for e in to_check if e.level_info.table_id in scope_table_ids]
 
     fill_results: dict[int, str] = {}
+    fill_codes:   dict[int, set[str]] = {}
     gl_results: dict[int, list[dict] | Exception] = {}
 
-    def _fetch_fill(entry: RoadmapEntry) -> tuple[int, str]:
-        return id(entry), check_table_filled(profile_code, company_id, entry.level_info.table_id)
+    # RÉVISÉ (19/08/2026) : check_table_filled_and_codes() au lieu de
+    # check_table_filled() — même appel réseau, mais on garde aussi les
+    # codes live pour croiser sub_anomalies (voir _has_blocking_sub_anomalies
+    # et sa docstring). Marqueur "fill"/"gl" en 2e position du tuple retourné
+    # au lieu de discriminer par longueur (len(res)==2) — les deux résultats
+    # ont maintenant 4 éléments chacun.
+    def _fetch_fill(entry: RoadmapEntry) -> tuple[int, str, str, set[str]]:
+        status, codes = check_table_filled_and_codes(profile_code, company_id, entry.level_info.table_id)
+        return id(entry), "fill", status, codes
 
     def _fetch_gl(entry: RoadmapEntry):
         try:
-            return id(entry), gl_account_check(), None
+            return id(entry), "gl", gl_account_check(), None
         except Exception as exc:
-            return id(entry), None, exc
+            return id(entry), "gl", None, exc
 
     with ThreadPoolExecutor(max_workers=8) as pool:
         futures = [pool.submit(_fetch_fill, e) for e in to_check]
@@ -474,11 +558,13 @@ def refresh_roadmap(
             futures += [pool.submit(_fetch_gl, e) for e in gl_entries]
         for fut in as_completed(futures):
             res = fut.result()
-            if len(res) == 2:
-                eid, result = res
+            eid, kind = res[0], res[1]
+            if kind == "fill":
+                _, _, result, codes = res
                 fill_results[eid] = result
+                fill_codes[eid] = codes
             else:
-                eid, gl_res, gl_exc = res
+                _, _, gl_res, gl_exc = res
                 gl_results[eid] = gl_exc if gl_exc is not None else gl_res
 
     for e in roadmap:
@@ -522,9 +608,9 @@ def refresh_roadmap(
                 e.status = "pending"  # comptes existent mais champs vides (ou contrôle en échec) — jamais validé
             continue
 
-        if result == "filled" and not _has_blocking_sub_anomalies(getattr(e, "sub_anomalies", None)):
+        if result == "filled" and not _has_blocking_sub_anomalies(getattr(e, "sub_anomalies", None), fill_codes.get(id(e))):
             e.status = "validated"
-        elif _has_blocking_sub_anomalies(getattr(e, "sub_anomalies", None)):
+        elif _has_blocking_sub_anomalies(getattr(e, "sub_anomalies", None), fill_codes.get(id(e))):
             # CORRIGÉ (07/08/2026) : généralisation du fix du 04/08 (jusque-là
             # réservé à la table 15). N'importe quel niveau pouvait être
             # validé à tort dès que check_table_filled voyait des données,
