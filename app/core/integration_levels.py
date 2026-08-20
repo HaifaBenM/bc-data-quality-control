@@ -267,23 +267,8 @@ def build_roadmap_from_prereqs(
 
     table_ids: set[int] = set(prereqs_by_table.keys())
 
-    # RÉVISÉ (19/08/2026) : avant, seul le niveau 0 (G/L Account, règle
-    # métier absolue) était forcé à toujours apparaître — toute autre table
-    # sans anomalie détectée disparaissait du roadmap plutôt que de
-    # s'afficher cochée. Ça masquait la progression réelle : une fois 349
-    # (Section analytique) corrigée dans BC, elle disparaissait purement et
-    # simplement de l'écran au lieu de montrer ✓ — mauvais pour suivre
-    # visuellement l'avancement (Rami, 19/08, préparation démo).
-    #
-    # Élargi à TOUTES les tables classées dans level_config (pas
-    # spécifiquement niveau -1 ou 0) : contrairement à la traversée par
-    # jointures abandonnée le 27/07 (qui générait ~40 tables techniques de
-    # bruit en suivant tout le schéma BC), level_config reste une liste
-    # COURTE et choisie à la main par le consultant — l'inclure en entier
-    # ne réintroduit pas ce bruit, ce n'est qu'une vingtaine de tables
-    # délibérément classées, pas le schéma BC complet.
     for _tid, _info in level_config.items():
-        if not _info.ignored:
+        if _info.level == 0 and not _info.ignored:
             table_ids.add(_tid)
 
     roadmap: list[RoadmapEntry] = []
