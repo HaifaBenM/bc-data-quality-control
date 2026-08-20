@@ -1165,7 +1165,20 @@ with tab_main:
                         # sub_anomalies à CHAQUE niveau concerné (pas seulement GL
                         # Account) — demandé par Rami le 27/07 : plusieurs tables
                         # prérequis doivent chacune afficher leur propre détail.
-                        st.session_state[_roadmap_key] = build_roadmap_from_prereqs(_prereqs, _level_cfg)
+                        #
+                        # AJOUTÉ (19/08/2026) — previous_table_ids : garde affichées
+                        # (cochées ✓ une fois propres) les tables déjà vues dans CETTE
+                        # session de travail, au lieu qu'elles disparaissent purement
+                        # et simplement dès qu'elles n'ont plus d'anomalie détectée.
+                        # Repli sur set() si aucun roadmap précédent en mémoire (1er
+                        # scan) — comportement inchangé dans ce cas.
+                        _prev_roadmap = st.session_state.get(_roadmap_key)
+                        _previous_table_ids = (
+                            {e.level_info.table_id for e in _prev_roadmap} if _prev_roadmap else set()
+                        )
+                        st.session_state[_roadmap_key] = build_roadmap_from_prereqs(
+                            _prereqs, _level_cfg, previous_table_ids=_previous_table_ids
+                        )
                         _perf_log.append(("build_roadmap_from_prereqs", _perf_time.time() - _t))
                         _perf_log.append(("TOTAL", _perf_time.time() - _t_start))
                         st.session_state["_perf_log_prereqs"] = _perf_log

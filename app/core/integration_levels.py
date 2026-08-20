@@ -224,6 +224,7 @@ def build_roadmap(
 def build_roadmap_from_prereqs(
     prereqs: list[dict],
     level_config: dict[int, LevelInfo],
+    previous_table_ids: set[int] | None = None,
 ) -> list[RoadmapEntry]:
     """
     Construit la roadmap à partir des vraies anomalies Axe B (sortie de
@@ -256,6 +257,21 @@ def build_roadmap_from_prereqs(
     appelant (2_Sessions_Integration.py) — demandé par Rami : si plusieurs
     tables ont des prérequis détectés, chacune doit afficher le sien, pas
     seulement GL Account.
+
+    previous_table_ids (AJOUTÉ 19/08/2026) : ensemble optionnel de table_id
+    déjà affichés dans le roadmap AVANT ce rescan (à passer par l'appelant
+    depuis le roadmap en session_state). Une table qui y figure reste
+    affichée même si elle n'a PLUS d'anomalie détectée dans `prereqs` — elle
+    apparaît alors avec sub_anomalies=None, ce qui la laisse passer
+    "validated" (cochée ✓) via refresh_roadmap dès que check_table_filled
+    confirme BC propre, au lieu de disparaître purement et simplement de
+    l'écran. Ne concerne QUE les tables déjà vues dans CETTE session de
+    travail précise — jamais tout level_config (voir tentative ratée du
+    19/08 : inclure tout level_config remonte des tables d'autres domaines
+    métier, Achats/Ventes/Immobilisations, sans rapport avec le fichier en
+    cours). None (défaut) = comportement inchangé, une table disparaît dès
+    qu'elle n'a plus d'anomalie — pour ne rien casser côté appelants qui ne
+    fournissent pas ce paramètre.
     """
     prereqs_by_table: dict[int, list[dict]] = {}
     for row in prereqs:
@@ -266,6 +282,8 @@ def build_roadmap_from_prereqs(
         prereqs_by_table.setdefault(_tid, []).append(row)
 
     table_ids: set[int] = set(prereqs_by_table.keys())
+    if previous_table_ids:
+        table_ids |= previous_table_ids
 
     for _tid, _info in level_config.items():
         if _info.level == 0 and not _info.ignored:
