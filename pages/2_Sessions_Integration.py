@@ -396,7 +396,7 @@ def display_unified_results(merged: dict, axe_c: dict, pr: dict = None):
                 ]
 
                 if filtered:
-                    cols_to_show = ["Ligne", "N° fonctionnel", "Champ", "Valeur", "Type d'anomalie", "Sévérité", "Classification", "Message", "Correction suggérée"]
+                    cols_to_show = ["Ligne", "Identifiant métier", "Champ", "Valeur", "Type d'anomalie", "Sévérité", "Classification", "Message", "Correction suggérée"]
                     df_show      = pd.DataFrame([{c: a.get(c, "") for c in cols_to_show} for a in filtered])
 
                     def color_row(row):
@@ -544,7 +544,7 @@ def display_correction_workflow(merged: dict, cfg: dict, pr: dict):
             # AJOUTÉ (20/08/2026) : clé métier (ex. N° article) — demande
             # Rami : rend la ligne identifiable sans réouvrir le fichier,
             # pour proposer une correction en connaissance de cause.
-            "N° fonctionnel":  a.get("N° fonctionnel", ""),
+            "Identifiant métier":  a.get("Identifiant métier", ""),
             "Champ":           a.get("Champ", ""),
             "Valeur actuelle": a.get("Valeur", ""),
             "Nouvelle valeur": a.get("Correction suggérée", ""),
@@ -555,7 +555,7 @@ def display_correction_workflow(merged: dict, cfg: dict, pr: dict):
         pd.DataFrame(edit_rows),
         use_container_width=True,
         hide_index=True,
-        disabled=["Onglet", "Ligne", "N° fonctionnel", "Champ", "Valeur actuelle"],
+        disabled=["Onglet", "Ligne", "Identifiant métier", "Champ", "Valeur actuelle"],
         column_config={
             "Appliquer": st.column_config.CheckboxColumn(
                 help="Cocher pour inclure cette ligne dans le fichier généré"
@@ -1184,7 +1184,21 @@ with tab_main:
                                 _label = f"{_label} ({_entry.level_info.sub_level})"
 
                             if _entry.status == "validated":
-                                _circle, _lbl_cls = '<div class="level-check-circle-done">✓</div>', "level-check-label-done"
+                                # AJOUTÉ (20/08/2026) — distinction honnête : le cercle
+                                # vert (✓) reste réservé au confirmé BC réel ; un statut
+                                # validé uniquement via la mémoire d'une autre session
+                                # affiche un repère orange (🟡) distinct, avec une légende
+                                # explicite — le client doit voir la différence, ce n'est
+                                # pas la même garantie (décision Rami, 20/08).
+                                if getattr(_entry, "validated_via", None) == "memory":
+                                    _circle, _lbl_cls = (
+                                        '<div class="level-check-circle-done" '
+                                        'style="background:#F59E0B;">🟡</div>',
+                                        "level-check-label-done",
+                                    )
+                                    _label += " — en attente d'intégration BC (mémoire)"
+                                else:
+                                    _circle, _lbl_cls = '<div class="level-check-circle-done">✓</div>', "level-check-label-done"
                             elif not _unlocked:
                                 _circle, _lbl_cls = '<div class="level-check-circle-todo"></div>', "level-check-label-locked"
                             else:
@@ -1246,23 +1260,26 @@ with tab_main:
                             key="dl_all_sub_anomalies",
                         )
 
-                    _levels_ok = all_validated(_roadmap)
-                    if not _levels_ok:
-                        st.info("🔒 L'analyse qualité reste verrouillée tant que tous les niveaux ne sont pas validés dans BC.")
-                        # RÉVISÉ (20/08/2026) : contournement désormais toujours visible
-                        # pour les consultants, pas seulement si des tables "Non classé"
-                        # existent — demande explicite de Rami pour pouvoir tester la
-                        # partie corrections sans attendre que tout le socle soit validé
-                        # dans BC. Ne doit jamais être visible ni utilisable par un client
-                        # (condition is_consultant() conservée).
-                        if is_consultant():
-                            st.warning(
-                                "🔧 Consultant — passage direct à l'analyse qualité sans "
-                                "attendre la validation de tous les niveaux. Pour les tests "
-                                "uniquement, jamais visible côté client."
-                            )
-                            if st.checkbox("Passer directement aux corrections (consultant, test uniquement)", key="bypass_levels"):
-                                _levels_ok = True
+                    # RÉVISÉ (20/08/2026) — changement de philosophie validé avec Rami :
+                    # "prêt pour la correction" ne dépend plus de "tous les niveaux
+                    # validés". Avec la mémoire inter-sessions, exiger une validation
+                    # BC complète avant de pouvoir corriger un fichier bloque le flux
+                    # réel du client (il prépare/corrige TOUS ses MDD avant que le
+                    # consultant intègre en bloc — pendant toute cette phase, BC reste
+                    # naturellement incomplet). Le roadmap garde sa valeur de suivi/
+                    # priorisation, mais n'est plus une porte. Le vrai garde-fou se
+                    # déplace vers la clôture de session (can_close_session,
+                    # sessions_db.py) et vers l'intégration BC réelle — pas vers la
+                    # préparation/correction du fichier.
+                    _levels_ok = True
+                    _n_pending = sum(1 for e in _roadmap if e.status != "validated") if _roadmap else 0
+                    if _n_pending:
+                        st.info(
+                            f"ℹ️ {_n_pending} niveau(x) prérequis pas encore confirmé(s) "
+                            "(ni en BC, ni via une autre session) — tu peux corriger ce "
+                            "fichier dès maintenant, mais vérifie ces niveaux avant "
+                            "l'intégration réelle dans BC."
+                        )
                 # _roadmap vide => aucune dépendance de niveau détectée => _levels_ok reste True (analyse directe)
             # level_config vide/non chargée : ne bloque pas l'analyse — à corriger si level_config
             # doit être rendue obligatoire (dépend de si tu veux imposer le seed avant tout usage).

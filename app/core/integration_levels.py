@@ -150,6 +150,12 @@ class RoadmapEntry:
     status:         str = "pending"  # "pending" | "validated"
     last_check:     str | None = None  # None | "filled" | "empty" | "unknown" — motif du statut "pending", pour l'UI
     sub_anomalies:  list[dict] | None = None  # détail à afficher en sous-niveau (ex. comptes GL avec champs vides) — None si non applicable à cette table, [] si applicable et propre
+    # AJOUTÉ (20/08/2026) — distinction honnête 🟢 confirmé BC / 🟡 en
+    # attente d'intégration (mémoire inter-sessions seule). None tant que
+    # non validé ; "bc" si au moins une partie du "filled" vient de BC
+    # réel ; "memory" si UNIQUEMENT la mémoire (aucune donnée BC réelle
+    # pour cette table à ce jour).
+    validated_via:  str | None = None  # None | "bc" | "memory"
 
 
 def build_roadmap(
@@ -489,7 +495,7 @@ def check_table_filled(profile_code: str, company_id: str, table_id: int) -> str
 def check_table_filled_and_codes(
     profile_code: str, company_id: str, table_id: int,
     exclude_session_id: str | None = None,
-) -> tuple[str, set[str]]:
+) -> tuple[str, set[str], set[str]]:
     """
     AJOUTÉ (19/08/2026) — même logique que check_table_filled(), mais
     expose AUSSI l'ensemble des codes live trouvés dans BC — nécessaire
@@ -525,20 +531,28 @@ def check_table_filled_and_codes(
     propre fichier. best_effort : si la lecture Supabase échoue, on
     continue avec les seuls codes BC (voir get_pending_codes, jamais
     bloquant).
+
+    RÉVISÉ (20/08/2026, 2e passe) : retourne désormais aussi `bc_codes`
+    (les codes confirmés en BC réel, AVANT union avec la mémoire) en 3e
+    élément — nécessaire pour que l'UI distingue honnêtement "🟢 confirmé
+    BC" de "🟡 en attente d'intégration (mémoire seule)", au lieu
+    d'afficher les deux de façon identique (décision prise avec Rami,
+    20/08 : le client doit voir la nuance, ce n'est pas la même garantie).
     """
     from app.db.metadata_db import get_reference_values_by_table_id, get_pending_codes
 
     try:
-        codes, found = get_reference_values_by_table_id(profile_code, company_id, table_id)
+        bc_codes, found = get_reference_values_by_table_id(profile_code, company_id, table_id)
+        bc_codes = bc_codes or set()
     except Exception:
-        codes, found = set(), False
+        bc_codes, found = set(), False
 
     pending = get_pending_codes(profile_code, company_id, table_id, exclude_session_id)
-    codes = (codes or set()) | pending
+    codes = bc_codes | pending
 
     if not found and not pending:
-        return "unknown", set()
-    return ("filled" if codes else "empty"), codes
+        return "unknown", set(), set()
+    return ("filled" if codes else "empty"), codes, bc_codes
 
 
 def refresh_roadmap(
@@ -588,6 +602,9 @@ def refresh_roadmap(
 
     fill_results: dict[int, str] = {}
     fill_codes:   dict[int, set[str]] = {}
+    # AJOUTÉ (20/08/2026) : codes confirmés BC réel séparément (avant union
+    # mémoire) — nécessaire pour calculer validated_via ("bc" vs "memory").
+    fill_bc_codes: dict[int, set[str]] = {}
     gl_results: dict[int, list[dict] | Exception] = {}
 
     # RÉVISÉ (19/08/2026) : check_table_filled_and_codes() au lieu de
@@ -596,12 +613,12 @@ def refresh_roadmap(
     # et sa docstring). Marqueur "fill"/"gl" en 2e position du tuple retourné
     # au lieu de discriminer par longueur (len(res)==2) — les deux résultats
     # ont maintenant 4 éléments chacun.
-    def _fetch_fill(entry: RoadmapEntry) -> tuple[int, str, str, set[str]]:
-        status, codes = check_table_filled_and_codes(
+    def _fetch_fill(entry: RoadmapEntry) -> tuple[int, str, str, set[str], set[str]]:
+        status, codes, bc_codes = check_table_filled_and_codes(
             profile_code, company_id, entry.level_info.table_id,
             exclude_session_id=exclude_session_id,
         )
-        return id(entry), "fill", status, codes
+        return id(entry), "fill", status, codes, bc_codes
 
     def _fetch_gl(entry: RoadmapEntry):
         try:
@@ -618,9 +635,10 @@ def refresh_roadmap(
             res = fut.result()
             eid, kind = res[0], res[1]
             if kind == "fill":
-                _, _, result, codes = res
+                _, _, result, codes, bc_codes = res
                 fill_results[eid] = result
                 fill_codes[eid] = codes
+                fill_bc_codes[eid] = bc_codes
             else:
                 _, _, gl_res, gl_exc = res
                 gl_results[eid] = gl_exc if gl_exc is not None else gl_res
@@ -674,12 +692,17 @@ def refresh_roadmap(
             # succès, rien trouvé) le peut.
             if result == "filled" and not _has_blocking_sub_anomalies(e.sub_anomalies):
                 e.status = "validated"
+                # AJOUTÉ (20/08/2026) : "bc" si au moins un code BC réel existe
+                # pour cette table, sinon "memory" (validé uniquement via la
+                # mémoire d'une autre session — voir docstring RoadmapEntry).
+                e.validated_via = "bc" if fill_bc_codes.get(id(e)) else "memory"
             elif _has_blocking_sub_anomalies(e.sub_anomalies):
                 e.status = "pending"  # comptes existent mais champs vides (ou contrôle en échec) — jamais validé
             continue
 
         if result == "filled" and not _has_blocking_sub_anomalies(getattr(e, "sub_anomalies", None), fill_codes.get(id(e))):
             e.status = "validated"
+            e.validated_via = "bc" if fill_bc_codes.get(id(e)) else "memory"
         elif _has_blocking_sub_anomalies(getattr(e, "sub_anomalies", None), fill_codes.get(id(e))):
             # CORRIGÉ (07/08/2026) : généralisation du fix du 04/08 (jusque-là
             # réservé à la table 15). N'importe quel niveau pouvait être
