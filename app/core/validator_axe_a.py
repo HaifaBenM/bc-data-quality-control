@@ -355,7 +355,7 @@ def _anomaly(
         # Rami : rend chaque ligne d'anomalie identifiable sans réouvrir le
         # fichier Excel, utile en particulier dans le tableau des
         # corrections (VALEUR_CORRIGIBLE).
-        "N° fonctionnel":      key_value,
+        "Identifiant métier":      key_value,
         "Champ":               field,
         "Valeur":              value,
         "Type d'anomalie":     error_type,

@@ -151,7 +151,7 @@ def validate_axe_b(
                 anomalies.append({
                     "Ligne":               0,
                     "Onglet":              sheet_name,
-                    "N° fonctionnel":      "",
+                    "Identifiant métier":      "",
                     "Champ":               col,
                     "Valeur":              "",
                     "Type d'anomalie":     "Code de référence non vérifiable",
@@ -204,7 +204,7 @@ def validate_axe_b(
                         anomalies.append({
                             "Ligne":               int(row_idx) + 4,
                             "Onglet":              sheet_name,
-                            "N° fonctionnel":      _key_val_b,
+                            "Identifiant métier":      _key_val_b,
                             "Champ":               col,
                             "Valeur":              "",
                             "Type d'anomalie":     "Souches de n° non résolvable",
@@ -255,7 +255,7 @@ def validate_axe_b(
                     anomalies.append({
                         "Ligne":               int(row_idx) + 4,
                         "Onglet":              sheet_name,
-                        "N° fonctionnel":      _key_val_b,
+                        "Identifiant métier":      _key_val_b,
                         "Champ":               col,
                         "Valeur":              value,
                         "Type d'anomalie":     "Code de référence invalide",
@@ -293,7 +293,7 @@ def validate_axe_b(
     anomalies.append({
         "Ligne":               0,
         "Onglet":              sheet_name,
-        "N° fonctionnel":      "",
+        "Identifiant métier":      "",
         "Champ":               "",
         "Valeur":              "",
         "Type d'anomalie":     "Validation références non disponible",
@@ -412,7 +412,7 @@ def validate_file_axe_b(
                             # clé métier de la ligne. Laissé en suivi futur
                             # si ce détail s'avère nécessaire pour ce cas
                             # précis ; n'empêche pas l'affichage de la colonne.
-                            "N° fonctionnel":      "",
+                            "Identifiant métier":      "",
                             "Champ":               ta.field_name,
                             "Valeur":              ta.value,
                             "Type d'anomalie":     f"Trigger {ta.trigger_type}",
