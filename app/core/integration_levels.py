@@ -225,6 +225,8 @@ def build_roadmap_from_prereqs(
     prereqs: list[dict],
     level_config: dict[int, LevelInfo],
     previous_table_ids: set[int] | None = None,
+    profile_code: str | None = None,
+    company_id: str | None = None,
 ) -> list[RoadmapEntry]:
     """
     Construit la roadmap à partir des vraies anomalies Axe B (sortie de
@@ -272,6 +274,17 @@ def build_roadmap_from_prereqs(
     cours). None (défaut) = comportement inchangé, une table disparaît dès
     qu'elle n'a plus d'anomalie — pour ne rien casser côté appelants qui ne
     fournissent pas ce paramètre.
+
+    profile_code/company_id (AJOUTÉ 20/08/2026) : si fournis, le nom de
+    chaque table classée (level_config) est écrasé par sa légende BC
+    résolue dynamiquement en français (get_table_caption_cached, même
+    mécanisme déjà utilisé par build_prerequisites_report) — level_config
+    est alimenté à la main par plusieurs personnes (Bilel, Rami) et mélange
+    du français et de l'anglais selon qui a inséré la ligne (ex. "Currency"
+    vs "Groupe compta. produit") ; unifie l'affichage du roadmap et de
+    l'arbre mère/fille, qui lisaient tous les deux le nom brut stocké.
+    Repli silencieux sur le nom stocké si la résolution échoue ou n'est pas
+    fournie — jamais bloquant.
     """
     prereqs_by_table: dict[int, list[dict]] = {}
     for row in prereqs:
@@ -314,6 +327,22 @@ def build_roadmap_from_prereqs(
                 sub_level=None,
                 note="Anomalie Axe B réelle sur cette table, absente de level_config — à classer, mais quand même vérifiée.",
             )
+        # AJOUTÉ (20/08/2026) : unifie la langue du nom de table affiché —
+        # voir docstring. Ne modifie que l'affichage (table_name), jamais
+        # table_id/level/sub_level qui pilotent la vraie logique.
+        if info is not None and profile_code and company_id:
+            try:
+                from app.db.metadata_db import get_table_caption_cached
+                _fr_caption = get_table_caption_cached(profile_code, company_id, table_id)
+                if _fr_caption:
+                    info = LevelInfo(
+                        table_id=info.table_id, table_name=_fr_caption,
+                        level=info.level, sub_level=info.sub_level,
+                        note=info.note, ignored=info.ignored,
+                    )
+            except Exception:
+                pass  # unification du nom : jamais bloquant, repli sur le nom stocké
+
         roadmap.append(RoadmapEntry(
             level_info=info,
             chain_resolved=True,

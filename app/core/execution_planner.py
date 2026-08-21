@@ -101,8 +101,20 @@ _NONZERO_REQUIRED_FIELDS: dict[str, list[str]] = {
 }
 
 _KEY_FIELD: dict[str, str] = {
+    # Tables identifiées par "N°" (master data avec numérotation)
     "18": "N°", "23": "N°", "27": "N°", "15": "N°", "5050": "N°",
-    "3":  "Code", "4": "Code", "9": "Code", "10": "Code", "204": "Code",
+    # Tables identifiées par "Code" (référence/posting groups/dimensions)
+    "3": "Code", "4": "Code", "9": "Code", "10": "Code", "204": "Code",
+    # AJOUTÉ (20/08/2026) : tables manquantes qui retombaient à tort sur le
+    # défaut "N°" (colonne inexistante sur ces onglets, donc N° fonctionnel
+    # vide ou faux) — toutes identifiées par Code dans BC standard : groupes
+    # comptables (91/92/93/94/5606/251/252/323/324/325), valeurs de
+    # dimension (349), catégories d'articles (5722), codes de traçabilité
+    # (6502). Confirmé par Rami le 20/08 : le champ doit être propre à
+    # CHAQUE table, pas un défaut générique appliqué partout.
+    "91": "Code", "92": "Code", "93": "Code", "94": "Code", "5606": "Code",
+    "251": "Code", "252": "Code", "323": "Code", "324": "Code", "325": "Code",
+    "349": "Code", "5722": "Code", "6502": "Code", "289": "Code", "308": "Code",
     "default": "N°",
 }
 
@@ -113,6 +125,24 @@ def get_default_key_field(table_id: int) -> str:
     ExecutionPlan complet (ex. extraction de la mémoire inter-sessions à la
     sauvegarde d'une session, où aucun plan BC n'a forcément été chargé)."""
     return _KEY_FIELD.get(str(table_id), _KEY_FIELD["default"])
+
+
+def resolve_key_field_in_columns(table_id: int, columns) -> str | None:
+    """
+    AJOUTÉ (20/08/2026) — filet de sécurité : si le champ clé configuré pour
+    cette table (_KEY_FIELD) n'est en fait pas une colonne de CET onglet
+    précis (dictionnaire incomplet, table non répertoriée, variation entre
+    fichiers), essaie l'autre candidat usuel (N° <-> Code) avant d'abandonner.
+    Retourne None si ni l'un ni l'autre n'existe — l'appelant doit alors
+    afficher une valeur vide plutôt qu'une valeur fausse.
+    """
+    configured = get_default_key_field(table_id)
+    if configured in columns:
+        return configured
+    alternate = "Code" if configured == "N°" else "N°"
+    if alternate in columns:
+        return alternate
+    return None
 
 
 @dataclass

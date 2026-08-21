@@ -502,13 +502,43 @@ def display_correction_workflow(merged: dict, cfg: dict, pr: dict):
         f"**✏️ {len(corrigibles)} anomalie(s) corrigible(s) dans le fichier — "
         f"éditez « Nouvelle valeur » et cochez « Appliquer » pour chaque ligne à intégrer :**"
     )
+    # AJOUTÉ (20/08/2026) — sélection en lot, demande Rami : possibilité de
+    # cocher/décocher toutes les lignes d'un coup, en plus du cas par cas
+    # déjà existant. `_editor_gen` change de valeur à chaque clic pour
+    # forcer Streamlit à traiter le data_editor comme un widget neuf (sinon
+    # l'état interne déjà édité par l'utilisateur prime sur les nouvelles
+    # valeurs qu'on lui passe, et "Tout sélectionner" resterait sans effet
+    # visible).
+    _editor_gen_key = "corrections_editor_gen"
+    if _editor_gen_key not in st.session_state:
+        st.session_state[_editor_gen_key] = 0
+
+    csel1, csel2, csel3 = st.columns([1.3, 1.3, 4])
+    with csel1:
+        if st.button("✅ Tout sélectionner", key="btn_select_all_corr", use_container_width=True):
+            st.session_state["_corrections_select_override"] = True
+            st.session_state[_editor_gen_key] += 1
+            st.rerun()
+    with csel2:
+        if st.button("⬜ Tout désélectionner", key="btn_deselect_all_corr", use_container_width=True):
+            st.session_state["_corrections_select_override"] = False
+            st.session_state[_editor_gen_key] += 1
+            st.rerun()
+
+    _select_override = st.session_state.pop("_corrections_select_override", None)
+
     edit_rows = [
         {
             # Coché par défaut UNIQUEMENT si on a déjà une suggestion fiable
             # (ex: code de référence proche trouvé). Sinon décoché : le
             # consultant doit taper une valeur avant de pouvoir l'appliquer,
             # jamais une case vide poussée par défaut dans le fichier généré.
-            "Appliquer":       bool(str(a.get("Correction suggérée", "")).strip()),
+            # Si "Tout sélectionner/désélectionner" vient d'être cliqué,
+            # _select_override prime sur ce comportement par défaut.
+            "Appliquer": (
+                _select_override if _select_override is not None
+                else bool(str(a.get("Correction suggérée", "")).strip())
+            ),
             "Onglet":          a.get("Onglet", ""),
             "Ligne":           a.get("Ligne", 0),
             # AJOUTÉ (20/08/2026) : clé métier (ex. N° article) — demande
@@ -534,7 +564,7 @@ def display_correction_workflow(merged: dict, cfg: dict, pr: dict):
                 help="Modifiable — tapez la valeur correcte pour cette cellule"
             ),
         },
-        key="corrections_editor",
+        key=f"corrections_editor_{st.session_state[_editor_gen_key]}",
     )
 
     cgen1, cgen2 = st.columns([2, 6])
@@ -1096,7 +1126,8 @@ with tab_main:
                             {e.level_info.table_id for e in _prev_roadmap} if _prev_roadmap else set()
                         )
                         st.session_state[_roadmap_key] = build_roadmap_from_prereqs(
-                            _prereqs, _level_cfg, previous_table_ids=_previous_table_ids
+                            _prereqs, _level_cfg, previous_table_ids=_previous_table_ids,
+                            profile_code=client_code, company_id=cfg.get("company_id", ""),
                         )
                     except Exception as e:
                         st.session_state[_roadmap_key] = []

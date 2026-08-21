@@ -7,6 +7,7 @@ import re
 import pandas as pd
 from datetime import datetime
 from app.core.bc_order import sort_sheets_by_bc_order, get_bc_order_summary
+from app.core.execution_planner import resolve_key_field_in_columns
 
 
 DATE_FORMATS = [
@@ -122,8 +123,16 @@ def validate_axe_a(
 ) -> list[dict]:
     anomalies  = []
     table_id_s = str(table_id)
-    key_field  = execution_plan.get_key_field(int(table_id)) \
-                 if execution_plan and table_id else "N°"
+    # RÉVISÉ (20/08/2026) : resolve_key_field_in_columns essaie l'alternative
+    # (N° <-> Code) si le champ configuré pour cette table n'est pas une
+    # colonne réelle de CET onglet — évite un N° fonctionnel vide ou faux
+    # sur les tables identifiées par Code (251, 349, 5722, 94...) qui
+    # retombaient auparavant sur "N°" par défaut, une colonne inexistante
+    # sur ces onglets (confirmé par Rami le 20/08).
+    key_field = (
+        resolve_key_field_in_columns(int(table_id), df.columns) or "N°"
+        if execution_plan and table_id else "N°"
+    )
 
     has_plan   = (
         execution_plan is not None

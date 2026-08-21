@@ -7,6 +7,7 @@ import pandas as pd
 from app.db.metadata_db import get_reference_values_by_table_id
 from app.core.bc_order import sort_sheets_by_bc_order, get_bc_order_summary
 from app.core.correction_classifier import classify_reference_anomaly
+from app.core.execution_planner import resolve_key_field_in_columns
 
 
 def validate_axe_b(
@@ -179,7 +180,13 @@ def validate_axe_b(
             # "ACC001"), calculée une fois avant la boucle — même logique que
             # validator_axe_a.py, pour que chaque anomalie Axe B soit
             # identifiable sans réouvrir le fichier Excel (demande Rami).
-            _key_field_b = execution_plan.get_key_field(table_id_int) if execution_plan else "N°"
+            # RÉVISÉ (20/08/2026) : même filet de sécurité que validator_axe_a.py
+            # — essaie l'alternative (N° <-> Code) si le champ configuré n'est
+            # pas une colonne réelle de cet onglet.
+            _key_field_b = (
+                resolve_key_field_in_columns(table_id_int, df.columns) or "N°"
+                if execution_plan else "N°"
+            )
 
             # Valider chaque ligne
             for row_idx, row in df.iterrows():

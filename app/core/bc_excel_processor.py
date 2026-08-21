@@ -8,7 +8,7 @@ import io
 import re
 import zipfile
 import openpyxl
-from app.core.execution_planner import get_default_key_field
+from app.core.execution_planner import get_default_key_field, resolve_key_field_in_columns
 
 # ── Exemples par table/champ ──────────────────────────────────────────────────
 _FIELD_EXAMPLES: dict[int, dict[str, list[str]]] = {
@@ -486,8 +486,10 @@ def extract_key_values_by_table(excel_bytes: bytes) -> dict[int, set[str]]:
             headers.append(str(v) if v is not None else "")
             col += 1
 
-        key_field = get_default_key_field(table_id)
-        if key_field not in headers:
+        # RÉVISÉ (20/08/2026) : resolve_key_field_in_columns essaie
+        # l'alternative (N° <-> Code) au lieu d'abandonner directement.
+        key_field = resolve_key_field_in_columns(table_id, headers)
+        if key_field is None:
             continue
         key_col = headers.index(key_field) + 1
 
