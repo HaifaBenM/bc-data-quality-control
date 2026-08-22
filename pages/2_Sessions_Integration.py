@@ -825,6 +825,26 @@ with tab_main:
             gemini_ok = is_gemini_available()
             st.markdown("🤖 **Suggestions IA :** " + ("✅ Activées" if gemini_ok else "⚠️ Non configurées"))
 
+            # DÉPLACÉ (22/08/2026) depuis l'Étape 3 : plus logique à la
+            # création de session qu'au milieu de l'analyse des prérequis.
+            # Vide UNIQUEMENT bc_metadata_cache (entity_type='reference') —
+            # n'a AUCUN effet sur la mémoire inter-sessions
+            # (session_pending_codes), mécanisme complètement séparé.
+            if is_consultant():
+                if st.button("🔄 Vider le cache des valeurs de référence (Supabase)", key="btn_clear_ref_cache"):
+                    try:
+                        ok, err = clear_reference_cache(
+                            profile_code = active_client,
+                            company_id   = sel_company_id,
+                        )
+                        if ok:
+                            st.success("Cache des tables de référence vidé — sera rechargé depuis BC au prochain contrôle.")
+                        else:
+                            st.error(f"Échec du vidage : {err}")
+                    except Exception as e:
+                        st.error(f"Échec du vidage : {e}")
+                    st.rerun()
+
         st.markdown("---")
         col_rc, _, col_btn = st.columns([2, 6, 2])
         with col_rc:
@@ -1011,21 +1031,6 @@ with tab_main:
             # leur création). Bouton consultant, même logique que celui de
             # level_config ci-dessus — vidage manuel à la demande, pas de
             # rafraîchissement automatique.
-            if is_consultant():
-                if st.button("🔄 Vider le cache des valeurs de référence (Supabase)", key="btn_clear_ref_cache"):
-                    try:
-                        ok, err = clear_reference_cache(
-                            profile_code = cfg.get("client_code", ""),
-                            company_id   = cfg.get("company_id", ""),
-                        )
-                        if ok:
-                            st.success("Cache des tables de référence vidé — sera rechargé depuis BC au prochain contrôle.")
-                        else:
-                            st.error(f"Échec du vidage : {err}")
-                    except Exception as e:
-                        st.error(f"Échec du vidage : {e}")
-                    st.rerun()
-
             _level_cfg = st.session_state.level_config
             _roadmap_key = f"level_roadmap_{cfg.get('pkg_code', '')}_{cfg.get('company_id', '')}_{cfg.get('file_name', '')}"
 
