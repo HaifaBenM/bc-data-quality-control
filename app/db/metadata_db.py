@@ -276,15 +276,29 @@ def get_reference_values_by_table_id(
     company_id:   str,
     ref_table_id: int,
     ref_field_id: int = 0,
+    cache_ttl_hours: float = 1.0,
 ) -> tuple[set[str], bool]:
     """
     Retourne (valid_codes, found) pour une table référencée.
 
     Stratégie :
-      1. Cache Supabase
+      1. Cache Supabase (si encore frais — voir cache_ttl_hours ci-dessous)
       2. Lazy load via AL tableValues — refFieldId ou fallback field 1
       3. Fallback BC API v2.0
       4. set() vide + found=False → INFO
+
+    AJOUTÉ (22/08/2026) — cache_ttl_hours : jusqu'ici cette entrée de cache
+    n'avait AUCUNE expiration (seul un clic manuel sur "Vider le cache"
+    la rafraîchissait), ce qui a déjà causé un faux blocage confirmé le
+    19/08 (table 251 "introuvable" alors que les groupes existaient dans
+    BC depuis leur création après la mise en cache). Un TTL court (1h par
+    défaut, même mécanisme que is_cache_valid déjà utilisé pour
+    gl_account_posting_fields à 24h) réduit ce risque sans reproduire le
+    coût mesuré du 18/08 (354s→7s) : à l'intérieur d'une même session de
+    travail les lookups répétés restent servis par le cache, seule une
+    entrée vieille de plus d'1h est ignorée et re-fetchée depuis BC. Le
+    bouton manuel "Vider le cache" (Étape 1) reste utile pour forcer un
+    rafraîchissement immédiat sans attendre le TTL.
     """
     if not ref_table_id:
         return set(), False
@@ -292,12 +306,13 @@ def get_reference_values_by_table_id(
     cache_key   = _REF_TABLE_CACHE_KEYS.get(ref_table_id, f"table_{ref_table_id}")
     entity_info = _TABLE_BC_ENTITY.get(ref_table_id)
 
-    # 1. Cache Supabase
+    # 1. Cache Supabase — seulement si encore frais (cache_ttl_hours)
     if company_id:
         try:
-            cached = get_reference_values(profile_code, company_id, cache_key)
-            if cached:
-                return set(str(c).strip() for c in cached if c), True
+            if is_cache_valid(profile_code, company_id, cache_key, hours=cache_ttl_hours):
+                cached = get_reference_values(profile_code, company_id, cache_key)
+                if cached:
+                    return set(str(c).strip() for c in cached if c), True
         except Exception:
             pass
 
