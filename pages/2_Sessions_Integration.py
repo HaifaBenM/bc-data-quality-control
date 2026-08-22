@@ -830,20 +830,37 @@ with tab_main:
             # Vide UNIQUEMENT bc_metadata_cache (entity_type='reference') —
             # n'a AUCUN effet sur la mémoire inter-sessions
             # (session_pending_codes), mécanisme complètement séparé.
+            # Label raccourci + tooltip (22/08/2026) : le nom complet
+            # précédent ("Vider le cache des valeurs de référence
+            # (Supabase)") était trop long pour un bouton pleine largeur,
+            # l'explication technique est déplacée dans le `help=`.
             if is_consultant():
-                if st.button("🔄 Vider le cache des valeurs de référence (Supabase)", key="btn_clear_ref_cache"):
-                    try:
-                        ok, err = clear_reference_cache(
-                            profile_code = active_client,
-                            company_id   = sel_company_id,
-                        )
-                        if ok:
-                            st.success("Cache des tables de référence vidé — sera rechargé depuis BC au prochain contrôle.")
-                        else:
-                            st.error(f"Échec du vidage : {err}")
-                    except Exception as e:
-                        st.error(f"Échec du vidage : {e}")
-                    st.rerun()
+                with st.container(border=True):
+                    st.caption("🛠️ Outil consultant")
+                    if st.button(
+                        "🔄 Vider le cache",
+                        key="btn_clear_ref_cache",
+                        use_container_width=True,
+                        help=(
+                            "Force le rechargement des valeurs de référence BC "
+                            "(groupes comptables, devises, catégories...) depuis "
+                            "Business Central au prochain contrôle. À utiliser si "
+                            "des codes créés récemment dans BC ne sont pas encore "
+                            "reconnus par l'outil."
+                        ),
+                    ):
+                        try:
+                            ok, err = clear_reference_cache(
+                                profile_code = active_client,
+                                company_id   = sel_company_id,
+                            )
+                            if ok:
+                                st.success("Cache vidé — sera rechargé depuis BC au prochain contrôle.")
+                            else:
+                                st.error(f"Échec du vidage : {err}")
+                        except Exception as e:
+                            st.error(f"Échec du vidage : {e}")
+                        st.rerun()
 
         st.markdown("---")
         col_rc, _, col_btn = st.columns([2, 6, 2])
