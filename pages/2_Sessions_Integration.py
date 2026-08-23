@@ -1561,9 +1561,27 @@ with tab_main:
                     elif _node_kind == "Fille (une table de la roadmap)":
                         st.warning("Aucune table détectée dans le fichier chargé — impossible de créer une session fille.")
                 else:
+                    # AJOUTÉ (23/08/2026) — auto-détection silencieuse pour le
+                    # client : même logique que le consultant
+                    # (resolve_parent_candidates), sans lui montrer le choix
+                    # technique. Un seul cas s'auto-rattache en Fille : le
+                    # fichier contient exactement UNE table identifiable ET
+                    # UN SEUL parent candidat existe dans l'arbre de sessions
+                    # de cette société. Tout autre cas (0 ou plusieurs tables,
+                    # 0 ou plusieurs parents candidats) retombe sur Racine —
+                    # même repli que le comportement par défaut déjà en place,
+                    # jamais une régression silencieuse plus risquée que
+                    # l'ancien état "toujours Racine".
                     _node_kind     = "Racine (socle complet)"
                     _sel_table_id  = None
                     _sel_parent_id = None
+                    if len(_table_options) == 1:
+                        _auto_tid = _table_options[0][0]
+                        _auto_candidates = resolve_parent_candidates(_tree_sessions, _auto_tid, _lvl_cfg)
+                        if len(_auto_candidates) == 1:
+                            _node_kind     = "Fille (une table de la roadmap)"
+                            _sel_table_id  = _auto_tid
+                            _sel_parent_id = _auto_candidates[0]["id"]
 
                 if st.button("💾 Sauvegarder la session", type="primary", use_container_width=True):
                     original_bytes  = st.session_state.get("original_file_bytes")
