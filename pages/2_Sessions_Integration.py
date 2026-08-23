@@ -397,16 +397,27 @@ def display_unified_results(merged: dict, axe_c: dict, pr: dict = None):
 
                 if filtered:
                     cols_to_show = ["Ligne", "Identifiant métier", "Champ", "Valeur", "Type d'anomalie", "Sévérité", "Classification", "Message", "Correction suggérée"]
-                    df_show      = pd.DataFrame([{c: a.get(c, "") for c in cols_to_show} for a in filtered])
-
-                    def color_row(row):
-                        s = row.get("Sévérité", "")
-                        if s == "Majeure": return ["background-color:#FAECE7"] * len(row)
-                        if s == "Mineure": return ["background-color:#FAEEDA"] * len(row)
-                        return [""] * len(row)
+                    # RÉVISÉ (23/08/2026) — perf/stabilité : le pandas Styler
+                    # (.style.apply, fond de couleur par ligne) générait un
+                    # payload CSS ligne par ligne sans limite de volume, cause
+                    # confirmée d'un crash "Bad message format / SessionInfo
+                    # before it was initialized" sur un fichier à 4199
+                    # anomalies (jamais atteint par les fichiers testés avant
+                    # ce soir). Remplacé par un simple préfixe emoji sur la
+                    # colonne Sévérité (🔴/🟠) — même repère visuel rapide,
+                    # payload proportionnel aux données réelles, pas à un
+                    # style recalculé par cellule. Les cartes détaillées
+                    # ci-dessous (card-major/card-minor, plafonnées à 50)
+                    # gardent leur vraie couleur de fond.
+                    _sev_icon = {"Majeure": "🔴 Majeure", "Mineure": "🟠 Mineure"}
+                    df_show = pd.DataFrame([
+                        {c: (_sev_icon.get(a.get("Sévérité", ""), a.get("Sévérité", "")) if c == "Sévérité" else a.get(c, ""))
+                         for c in cols_to_show}
+                        for a in filtered
+                    ])
 
                     st.dataframe(
-                        df_show.style.apply(color_row, axis=1),
+                        df_show,
                         use_container_width=True, hide_index=True,
                         height=min(400, 50 + len(filtered) * 35)
                     )
