@@ -396,67 +396,45 @@ def display_unified_results(merged: dict, axe_c: dict, pr: dict = None):
                 ]
 
                 if filtered:
-                    cols_to_show = ["Ligne", "Identifiant métier", "Champ", "Valeur", "Type d'anomalie", "Sévérité", "Classification", "Message", "Correction suggérée"]
-                    # RÉVISÉ (23/08/2026) — perf/stabilité : le pandas Styler
-                    # (.style.apply, fond de couleur par ligne) générait un
-                    # payload CSS ligne par ligne sans limite de volume, cause
-                    # confirmée d'un crash "Bad message format / SessionInfo
-                    # before it was initialized" sur un fichier à 4199
-                    # anomalies (jamais atteint par les fichiers testés avant
-                    # ce soir). Remplacé par un simple préfixe emoji sur la
-                    # colonne Sévérité (🔴/🟠) — même repère visuel rapide,
-                    # payload proportionnel aux données réelles, pas à un
-                    # style recalculé par cellule. Les cartes détaillées
-                    # ci-dessous (card-major/card-minor, plafonnées à 50)
-                    # gardent leur vraie couleur de fond.
-                    _sev_icon = {"Majeure": "🔴 Majeure", "Mineure": "🟠 Mineure"}
-                    df_show = pd.DataFrame([
-                        {c: (_sev_icon.get(a.get("Sévérité", ""), a.get("Sévérité", "")) if c == "Sévérité" else a.get(c, ""))
-                         for c in cols_to_show}
-                        for a in filtered
-                    ])
+                    # RÉVISÉ (23/08/2026) — simplification écran client (demande
+                    # Bilel : lisible et simple). Fusion de l'ancien tableau brut
+                    # + du bloc "Détail" (cartes HTML redondantes, IA/Prérequis
+                    # BC en HTML séparé) en UN SEUL tableau lisible. Rien perdu :
+                    # "Classification" (enum technique VALEUR_CORRIGIBLE /
+                    # PREALABLE_BC_REQUIS) devient un libellé clair, la
+                    # suggestion IA + confiance devient une colonne dédiée au
+                    # lieu d'une carte séparée avec barre de progression HTML.
+                    _sev_icon  = {"Majeure": "🔴 Majeure", "Mineure": "🟠 Mineure"}
+                    _cls_label = {
+                        "PREALABLE_BC_REQUIS": "🟣 Prérequis BC requis",
+                        "VALEUR_CORRIGIBLE":   "✏️ Corrigible",
+                    }
+                    _has_ia_col = any(a.get("suggestion_ia") for a in filtered)
+
+                    def _row(a: dict) -> dict:
+                        out = {
+                            "Ligne":              a.get("Ligne", ""),
+                            "Identifiant métier": a.get("Identifiant métier", ""),
+                            "Champ":              a.get("Champ", ""),
+                            "Valeur":             a.get("Valeur", ""),
+                            "Type d'anomalie":    a.get("Type d'anomalie", ""),
+                            "Sévérité":           _sev_icon.get(a.get("Sévérité", ""), a.get("Sévérité", "")),
+                            "Classification":     _cls_label.get(a.get("Classification", ""), ""),
+                            "Message":            a.get("Message", ""),
+                            "Correction suggérée": a.get("Correction suggérée", ""),
+                        }
+                        if _has_ia_col:
+                            sug = a.get("suggestion_ia", "")
+                            out["🤖 Suggestion IA"] = f"{sug} ({a.get('confiance_ia', 0)}%)" if sug else ""
+                        return out
+
+                    df_show = pd.DataFrame([_row(a) for a in filtered])
 
                     st.dataframe(
                         df_show,
                         use_container_width=True, hide_index=True,
                         height=min(400, 50 + len(filtered) * 35)
                     )
-
-                    with st.expander(f"📋 Détail — {len(filtered)} anomalie(s)"):
-                        for a in filtered[:50]:
-                            css   = "card-major" if a.get("Sévérité") == "Majeure" else "card-minor"
-                            fix   = f" → <b>{a['Correction suggérée']}</b>" if a.get("Correction suggérée") else ""
-                            err_t = a.get("Type d'anomalie", "")
-                            prereq_tag = (
-                                '<span class="tag tag-prereq" title="Nécessite la création d\'une donnée en BC avant import">🟣 Prérequis BC</span>'
-                                if a.get("Classification") == "PREALABLE_BC_REQUIS" else ""
-                            )
-                            ia_block = ""
-                            if a.get("suggestion_ia"):
-                                conf     = a.get("confiance_ia", 0)
-                                bar_col  = "#0F6E56" if conf >= 90 else ("#854F0B" if conf >= 70 else "#993C1D")
-                                auto_tag = '<span class="tag tag-auto">⚡ Auto</span>' if a.get("auto_corrige") else ""
-                                ia_block = (
-                                    f'<div style="margin-top:6px;padding-top:6px;border-top:1px solid #E2E8F0">'
-                                    f'<span class="tag tag-ai">🤖 IA</span>{auto_tag}'
-                                    f' Suggestion : <b>"{a["suggestion_ia"]}"</b>'
-                                    f'<div class="conf-bar"><div style="width:{conf}%;background:{bar_col};height:5px;border-radius:3px"></div></div>'
-                                    f'<span style="font-size:10px;color:{bar_col}">Confiance : {conf}%</span>'
-                                    f'{"<br><i>" + a.get("explication_ia", "") + "</i>" if a.get("explication_ia") else ""}'
-                                    f'</div>'
-                                )
-                            st.markdown(
-                                f'<div class="{css}">'
-                                f'<b>Ligne {a.get("Ligne", "")}</b> · <b>{a.get("Champ", "")}</b> · '
-                                f'<span class="tag tag-{"major" if a.get("Sévérité") == "Majeure" else "minor"}">{a.get("Sévérité", "")}</span>'
-                                f'<span class="tag" style="background:#E2E8F0;color:#1B3A6B">{err_t}</span>'
-                                f'{bc_badge(err_t)}{prereq_tag}'
-                                f'<br>{a.get("Message", "")}{fix}'
-                                f'{ia_block}</div>',
-                                unsafe_allow_html=True
-                            )
-                        if len(filtered) > 50:
-                            st.caption(f"50 premières sur {len(filtered)}.")
 
             if info_anomalies:
                 st.markdown("---")
@@ -509,37 +487,48 @@ def display_correction_workflow(merged: dict, cfg: dict, pr: dict):
         st.session_state["prerequisites_report"] = prereqs
         return
 
-    st.markdown(
-        f"**✏️ {len(corrigibles)} anomalie(s) corrigible(s) dans le fichier — "
-        f"éditez « Nouvelle valeur » et cochez « Appliquer » pour chaque ligne à intégrer :**"
-    )
-    # AJOUTÉ (20/08/2026) — sélection en lot, demande Rami : possibilité de
-    # cocher/décocher toutes les lignes d'un coup, en plus du cas par cas
-    # déjà existant. `_editor_gen` change de valeur à chaque clic pour
-    # forcer Streamlit à traiter le data_editor comme un widget neuf (sinon
-    # l'état interne déjà édité par l'utilisateur prime sur les nouvelles
-    # valeurs qu'on lui passe, et "Tout sélectionner" resterait sans effet
-    # visible).
+    # AJOUTÉ (23/08/2026) — simplification écran client (demande Bilel) :
+    # replié par défaut pour ne pas surcharger l'écran avec un 3e tableau
+    # (déjà tableau + désormais fusionné avec le détail dans
+    # display_unified_results). Reste ouvert automatiquement dès que le
+    # consultant/client a commencé à interagir (sélection en lot ou fichier
+    # déjà généré) — jamais besoin de re-déplier soi-même en pleine action.
     _editor_gen_key = "corrections_editor_gen"
-    if _editor_gen_key not in st.session_state:
-        st.session_state[_editor_gen_key] = 0
+    _corr_expanded = (
+        st.session_state.get(_editor_gen_key, 0) > 0
+        or bool(st.session_state.get("generated_file_bytes"))
+    )
+    with st.expander("🔧 Corriger et générer le fichier", expanded=_corr_expanded):
+        st.markdown(
+            f"**✏️ {len(corrigibles)} anomalie(s) corrigible(s) dans le fichier — "
+            f"éditez « Nouvelle valeur » et cochez « Appliquer » pour chaque ligne à intégrer :**"
+        )
+        # AJOUTÉ (20/08/2026) — sélection en lot, demande Rami : possibilité de
+        # cocher/décocher toutes les lignes d'un coup, en plus du cas par cas
+        # déjà existant. `_editor_gen` change de valeur à chaque clic pour
+        # forcer Streamlit à traiter le data_editor comme un widget neuf (sinon
+        # l'état interne déjà édité par l'utilisateur prime sur les nouvelles
+        # valeurs qu'on lui passe, et "Tout sélectionner" resterait sans effet
+        # visible).
+        if _editor_gen_key not in st.session_state:
+            st.session_state[_editor_gen_key] = 0
 
-    csel1, csel2, csel3 = st.columns([1.3, 1.3, 4])
-    with csel1:
-        if st.button("✅ Tout sélectionner", key="btn_select_all_corr", use_container_width=True):
-            st.session_state["_corrections_select_override"] = True
-            st.session_state[_editor_gen_key] += 1
-            st.rerun()
-    with csel2:
-        if st.button("⬜ Tout désélectionner", key="btn_deselect_all_corr", use_container_width=True):
-            st.session_state["_corrections_select_override"] = False
-            st.session_state[_editor_gen_key] += 1
-            st.rerun()
+        csel1, csel2, csel3 = st.columns([1.3, 1.3, 4])
+        with csel1:
+            if st.button("✅ Tout sélectionner", key="btn_select_all_corr", use_container_width=True):
+                st.session_state["_corrections_select_override"] = True
+                st.session_state[_editor_gen_key] += 1
+                st.rerun()
+        with csel2:
+            if st.button("⬜ Tout désélectionner", key="btn_deselect_all_corr", use_container_width=True):
+                st.session_state["_corrections_select_override"] = False
+                st.session_state[_editor_gen_key] += 1
+                st.rerun()
 
-    _select_override = st.session_state.pop("_corrections_select_override", None)
+        _select_override = st.session_state.pop("_corrections_select_override", None)
 
-    edit_rows = [
-        {
+        edit_rows = [
+            {
             # Coché par défaut UNIQUEMENT si on a déjà une suggestion fiable
             # (ex: code de référence proche trouvé). Sinon décoché : le
             # consultant doit taper une valeur avant de pouvoir l'appliquer,
@@ -563,151 +552,151 @@ def display_correction_workflow(merged: dict, cfg: dict, pr: dict):
         for a in corrigibles
     ]
 
-    # AJOUTÉ (23/08/2026) — même cause que le crash "Bad message format /
-    # SessionInfo before it was initialized" corrigé sur display_unified_
-    # results (Styler) : st.data_editor sans plafond sur des milliers de
-    # lignes (4199 anomalies constatées) sature aussi le payload WebSocket
-    # et provoque le rafraîchissement en boucle observé après ce fix-là.
-    # Plafond appliqué UNIQUEMENT à l'affichage/édition interactive — les
-    # lignes au-delà gardent EXACTEMENT le même comportement par défaut
-    # qu'une ligne jamais éditée manuellement (Appliquer = suggestion
-    # présente, Nouvelle valeur = suggestion), donc aucune correction perdue
-    # silencieusement. Seule perte réelle : impossible d'éditer à la main
-    # une ligne au-delà du plafond dans ce run — acceptable en dépannage
-    # avant démo, à revoir avec une vraie pagination par onglet après le 27.
-    _MAX_EDITABLE_ROWS = 300
-    _overflow_rows      = edit_rows[_MAX_EDITABLE_ROWS:]
-    edit_rows_display   = edit_rows[:_MAX_EDITABLE_ROWS]
+        # AJOUTÉ (23/08/2026) — même cause que le crash "Bad message format /
+        # SessionInfo before it was initialized" corrigé sur display_unified_
+        # results (Styler) : st.data_editor sans plafond sur des milliers de
+        # lignes (4199 anomalies constatées) sature aussi le payload WebSocket
+        # et provoque le rafraîchissement en boucle observé après ce fix-là.
+        # Plafond appliqué UNIQUEMENT à l'affichage/édition interactive — les
+        # lignes au-delà gardent EXACTEMENT le même comportement par défaut
+        # qu'une ligne jamais éditée manuellement (Appliquer = suggestion
+        # présente, Nouvelle valeur = suggestion), donc aucune correction perdue
+        # silencieusement. Seule perte réelle : impossible d'éditer à la main
+        # une ligne au-delà du plafond dans ce run — acceptable en dépannage
+        # avant démo, à revoir avec une vraie pagination par onglet après le 27.
+        _MAX_EDITABLE_ROWS = 300
+        _overflow_rows      = edit_rows[_MAX_EDITABLE_ROWS:]
+        edit_rows_display   = edit_rows[:_MAX_EDITABLE_ROWS]
 
-    if _overflow_rows:
-        st.caption(
-            f"⚠️ {len(_overflow_rows)} anomalie(s) corrigible(s) supplémentaire(s) non affichée(s) "
-            f"ci-dessous (volume trop important pour l'édition interactive) — incluses dans le "
-            f"fichier généré avec leur correction suggérée par défaut, non modifiables dans ce run."
+        if _overflow_rows:
+            st.caption(
+                f"⚠️ {len(_overflow_rows)} anomalie(s) corrigible(s) supplémentaire(s) non affichée(s) "
+                f"ci-dessous (volume trop important pour l'édition interactive) — incluses dans le "
+                f"fichier généré avec leur correction suggérée par défaut, non modifiables dans ce run."
+            )
+
+        edited = st.data_editor(
+            pd.DataFrame(edit_rows_display),
+            use_container_width=True,
+            hide_index=True,
+            disabled=["Onglet", "Ligne", "Identifiant métier", "Champ", "Valeur actuelle"],
+            column_config={
+                "Appliquer": st.column_config.CheckboxColumn(
+                    help="Cocher pour inclure cette ligne dans le fichier généré"
+                ),
+                "Nouvelle valeur": st.column_config.TextColumn(
+                    help="Modifiable — tapez la valeur correcte pour cette cellule"
+                ),
+            },
+            key=f"corrections_editor_{st.session_state[_editor_gen_key]}",
         )
 
-    edited = st.data_editor(
-        pd.DataFrame(edit_rows_display),
-        use_container_width=True,
-        hide_index=True,
-        disabled=["Onglet", "Ligne", "Identifiant métier", "Champ", "Valeur actuelle"],
-        column_config={
-            "Appliquer": st.column_config.CheckboxColumn(
-                help="Cocher pour inclure cette ligne dans le fichier généré"
-            ),
-            "Nouvelle valeur": st.column_config.TextColumn(
-                help="Modifiable — tapez la valeur correcte pour cette cellule"
-            ),
-        },
-        key=f"corrections_editor_{st.session_state[_editor_gen_key]}",
-    )
+        cgen1, cgen2 = st.columns([2, 6])
+        with cgen1:
+            gen_clicked = st.button("🔧 Générer le fichier corrigé", type="primary", use_container_width=True)
 
-    cgen1, cgen2 = st.columns([2, 6])
-    with cgen1:
-        gen_clicked = st.button("🔧 Générer le fichier corrigé", type="primary", use_container_width=True)
-
-    if gen_clicked:
-        original_bytes = st.session_state.get("original_file_bytes")
-        if not original_bytes:
-            st.error("❌ Fichier original introuvable en mémoire — remontez à l'étape 2.")
-        else:
-            selected = edited[
-                (edited["Appliquer"] == True)
-                & (edited["Nouvelle valeur"].astype(str).str.strip() != "")
-            ]
-            # RÉVISÉ (19/08/2026) : le vidage des colonnes Guid
-            # (clear_id_reference_columns) est indépendant des corrections
-            # de valeur — il ne devrait pas être bloqué par "aucune ligne
-            # cochée". Avant ce fix, le bouton refusait purement et
-            # simplement de générer un fichier s'il n'y avait rien à
-            # corriger, empêchant de tester le nettoyage Guid seul (cas
-            # Rami du 19/08 : 251 déjà correct dans BC, rien à corriger,
-            # mais besoin de télécharger le fichier nettoyé quand même).
-            corrections = [
-                {
-                    "sheet":       row["Onglet"],
-                    "excel_row":   int(row["Ligne"]),
-                    "column_name": row["Champ"],
-                    "new_value":   row["Nouvelle valeur"],
-                }
-                for _, row in selected.iterrows()
-            ]
-            # AJOUTÉ (23/08/2026) — complète avec les lignes au-delà du
-            # plafond d'édition interactive (_overflow_rows), avec leur
-            # valeur par défaut (identique à une ligne jamais éditée à la
-            # main) : aucune correction silencieusement perdue à cause du
-            # plafond d'affichage.
-            corrections += [
-                {
-                    "sheet":       r["Onglet"],
-                    "excel_row":   int(r["Ligne"]),
-                    "column_name": r["Champ"],
-                    "new_value":   r["Nouvelle valeur"],
-                }
-                for r in _overflow_rows
-                if r["Appliquer"] and str(r["Nouvelle valeur"]).strip()
-            ]
-            try:
-                generated_bytes = (
-                    apply_corrections(original_bytes, corrections)
-                    if corrections else original_bytes
-                )
-                # RÉVISÉ (18/08/2026, 2e passe) : calcule les colonnes de
-                # type Guid par feuille depuis l'execution_plan déjà en
-                # cache (early_axeab_*), plutôt que de deviner par le nom
-                # "ID X" — extension-agnostique (voir docstring de
-                # clear_id_reference_columns). Repli automatique sur
-                # l'ancien préfixe si le plan est indisponible.
-                _guid_cols_by_sheet: dict[str, set[str]] | None = None
-                _early_key = (
-                    f"early_axeab_{cfg.get('pkg_code', '')}_"
-                    f"{cfg.get('company_id', '')}_{cfg.get('file_name', '')}"
-                )
-                _cached_plan = st.session_state.get(_early_key, {}).get("exec_plan")
-                if _cached_plan is not None:
-                    try:
-                        from app.core.bc_excel_processor import extract_sheets_info
-                        _sheets_info = extract_sheets_info(original_bytes)
-                        _guid_cols_by_sheet = {}
-                        for _si in _sheets_info:
-                            _tid = int(_si["table_id"]) if str(_si["table_id"]).isdigit() else 0
-                            if not _tid:
-                                continue
-                            _defs = _cached_plan.get_field_defs_for_table(_tid)
-                            _guid_names = {n for n, fm in _defs.items() if fm.al_type == "Guid"}
-                            if _guid_names:
-                                _guid_cols_by_sheet[_si["sheet_name"]] = _guid_names
-                    except Exception:
-                        _guid_cols_by_sheet = None  # repli silencieux sur l'heuristique par nom
-                # AJOUTÉ (18/08/2026) : les colonnes Guid (SystemId BC)
-                # ne sont jamais portables d'une société à l'autre — BC
-                # rejette l'import sur ces colonnes même quand le Code
-                # associé est correct. On les vide pour laisser BC
-                # résoudre uniquement via Code à l'import.
-                generated_bytes = clear_id_reference_columns(generated_bytes, _guid_cols_by_sheet)
-                st.session_state["generated_file_bytes"] = generated_bytes
-                st.session_state["generated_file_name"]  = (
-                    f"CORRIGE_{cfg.get('file_name', 'fichier.xlsx')}"
-                )
-                st.session_state["prerequisites_report"] = prereqs
-                if corrections:
-                    st.success(f"✅ Fichier généré avec {len(corrections)} correction(s) appliquée(s).")
-                else:
-                    st.success(
-                        "✅ Fichier généré sans correction de valeur — colonnes Guid (SystemId) "
-                        "vidées uniquement."
+        if gen_clicked:
+            original_bytes = st.session_state.get("original_file_bytes")
+            if not original_bytes:
+                st.error("❌ Fichier original introuvable en mémoire — remontez à l'étape 2.")
+            else:
+                selected = edited[
+                    (edited["Appliquer"] == True)
+                    & (edited["Nouvelle valeur"].astype(str).str.strip() != "")
+                ]
+                # RÉVISÉ (19/08/2026) : le vidage des colonnes Guid
+                # (clear_id_reference_columns) est indépendant des corrections
+                # de valeur — il ne devrait pas être bloqué par "aucune ligne
+                # cochée". Avant ce fix, le bouton refusait purement et
+                # simplement de générer un fichier s'il n'y avait rien à
+                # corriger, empêchant de tester le nettoyage Guid seul (cas
+                # Rami du 19/08 : 251 déjà correct dans BC, rien à corriger,
+                # mais besoin de télécharger le fichier nettoyé quand même).
+                corrections = [
+                    {
+                        "sheet":       row["Onglet"],
+                        "excel_row":   int(row["Ligne"]),
+                        "column_name": row["Champ"],
+                        "new_value":   row["Nouvelle valeur"],
+                    }
+                    for _, row in selected.iterrows()
+                ]
+                # AJOUTÉ (23/08/2026) — complète avec les lignes au-delà du
+                # plafond d'édition interactive (_overflow_rows), avec leur
+                # valeur par défaut (identique à une ligne jamais éditée à la
+                # main) : aucune correction silencieusement perdue à cause du
+                # plafond d'affichage.
+                corrections += [
+                    {
+                        "sheet":       r["Onglet"],
+                        "excel_row":   int(r["Ligne"]),
+                        "column_name": r["Champ"],
+                        "new_value":   r["Nouvelle valeur"],
+                    }
+                    for r in _overflow_rows
+                    if r["Appliquer"] and str(r["Nouvelle valeur"]).strip()
+                ]
+                try:
+                    generated_bytes = (
+                        apply_corrections(original_bytes, corrections)
+                        if corrections else original_bytes
                     )
-            except Exception as e:
-                st.error(f"❌ Erreur lors de la génération : {e}")
+                    # RÉVISÉ (18/08/2026, 2e passe) : calcule les colonnes de
+                    # type Guid par feuille depuis l'execution_plan déjà en
+                    # cache (early_axeab_*), plutôt que de deviner par le nom
+                    # "ID X" — extension-agnostique (voir docstring de
+                    # clear_id_reference_columns). Repli automatique sur
+                    # l'ancien préfixe si le plan est indisponible.
+                    _guid_cols_by_sheet: dict[str, set[str]] | None = None
+                    _early_key = (
+                        f"early_axeab_{cfg.get('pkg_code', '')}_"
+                        f"{cfg.get('company_id', '')}_{cfg.get('file_name', '')}"
+                    )
+                    _cached_plan = st.session_state.get(_early_key, {}).get("exec_plan")
+                    if _cached_plan is not None:
+                        try:
+                            from app.core.bc_excel_processor import extract_sheets_info
+                            _sheets_info = extract_sheets_info(original_bytes)
+                            _guid_cols_by_sheet = {}
+                            for _si in _sheets_info:
+                                _tid = int(_si["table_id"]) if str(_si["table_id"]).isdigit() else 0
+                                if not _tid:
+                                    continue
+                                _defs = _cached_plan.get_field_defs_for_table(_tid)
+                                _guid_names = {n for n, fm in _defs.items() if fm.al_type == "Guid"}
+                                if _guid_names:
+                                    _guid_cols_by_sheet[_si["sheet_name"]] = _guid_names
+                        except Exception:
+                            _guid_cols_by_sheet = None  # repli silencieux sur l'heuristique par nom
+                    # AJOUTÉ (18/08/2026) : les colonnes Guid (SystemId BC)
+                    # ne sont jamais portables d'une société à l'autre — BC
+                    # rejette l'import sur ces colonnes même quand le Code
+                    # associé est correct. On les vide pour laisser BC
+                    # résoudre uniquement via Code à l'import.
+                    generated_bytes = clear_id_reference_columns(generated_bytes, _guid_cols_by_sheet)
+                    st.session_state["generated_file_bytes"] = generated_bytes
+                    st.session_state["generated_file_name"]  = (
+                        f"CORRIGE_{cfg.get('file_name', 'fichier.xlsx')}"
+                    )
+                    st.session_state["prerequisites_report"] = prereqs
+                    if corrections:
+                        st.success(f"✅ Fichier généré avec {len(corrections)} correction(s) appliquée(s).")
+                    else:
+                        st.success(
+                            "✅ Fichier généré sans correction de valeur — colonnes Guid (SystemId) "
+                            "vidées uniquement."
+                        )
+                except Exception as e:
+                    st.error(f"❌ Erreur lors de la génération : {e}")
 
-    if st.session_state.get("generated_file_bytes"):
-        st.download_button(
-            "⬇️ Télécharger le fichier corrigé",
-            data=st.session_state["generated_file_bytes"],
-            file_name=st.session_state.get("generated_file_name", "fichier_corrige.xlsx"),
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            key="dl_generated_file",
-        )
+        if st.session_state.get("generated_file_bytes"):
+            st.download_button(
+                "⬇️ Télécharger le fichier corrigé",
+                data=st.session_state["generated_file_bytes"],
+                file_name=st.session_state.get("generated_file_name", "fichier_corrige.xlsx"),
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="dl_generated_file",
+            )
 
 
 def reset_session():
@@ -1079,7 +1068,10 @@ with tab_main:
             # compris après un "Recommencer" qui ne vidait pas cette clé.
             # Bouton explicite plutôt qu'un rechargement systématique à
             # chaque run (coût Supabase superflu quand rien n'a changé).
-            if st.button("🔄 Recharger classification niveaux (level_config)", key="btn_reload_level_config"):
+            # AJOUTÉ (23/08/2026) — simplification écran client, demande Bilel :
+            # ce bouton (rechargement config technique Supabase) n'a de sens que
+            # pour le consultant, jamais pour le client. Masqué, pas supprimé.
+            if is_consultant() and st.button("🔄 Recharger classification niveaux (level_config)", key="btn_reload_level_config"):
                 try:
                     st.session_state.level_config = load_level_config(get_supabase_client())
                     for _k in list(st.session_state.keys()):
@@ -1295,20 +1287,32 @@ with tab_main:
                             # anomalies déjà résolues comme si elles étaient encore là.
                             _sub_anomalies = getattr(_entry, "sub_anomalies", None)
                             if _sub_anomalies and _entry.status != "validated":
-                                with st.expander(
-                                    f"⚠️ {len(_sub_anomalies)} champ(s) manquant(s) sur des comptes référencés",
-                                    expanded=False,
-                                ):
-                                    st.dataframe(
-                                        pd.DataFrame(_sub_anomalies),
-                                        use_container_width=True, hide_index=True,
-                                    )
+                                # RÉVISÉ (23/08/2026) — simplification écran client (demande
+                                # Bilel) : le détail brut (dataframe technique) reste réservé
+                                # au consultant. Le client voit juste un compteur simple.
+                                if is_consultant():
+                                    with st.expander(
+                                        f"⚠️ {len(_sub_anomalies)} champ(s) manquant(s) sur des comptes référencés",
+                                        expanded=False,
+                                    ):
+                                        st.dataframe(
+                                            pd.DataFrame(_sub_anomalies),
+                                            use_container_width=True, hide_index=True,
+                                        )
+                                else:
+                                    st.caption(f"　　⚠️ {len(_sub_anomalies)} point(s) à vérifier avant l'intégration BC.")
                     except Exception as _diag_e:
                         # DIAGNOSTIC — laissé en place tant qu'on n'a pas une confirmation
                         # de stabilité dans la durée. Sans impact visuel si tout va bien.
-                        import traceback
-                        st.error("🔧 DIAGNOSTIC — erreur capturée dans la boucle d'affichage de la roadmap :")
-                        st.code(traceback.format_exc())
+                        # RÉVISÉ (23/08/2026) — simplification écran client (demande
+                        # Bilel) : la trace technique complète reste réservée au
+                        # consultant, le client voit un message neutre.
+                        if is_consultant():
+                            import traceback
+                            st.error("🔧 DIAGNOSTIC — erreur capturée dans la boucle d'affichage de la roadmap :")
+                            st.code(traceback.format_exc())
+                        else:
+                            st.warning("⚠️ Affichage des prérequis momentanément indisponible. Réessaie dans un instant.")
 
                     # AJOUTÉ (07/08/2026) : export consolidé de TOUS les niveaux en
                     # un seul fichier — jusqu'ici chaque niveau n'était téléchargeable
@@ -1323,7 +1327,9 @@ with tab_main:
                                 _row = dict(_a)
                                 _row["Niveau"] = _e.level_info.table_name
                                 _all_sub_anomalies.append(_row)
-                    if _all_sub_anomalies:
+                    if _all_sub_anomalies and is_consultant():
+                        # RÉVISÉ (23/08/2026) — simplification écran client (demande
+                        # Bilel) : export brut réservé au consultant.
                         st.download_button(
                             "⬇️ Toutes les anomalies (tous niveaux)",
                             data=build_prerequisites_excel(_all_sub_anomalies),
@@ -1516,37 +1522,48 @@ with tab_main:
                     except Exception:
                         _table_options = []
 
-                _node_kind = st.radio(
-                    "Type de session",
-                    ["Racine (socle complet)", "Fille (une table de la roadmap)"],
-                    key="node_kind_radio",
-                    horizontal=True,
-                )
-                _sel_table_id: int | None = None
-                _sel_parent_id: str | None = None
-                if _node_kind == "Fille (une table de la roadmap)" and _table_options:
-                    _sel_table_id = st.selectbox(
-                        "Table traitée par cette session",
-                        options=[t[0] for t in _table_options],
-                        format_func=lambda tid: dict(_table_options).get(tid, str(tid)),
-                        key="node_table_select",
+                # RÉVISÉ (23/08/2026) — simplification écran client (demande
+                # Bilel) : le choix d'architecture racine/fille est une
+                # décision consultant (rattachement à la roadmap technique),
+                # pas quelque chose que le client doit comprendre pour
+                # sauvegarder sa session. Le client sauvegarde simplement en
+                # racine ; le consultant garde le contrôle complet.
+                if is_consultant():
+                    _node_kind = st.radio(
+                        "Type de session",
+                        ["Racine (socle complet)", "Fille (une table de la roadmap)"],
+                        key="node_kind_radio",
+                        horizontal=True,
                     )
-                    _candidates = resolve_parent_candidates(_tree_sessions, _sel_table_id, _lvl_cfg)
-                    if len(_candidates) == 1:
-                        _sel_parent_id = _candidates[0]["id"]
-                        st.caption(f"↳ Rattachée automatiquement à : **{_candidates[0].get('name', '')}**")
-                    elif len(_candidates) > 1:
-                        _parent_names = {c["id"]: c.get("name", c["id"]) for c in _candidates}
-                        _sel_parent_id = st.selectbox(
-                            "Plusieurs sessions candidates au même niveau — choisis la session parente",
-                            options=list(_parent_names.keys()),
-                            format_func=lambda pid: _parent_names.get(pid, pid),
-                            key="node_parent_select",
+                    _sel_table_id: int | None = None
+                    _sel_parent_id: str | None = None
+                    if _node_kind == "Fille (une table de la roadmap)" and _table_options:
+                        _sel_table_id = st.selectbox(
+                            "Table traitée par cette session",
+                            options=[t[0] for t in _table_options],
+                            format_func=lambda tid: dict(_table_options).get(tid, str(tid)),
+                            key="node_table_select",
                         )
-                    else:
-                        st.caption("↳ Aucune session de niveau inférieur trouvée — rattachée à la racine du socle.")
-                elif _node_kind == "Fille (une table de la roadmap)":
-                    st.warning("Aucune table détectée dans le fichier chargé — impossible de créer une session fille.")
+                        _candidates = resolve_parent_candidates(_tree_sessions, _sel_table_id, _lvl_cfg)
+                        if len(_candidates) == 1:
+                            _sel_parent_id = _candidates[0]["id"]
+                            st.caption(f"↳ Rattachée automatiquement à : **{_candidates[0].get('name', '')}**")
+                        elif len(_candidates) > 1:
+                            _parent_names = {c["id"]: c.get("name", c["id"]) for c in _candidates}
+                            _sel_parent_id = st.selectbox(
+                                "Plusieurs sessions candidates au même niveau — choisis la session parente",
+                                options=list(_parent_names.keys()),
+                                format_func=lambda pid: _parent_names.get(pid, pid),
+                                key="node_parent_select",
+                            )
+                        else:
+                            st.caption("↳ Aucune session de niveau inférieur trouvée — rattachée à la racine du socle.")
+                    elif _node_kind == "Fille (une table de la roadmap)":
+                        st.warning("Aucune table détectée dans le fichier chargé — impossible de créer une session fille.")
+                else:
+                    _node_kind     = "Racine (socle complet)"
+                    _sel_table_id  = None
+                    _sel_parent_id = None
 
                 if st.button("💾 Sauvegarder la session", type="primary", use_container_width=True):
                     original_bytes  = st.session_state.get("original_file_bytes")
