@@ -156,6 +156,13 @@ class RoadmapEntry:
     # réel ; "memory" si UNIQUEMENT la mémoire (aucune donnée BC réelle
     # pour cette table à ce jour).
     validated_via:  str | None = None  # None | "bc" | "memory"
+    # AJOUTÉ (23/08/2026) — diagnostic consultant : les codes BC/mémoire
+    # réellement récupérés au dernier "Revérifier", pour comparer
+    # visuellement contre "Code manquant" des sub_anomalies quand un niveau
+    # reste bloqué malgré une correction censée être faite dans BC (cas
+    # Section analytique, 23/08 — mismatch de format suspecté, accents/
+    # casse/espaces, sans accès direct aux données BC pour le confirmer).
+    last_codes:     set | None = None
 
 
 def build_roadmap(
@@ -664,6 +671,7 @@ def refresh_roadmap(
         if result is None:
             continue  # pas dans to_check (ne devrait pas arriver ici, sécurité)
         e.last_check = result
+        e.last_codes = fill_codes.get(id(e))
 
         if e.level_info.table_id == 15 and gl_account_check is not None:
             gl_outcome = gl_results.get(id(e))

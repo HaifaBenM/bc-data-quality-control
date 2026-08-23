@@ -146,15 +146,27 @@ def save_session(data: dict) -> tuple[bool, str]:
 def update_session(session_id: str, data: dict) -> tuple[bool, str]:
     """
     Met à jour les champs modifiables d'une session.
-    Champs modifiables : name, status, notes, et — quand une nouvelle
-    génération de fichier corrigé est faite après coup — generated_file_b64,
-    generated_file_name, prerequisites_report.
+
+    RÉVISÉ (23/08/2026) — demande Rami : reprendre une session (▶️
+    Reprendre) puis la sauvegarder créait une NOUVELLE session à chaque
+    fois (save_session() génère toujours un nouvel id) — 3 sessions pour
+    une seule modifiée deux fois, confusion réelle dans "Mes sessions".
+    Liste `editable` élargie pour couvrir une mise à jour complète
+    (fichiers, compteurs d'anomalies, architecture mère/fille) — pas
+    seulement les 3 champs de l'ancien formulaire d'édition (name/status/
+    notes). Voir l'appel dans 2_Sessions_Integration.py : si une session a
+    été reprise (session_state.resumed_session_id), la sauvegarde appelle
+    désormais update_session() sur CET id au lieu de save_session().
     """
     try:
         client = get_supabase_client()
         editable = (
             "name", "status", "notes",
+            "file_name", "date_controle", "company_id", "company_name",
+            "total_anomalies", "major_anomalies", "minor_anomalies",
+            "original_file_b64",
             "generated_file_b64", "generated_file_name", "prerequisites_report",
+            "table_id", "parent_session_id", "is_root", "pkg_code",
         )
         payload = {k: v for k, v in data.items() if k in editable}
         payload["updated_at"] = _now()

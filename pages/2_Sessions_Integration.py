@@ -770,6 +770,11 @@ def reset_session():
               "merged_result", "axe_c_result", "saved_session_id",
               "original_file_bytes", "generated_file_bytes",
               "generated_file_name", "prerequisites_report",
+              # AJOUTÉ (23/08/2026) — marqueur de reprise (voir bouton
+              # "▶️ Reprendre") : un "Recommencer" explicite doit repartir
+              # sur une session neuve, jamais continuer à écraser celle
+              # qui avait été reprise.
+              "resumed_session_id",
               # Auto-remplissage du nom de session (package + date/heure) :
               # sans ce nettoyage, une nouvelle session créée juste après un
               # "Recommencer" sur le même package/date garderait la
@@ -786,6 +791,82 @@ def reset_session():
             del st.session_state[k]
     if "level_pkg_resolve" in st.session_state:
         del st.session_state["level_pkg_resolve"]
+
+
+def _quick_save_session(cfg: dict, status: str = "Nouvelle") -> None:
+    """AJOUTÉ (23/08/2026) — demande Rami : pouvoir sauvegarder à n'importe
+    quelle étape (2 ou 3), pas seulement à la fin (Étape 4, déjà existante,
+    non touchée ici). Sauvegarde avec les infos disponibles à ce stade —
+    PAS de détection racine/fille (dépend de l'analyse complète, non faite
+    ici) : toujours en racine par défaut, SAUF si une session a été reprise
+    (session_state.resumed_session_id) — dans ce cas l'architecture mère/
+    fille déjà enregistrée est conservée telle quelle, pas réinitialisée.
+
+    RÉVISÉ (23/08/2026, 2e passe) — mise à jour en place si la session en
+    cours a été reprise via "▶️ Reprendre" (voir resumed_session_id) : sans
+    ça, reprendre une session puis la sauvegarder créait une NOUVELLE
+    session à chaque fois (3 sessions pour une seule modifiée deux fois,
+    signalé par Rami)."""
+    original_bytes  = st.session_state.get("original_file_bytes")
+    _resumed_id     = st.session_state.get("resumed_session_id")
+    _payload = {
+        "session_name":       cfg.get("session_name", ""),
+        "profile_code":       cfg.get("client_code", ""),
+        "file_name":          cfg.get("file_name", ""),
+        "notes":              cfg.get("notes", ""),
+        "date_controle":      cfg.get("date_controle", ""),
+        "company_id":         cfg.get("company_id", ""),
+        "company_name":       cfg.get("company_name", ""),
+        "status":             status,
+        "total_anomalies":    0,
+        "major_anomalies":    0,
+        "minor_anomalies":    0,
+        "original_file_b64": (
+            base64.b64encode(original_bytes).decode("ascii") if original_bytes else ""
+        ),
+        "generated_file_b64":  "",
+        "generated_file_name": "",
+        "prerequisites_report": [],
+        "table_id":            cfg.get("table_id"),
+        "parent_session_id":   cfg.get("parent_session_id"),
+        "is_root":             cfg.get("is_root", True),
+        "pkg_code":            cfg.get("pkg_code", ""),
+    }
+    if _resumed_id:
+        ok, res = update_session(_resumed_id, {**_payload, "name": _payload["session_name"]})
+        res = _resumed_id if ok else res
+    else:
+        ok, res = save_session(_payload)
+    if ok:
+        _mem_warning = None
+        try:
+            if original_bytes:
+                from app.core.bc_excel_processor import extract_key_values_by_table
+                from app.db.metadata_db import save_pending_codes
+                _codes_by_table = extract_key_values_by_table(original_bytes)
+                if _codes_by_table:
+                    _mem_ok, _mem_err = save_pending_codes(
+                        session_id=res,
+                        profile_code=cfg.get("client_code", ""),
+                        company_id=cfg.get("company_id", ""),
+                        codes_by_table=_codes_by_table,
+                    )
+                    if not _mem_ok:
+                        _mem_warning = f"Mémoire inter-sessions non enregistrée : {_mem_err}"
+        except Exception as _mem_exc:
+            _mem_warning = f"Mémoire inter-sessions non enregistrée : {_mem_exc}"
+
+        _saved_name = cfg.get("session_name", "")
+        reset_session()
+        st.session_state["_just_saved_banner"] = (
+            f"✅ Session « {_saved_name} » enregistrée (checkpoint). "
+            f"Retrouve-la dans « 📋 Mes sessions » — utilise « ▶️ Reprendre » pour continuer plus tard."
+        )
+        if _mem_warning and is_consultant():
+            st.session_state["_just_saved_mem_warning"] = f"⚠️ {_mem_warning}"
+        st.rerun()
+    else:
+        st.error(f"❌ {res}")
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -810,7 +891,7 @@ with tab_main:
         ("merged_result", None), ("axe_c_result", None), ("saved_session_id", None),
         ("original_file_bytes", None), ("generated_file_bytes", None),
         ("generated_file_name", None), ("prerequisites_report", None),
-        ("level_pkg_resolve", {}),
+        ("level_pkg_resolve", {}), ("resumed_session_id", None),
     ]:
         if key not in st.session_state:
             st.session_state[key] = default
@@ -1082,6 +1163,11 @@ with tab_main:
                             st.session_state.validation = val
                         st.session_state.step = 3
                         st.rerun()
+                # AJOUTÉ (23/08/2026) — demande Rami : possibilité de
+                # sauvegarder à cette étape aussi (checkpoint), pas
+                # seulement à la toute fin.
+                if st.button("💾 Enregistrer maintenant (checkpoint)", key="quicksave_step2", use_container_width=True):
+                    _quick_save_session(st.session_state.config, status="Nouvelle")
         else:
             cb, _, crc = st.columns([2, 6, 2])
             with cb:
@@ -1391,6 +1477,17 @@ with tab_main:
                                                 pd.DataFrame(_sub_anomalies),
                                                 use_container_width=True, hide_index=True,
                                             )
+                                            # AJOUTÉ (23/08/2026) — diagnostic : codes BC/mémoire
+                                            # réellement vus au dernier Revérifier, à comparer
+                                            # visuellement contre "Code manquant" ci-dessus (accents/
+                                            # casse/espaces) quand un niveau reste bloqué malgré une
+                                            # correction censée être faite dans BC.
+                                            _lc = getattr(_entry, "last_codes", None)
+                                            if _lc:
+                                                st.caption(f"🔎 Codes BC/mémoire vus ({len(_lc)}) :")
+                                                st.code(", ".join(sorted(_lc)) or "(aucun)")
+                                            else:
+                                                st.caption("🔎 Aucun code BC/mémoire trouvé pour cette table.")
                                     else:
                                         st.caption(f"　　⚠️ {len(_sub_anomalies)} point(s) à vérifier avant l'intégration BC.")
                         except Exception as _diag_e:
@@ -1526,6 +1623,11 @@ with tab_main:
                     st.rerun()
             else:
                 st.error("❌ Corrigez les erreurs structurelles.")
+
+        # AJOUTÉ (23/08/2026) — demande Rami : possibilité de sauvegarder à
+        # cette étape aussi (checkpoint), pas seulement à la toute fin.
+        if st.button("💾 Enregistrer maintenant (checkpoint)", key="quicksave_step3", use_container_width=True):
+            _quick_save_session(cfg, status="Nouvelle")
 
     # ── Étape 4 ──────────────────────────────────────────────────────────────
     elif st.session_state.step == 4:
@@ -1678,7 +1780,7 @@ with tab_main:
                 if st.button("💾 Sauvegarder la session", type="primary", use_container_width=True):
                     original_bytes  = st.session_state.get("original_file_bytes")
                     generated_bytes = st.session_state.get("generated_file_bytes")
-                    ok, res = save_session({
+                    _save_payload = {
                         "session_name":    cfg["session_name"],
                         "profile_code":    cfg["client_code"],
                         "file_name":       cfg.get("file_name", ""),
@@ -1705,7 +1807,18 @@ with tab_main:
                         "parent_session_id":   _sel_parent_id,
                         "is_root":             _node_kind == "Racine (socle complet)",
                         "pkg_code":            cfg.get("pkg_code", ""),
-                    })
+                    }
+                    # RÉVISÉ (23/08/2026) — demande Rami : reprendre une
+                    # session (▶️ Reprendre) puis sauvegarder créait une
+                    # NOUVELLE session à chaque fois. Si la session en cours
+                    # a été reprise (resumed_session_id), on MET À JOUR cet
+                    # id au lieu d'en créer un nouveau.
+                    _resumed_id = st.session_state.get("resumed_session_id")
+                    if _resumed_id:
+                        _ok, _err = update_session(_resumed_id, {**_save_payload, "name": _save_payload["session_name"]})
+                        ok, res = _ok, (_resumed_id if _ok else _err)
+                    else:
+                        ok, res = save_session(_save_payload)
                     if ok:
                         st.session_state.saved_session_id = res
                         # AJOUTÉ (20/08/2026) — mémoire inter-sessions : les
@@ -2113,6 +2226,15 @@ with tab_ses:
                                             "is_root":           s.get("is_root", False),
                                         }
                                         st.session_state.step = 3
+                                        # AJOUTÉ (23/08/2026) — marque cette session comme
+                                        # "reprise" : la prochaine sauvegarde (Étape 2/3/4)
+                                        # doit mettre à jour CET id au lieu d'en créer un
+                                        # nouveau (voir _quick_save_session et le bouton
+                                        # Sauvegarder de l'Étape 4). Assigné APRÈS
+                                        # reset_session() : sinon reset_session() (qui purge
+                                        # les clés de session_state d'une session en cours)
+                                        # l'effacerait aussitôt.
+                                        st.session_state["resumed_session_id"] = sid
                                         # Streamlit ne permet pas de changer l'onglet
                                         # actif par le code — bannière persistée pour
                                         # guider l'utilisateur vers l'autre onglet.
