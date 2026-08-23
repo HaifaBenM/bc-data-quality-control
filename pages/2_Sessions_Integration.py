@@ -547,6 +547,12 @@ def display_correction_workflow(merged: dict, cfg: dict, pr: dict):
             "Identifiant métier":  a.get("Identifiant métier", ""),
             "Champ":           a.get("Champ", ""),
             "Valeur actuelle": a.get("Valeur", ""),
+            # AJOUTÉ (23/08/2026) — demande Rami : colonne suggestion
+            # visible séparément de "Nouvelle valeur" (celle-ci pré-remplie
+            # avec la même valeur au départ, mais éditable — une fois
+            # modifiée, l'utilisateur perdait de vue la suggestion
+            # d'origine). Lecture seule, jamais utilisée pour la génération.
+            "Suggestion":      a.get("Correction suggérée", ""),
             "Nouvelle valeur": a.get("Correction suggérée", ""),
         }
         for a in corrigibles
@@ -579,7 +585,7 @@ def display_correction_workflow(merged: dict, cfg: dict, pr: dict):
             pd.DataFrame(edit_rows_display),
             use_container_width=True,
             hide_index=True,
-            disabled=["Onglet", "Ligne", "Identifiant métier", "Champ", "Valeur actuelle"],
+            disabled=["Onglet", "Ligne", "Identifiant métier", "Champ", "Valeur actuelle", "Suggestion"],
             column_config={
                 "Appliquer": st.column_config.CheckboxColumn(
                     help="Cocher pour inclure cette ligne dans le fichier généré"
