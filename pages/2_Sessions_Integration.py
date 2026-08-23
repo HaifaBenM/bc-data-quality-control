@@ -124,6 +124,24 @@ st.markdown("""
 .level-check-label-done   { color: #1B3A6B; font-weight: 500; }
 .level-check-label-todo   { color: #334155; }
 .level-check-label-locked { color: #94A3B8; }
+.tree-card {
+    background: white; border: 1px solid #E2E8F0; border-left: 4px solid #94A3B8;
+    border-radius: 8px; padding: .7rem 1rem; margin: .3rem 0;
+}
+.tree-card-root { background: #FFFBEB; }
+.tree-card-title { font-size: .95rem; font-weight: 600; color: #1B3A6B; }
+.tree-card-meta { font-size: .8rem; color: #64748B; margin-top: .2rem; }
+.tree-connector { color: #CBD5E1; font-size: .85rem; margin-right: .3rem; }
+.status-pill {
+    display: inline-block; padding: .12rem .55rem; border-radius: 999px;
+    font-size: .72rem; font-weight: 600; margin-left: .4rem;
+}
+.pkg-pill {
+    display: inline-block; padding: .12rem .5rem; border-radius: 5px;
+    font-size: .72rem; font-weight: 500; margin-left: .4rem;
+    background: #EEF4FD; color: #1B3A6B;
+}
+.session-row-actions { margin: .2rem 0 .6rem; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -765,7 +783,7 @@ def reset_session():
 st.markdown(f"# 📁 Sessions Intégration — {active_client_name}")
 st.markdown("---")
 
-tab_main, tab_ses = st.tabs(["➕ Nouvelle session", "📋 Mes sessions"])
+tab_ses, tab_main = st.tabs(["📋 Mes sessions", "➕ Nouvelle session"])
 
 with tab_main:
     for key, default in [
@@ -1657,8 +1675,14 @@ with tab_main:
                         # sessions de la même société pourront désormais les
                         # reconnaître comme "en attente" plutôt que
                         # "introuvable" (voir check_table_filled_and_codes).
-                        # Best-effort : un échec ici ne bloque jamais la
-                        # sauvegarde de session elle-même, déjà confirmée.
+                        # RÉVISÉ (23/08/2026) — le retour de save_pending_codes
+                        # était ignoré : un échec (ex. table Supabase
+                        # manquante) disparaissait silencieusement, sans
+                        # aucune trace pour comprendre pourquoi la mémoire
+                        # inter-sessions ne fonctionnait pas. Reste
+                        # non-bloquant pour la sauvegarde de session
+                        # elle-même (déjà confirmée juste avant), mais
+                        # affiche désormais l'échec au consultant.
                         try:
                             _bytes_for_memory = generated_bytes or original_bytes
                             if _bytes_for_memory:
@@ -1666,14 +1690,17 @@ with tab_main:
                                 from app.db.metadata_db import save_pending_codes
                                 _codes_by_table = extract_key_values_by_table(_bytes_for_memory)
                                 if _codes_by_table:
-                                    save_pending_codes(
+                                    _mem_ok, _mem_err = save_pending_codes(
                                         session_id=res,
                                         profile_code=cfg["client_code"],
                                         company_id=cfg.get("company_id", ""),
                                         codes_by_table=_codes_by_table,
                                     )
-                        except Exception:
-                            pass  # mémoire inter-sessions : jamais bloquant pour la sauvegarde
+                                    if not _mem_ok and is_consultant():
+                                        st.warning(f"⚠️ Mémoire inter-sessions non enregistrée : {_mem_err}")
+                        except Exception as _mem_exc:
+                            if is_consultant():
+                                st.warning(f"⚠️ Mémoire inter-sessions non enregistrée : {_mem_exc}")
                         st.success("✅ Sauvegardée !")
                         st.rerun()
                     else:
@@ -1740,25 +1767,31 @@ with tab_ses:
                     _si     = STATUS_ICONS.get(_status, "")
                     _tid    = node.get("table_id")
                     _pkg    = node.get("pkg_code", "")
+                    _is_root = bool(node.get("is_root"))
                     _tname  = (
-                        "📁 Racine du socle" if node.get("is_root")
+                        "📁 Racine du socle" if _is_root
                         else (f"{_tid} — {_lvl_cfg_view[_tid].table_name}" if _tid in _lvl_cfg_view else f"Table {_tid}")
                     )
-                    indent = "&nbsp;&nbsp;&nbsp;&nbsp;" * depth
-                    prefix = "└─ " if depth > 0 else ""
+                    # RÉVISÉ (23/08/2026) — refonte visuelle (demande Rami : la
+                    # vue arbre en texte brut + "└─" n'était pas ergonomique).
+                    # Carte cohérente avec le design déjà utilisé ailleurs
+                    # dans l'app (.card-session, .tag), statut en pastille
+                    # colorée au lieu d'un simple mot, package en petit tag.
+                    _connector = ('<span class="tree-connector">└─</span>' if depth > 0 else "")
+                    _pkg_html  = (f'<span class="pkg-pill">📦 {_pkg}</span>' if _pkg else "")
                     st.markdown(
-                        f'<div style="margin-left:{depth*24}px">'
-                        f'<span style="color:#94A3B8">{prefix}</span>'
-                        f'<b>{node.get("name", "")}</b> · {_tname}'
-                        f'{" · 📦 " + _pkg if _pkg else ""} · '
-                        f'<span style="color:{_sc}">{_si} {_status}</span>'
-                        f'</div>',
+                        f'<div class="tree-card{" tree-card-root" if _is_root else ""}" '
+                        f'style="margin-left:{depth*28}px;border-left-color:{_sc}">'
+                        f'<div class="tree-card-title">{_connector}{node.get("name", "")}</div>'
+                        f'<div class="tree-card-meta">{_tname}{_pkg_html}'
+                        f'<span class="status-pill" style="background:{_sc}22;color:{_sc}">{_si} {_status}</span>'
+                        f'</div></div>',
                         unsafe_allow_html=True,
                     )
-                    if not node.get("is_root") and _tid:
+                    if not _is_root and _tid:
                         rc1, rc2 = st.columns([1, 1])
                         with rc1:
-                            if st.button("🔄 Revérifier ce sous-arbre", key=f"scope_reverif_{_nid}"):
+                            if st.button("🔄 Revérifier ce sous-arbre", key=f"scope_reverif_{_nid}", use_container_width=True):
                                 _scope = get_descendant_table_ids(_nid, _tree_sessions_view)
                                 _roadmap_key_guess = None
                                 for k in st.session_state.keys():
@@ -1786,7 +1819,7 @@ with tab_ses:
                             # sont déjà "Terminée" (can_close_session, sessions_db.py).
                             if _status == _CLOSED_STATUS_LABEL:
                                 st.caption("✅ Déjà clôturée")
-                            elif st.button("🔒 Clôturer", key=f"close_{_nid}"):
+                            elif st.button("🔒 Clôturer", key=f"close_{_nid}", use_container_width=True):
                                 _ok, _reasons = can_close_session(_nid, _tree_sessions_view)
                                 if _ok:
                                     _uok, _uerr = update_session(_nid, {"status": _CLOSED_STATUS_LABEL})
@@ -1797,7 +1830,7 @@ with tab_ses:
                                         st.error(f"Échec de la clôture : {_uerr}")
                                 else:
                                     st.warning("Impossible de clôturer :\n" + "\n".join(f"- {r}" for r in _reasons))
-                    elif node.get("is_root"):
+                    elif _is_root:
                         # Clôture du socle entier — même règle, appliquée à la racine :
                         # bloquée tant que le socle lui-même a des anomalies ou qu'une
                         # SEULE de ses filles directes n'est pas encore "Terminée"
@@ -1805,7 +1838,7 @@ with tab_ses:
                         # propre branche, récursivement — voir can_close_session).
                         if _status == _CLOSED_STATUS_LABEL:
                             st.success("🏁 Socle clôturé — tous les niveaux et sous-niveaux sont vérifiés.")
-                        elif st.button("🏁 Clôturer le socle", key=f"close_root_{_nid}"):
+                        elif st.button("🏁 Clôturer le socle", key=f"close_root_{_nid}", use_container_width=True):
                             _ok, _reasons = can_close_session(_nid, _tree_sessions_view)
                             if _ok:
                                 _uok, _uerr = update_session(_nid, {"status": _CLOSED_STATUS_LABEL})
