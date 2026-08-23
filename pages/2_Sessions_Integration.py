@@ -785,7 +785,15 @@ def reset_session():
 st.markdown(f"# 📁 Sessions Intégration — {active_client_name}")
 st.markdown("---")
 
-tab_ses, tab_main = st.tabs(["📋 Mes sessions", "➕ Nouvelle session"])
+# RÉVISÉ (23/08/2026) — remis "Nouvelle session" en premier : le mettre en
+# 2e position (pour ouvrir par défaut sur "Mes sessions") cassait la
+# navigation pendant le remplissage d'une session — st.tabs() retombe sur
+# le PREMIER onglet à chaque st.rerun() (déclenché à chaque changement
+# d'étape), donc l'utilisateur se retrouvait éjecté vers "Mes sessions" à
+# chaque clic "Suivant". La stabilité pendant la création (usage bien plus
+# fréquent) prime sur l'onglet par défaut au tout premier chargement de
+# la page.
+tab_main, tab_ses = st.tabs(["➕ Nouvelle session", "📋 Mes sessions"])
 
 with tab_main:
     for key, default in [
