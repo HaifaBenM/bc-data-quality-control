@@ -1869,6 +1869,77 @@ with tab_ses:
         if not sessions:
             st.info("Aucune session. Créez-en une et cliquez sur **💾 Sauvegarder**.")
         else:
+            # AJOUTÉ (23/08/2026) — demande Rami : recherche + suppression en
+            # lot, pour nettoyer rapidement avant de retester la mémoire
+            # inter-sessions sur une base propre. Recherche sur nom, client,
+            # société et fichier — insensible à la casse, simple `in`.
+            _search = st.text_input(
+                "🔎 Rechercher une session", key="ses_search",
+                placeholder="Nom, client, société, fichier...",
+            )
+            if _search.strip():
+                _q = _search.strip().lower()
+                sessions = [
+                    s for s in sessions
+                    if _q in (s.get("name", "") or "").lower()
+                    or _q in (s.get("profile_code", "") or "").lower()
+                    or _q in (s.get("company_name", "") or "").lower()
+                    or _q in (s.get("file_name", "") or "").lower()
+                ]
+
+            if "bulk_select_ids" not in st.session_state:
+                st.session_state.bulk_select_ids = set()
+            if "confirm_bulk_delete" not in st.session_state:
+                st.session_state.confirm_bulk_delete = False
+            if "_bulk_gen" not in st.session_state:
+                st.session_state._bulk_gen = 0
+
+            _bcol1, _bcol2, _bcol3, _bcol4 = st.columns([2, 2, 2, 4])
+            with _bcol1:
+                if st.button("✅ Tout sélectionner", key="btn_bulk_select_all", use_container_width=True):
+                    st.session_state.bulk_select_ids = {s["id"] for s in sessions if s.get("id")}
+                    # AJOUTÉ (23/08/2026) — même pattern que l'éditeur de
+                    # correction (Étape 4) : une checkbox déjà rendue garde
+                    # son propre état interne Streamlit et ignore `value=`
+                    # au rerun suivant. Changer sa clé force une instance
+                    # neuve qui respecte bien value=True/False.
+                    st.session_state._bulk_gen += 1
+                    st.rerun()
+            with _bcol2:
+                if st.button("⬜ Tout désélectionner", key="btn_bulk_deselect_all", use_container_width=True):
+                    st.session_state.bulk_select_ids = set()
+                    st.session_state.confirm_bulk_delete = False
+                    st.session_state._bulk_gen += 1
+                    st.rerun()
+            with _bcol3:
+                _n_sel = len(st.session_state.bulk_select_ids & {s.get("id") for s in sessions})
+                if st.button(f"🗑️ Supprimer ({_n_sel})", key="btn_bulk_delete", type="primary",
+                             use_container_width=True, disabled=_n_sel == 0):
+                    st.session_state.confirm_bulk_delete = True
+
+            if st.session_state.confirm_bulk_delete:
+                _to_delete = st.session_state.bulk_select_ids & {s.get("id") for s in sessions}
+                st.warning(f"⚠️ Supprimer **{len(_to_delete)} session(s)** sélectionnée(s) ? Action irréversible.")
+                _dy, _dn, _ = st.columns([2, 2, 6])
+                with _dy:
+                    if st.button("✅ Confirmer la suppression", key="btn_bulk_confirm", type="primary", use_container_width=True):
+                        _errs = []
+                        for _sid in _to_delete:
+                            _ok, _err = delete_session(_sid)
+                            if not _ok:
+                                _errs.append(f"{_sid} : {_err}")
+                        st.session_state.bulk_select_ids = set()
+                        st.session_state.confirm_bulk_delete = False
+                        if _errs:
+                            st.error("Certaines suppressions ont échoué :\n" + "\n".join(f"- {e}" for e in _errs))
+                        else:
+                            st.success(f"{len(_to_delete)} session(s) supprimée(s).")
+                        st.rerun()
+                with _dn:
+                    if st.button("❌ Annuler", key="btn_bulk_cancel", use_container_width=True):
+                        st.session_state.confirm_bulk_delete = False
+                        st.rerun()
+
             st.markdown(f"**{len(sessions)} session(s)**")
             for s in sessions:
                 sid    = s.get("id", "")
@@ -1890,7 +1961,17 @@ with tab_ses:
                     '<span style="color:#0F6E56">✅ Aucune anomalie</span>'
                 )
     
-                ci, ca = st.columns([7, 3])
+                ck, ci, ca = st.columns([0.5, 6.5, 3])
+                with ck:
+                    _checked = st.checkbox(
+                        "Sélectionner", key=f"bulk_chk_{sid}_{st.session_state._bulk_gen}",
+                        value=sid in st.session_state.bulk_select_ids,
+                        label_visibility="collapsed",
+                    )
+                    if _checked:
+                        st.session_state.bulk_select_ids.add(sid)
+                    else:
+                        st.session_state.bulk_select_ids.discard(sid)
                 with ci:
                     st.markdown(
                         f'<div class="card-session">'
