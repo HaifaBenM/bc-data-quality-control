@@ -812,6 +812,13 @@ with tab_main:
 
     # ── Étape 1 ──────────────────────────────────────────────────────────────
     if st.session_state.step == 1:
+        # AJOUTÉ (23/08/2026) — demande Rami : après une sauvegarde réussie,
+        # repartir directement sur un formulaire neuf (au lieu de rester sur
+        # l'Étape 4 jusqu'à un clic manuel sur "Recommencer"). Bannière de
+        # confirmation affichée une seule fois, puis nettoyée.
+        _just_saved = st.session_state.pop("_just_saved_banner", None)
+        if _just_saved:
+            st.success(_just_saved)
         st.markdown('<div class="step-header">Étape 1 — Informations</div>', unsafe_allow_html=True)
         col1, col2 = st.columns(2)
 
@@ -1112,28 +1119,14 @@ with tab_main:
             # (nouvelle classification de table) restait invisible tant que
             # l'utilisateur n'actualisait pas complètement la page (F5), y
             # compris après un "Recommencer" qui ne vidait pas cette clé.
-            # Bouton explicite plutôt qu'un rechargement systématique à
-            # chaque run (coût Supabase superflu quand rien n'a changé).
-            # AJOUTÉ (23/08/2026) — simplification écran client, demande Bilel :
-            # ce bouton (rechargement config technique Supabase) n'a de sens que
-            # pour le consultant, jamais pour le client. Masqué, pas supprimé.
-            # RÉVISÉ (23/08/2026) — le bouton pleine largeur avec libellé
-            # technique cassait visuellement l'enchaînement des cartes
-            # DONNÉES. Repris en petite icône ⚙️ (st.popover) qui ne
-            # s'ouvre qu'au clic — même fonctionnalité, aucune place prise
-            # tant qu'on n'en a pas besoin.
-            if is_consultant():
-                with st.popover("⚙️", help="Options consultant"):
-                    if st.button("🔄 Recharger classification niveaux", key="btn_reload_level_config", use_container_width=True):
-                        try:
-                            st.session_state.level_config = load_level_config(get_supabase_client())
-                            for _k in list(st.session_state.keys()):
-                                if _k.startswith("level_roadmap_"):
-                                    del st.session_state[_k]
-                            st.success("Classification rechargée depuis Supabase.")
-                        except Exception as e:
-                            st.error(f"Échec du rechargement : {e}")
-                        st.rerun()
+            #
+            # RÉVISÉ (23/08/2026) — le bouton dédié (d'abord pleine largeur,
+            # puis icône ⚙️ isolée) a été retiré : visuellement à part, sans
+            # rapport clair avec le reste de l'écran ("fait amateur", retour
+            # Rami). Fusionné dans "🔄 Revérifier" ci-dessous à la place —
+            # recharge level_config à chaque clic, coût Supabase négligeable
+            # (petite table de référence), et le consultant obtient le même
+            # résultat sans bouton séparé à comprendre.
 
             # AJOUTÉ (19/08/2026) : get_reference_values_by_table_id() n'a
             # aucune expiration — une entrée en cache reste utilisée
@@ -1260,6 +1253,18 @@ with tab_main:
                         with _hcol2:
                             if st.button("🔄 Revérifier", key="btn_refresh_levels", use_container_width=True):
                                 with st.spinner("Vérification BC en cours..."):
+                                    # AJOUTÉ (23/08/2026) — fusionné depuis l'ancien bouton
+                                    # séparé "Recharger classification niveaux" (retiré, cf.
+                                    # commentaire plus haut) : recharge level_config à chaque
+                                    # clic, pour qu'une modif SQL faite directement dans
+                                    # Supabase soit prise en compte sans jamais avoir besoin
+                                    # d'un F5 complet. Coût négligeable (petite table de
+                                    # référence, un seul SELECT).
+                                    try:
+                                        st.session_state.level_config = load_level_config(get_supabase_client())
+                                    except Exception:
+                                        pass  # repli silencieux sur la classification déjà en mémoire
+
                                     def _gl_check():
                                         _rc_company_id = cfg.get("company_id", "")
                                         # Live BC en premier, l'onglet du fichier n'est qu'un
@@ -1709,7 +1714,18 @@ with tab_main:
                         except Exception as _mem_exc:
                             if is_consultant():
                                 st.warning(f"⚠️ Mémoire inter-sessions non enregistrée : {_mem_exc}")
-                        st.success("✅ Sauvegardée !")
+                        # RÉVISÉ (23/08/2026) — demande Rami : repartir
+                        # directement sur un formulaire neuf après la
+                        # sauvegarde, plutôt que de rester sur l'Étape 4
+                        # jusqu'à un clic manuel sur "Recommencer". Le
+                        # fichier/rapport restent consultables depuis
+                        # "Mes sessions" (déjà sauvegardés juste avant).
+                        _saved_name = cfg.get("session_name", "")
+                        reset_session()
+                        st.session_state["_just_saved_banner"] = (
+                            f"✅ Session « {_saved_name} » enregistrée avec succès. "
+                            f"Retrouve le fichier et le rapport dans « 📋 Mes sessions »."
+                        )
                         st.rerun()
                     else:
                         st.error(f"❌ {res}")
@@ -1931,10 +1947,18 @@ with tab_ses:
 
             if st.session_state.confirm_bulk_delete:
                 _to_delete = st.session_state.bulk_select_ids & {s.get("id") for s in sessions}
-                st.warning(f"⚠️ Supprimer **{len(_to_delete)} session(s)** sélectionnée(s) ? Action irréversible.")
-                _dy, _dn, _ = st.columns([2, 2, 6])
-                with _dy:
-                    if st.button("✅ Confirmer la suppression", key="btn_bulk_confirm", type="primary", use_container_width=True):
+                # RÉVISÉ (23/08/2026) — demande Rami : le gros encadré jaune
+                # (st.warning) + 2 boutons faisait double emploi avec le
+                # bouton "Supprimer (N)" déjà cliqué juste au-dessus — trop
+                # lourd visuellement. Simplifié en une ligne de texte + un
+                # seul bouton de confirmation (pas de bouton "Annuler" séparé
+                # : décocher/re-changer la sélection referme ce bloc tout
+                # seul au prochain rerun).
+                _cc1, _cc2 = st.columns([4, 2])
+                with _cc1:
+                    st.markdown(f"Supprimer **{len(_to_delete)} session(s)** sélectionnée(s) ?")
+                with _cc2:
+                    if st.button("✅ Confirmer", key="btn_bulk_confirm", type="primary", use_container_width=True):
                         _errs = []
                         for _sid in _to_delete:
                             _ok, _err = delete_session(_sid)
@@ -1946,10 +1970,6 @@ with tab_ses:
                             st.error("Certaines suppressions ont échoué :\n" + "\n".join(f"- {e}" for e in _errs))
                         else:
                             st.success(f"{len(_to_delete)} session(s) supprimée(s).")
-                        st.rerun()
-                with _dn:
-                    if st.button("❌ Annuler", key="btn_bulk_cancel", use_container_width=True):
-                        st.session_state.confirm_bulk_delete = False
                         st.rerun()
 
             st.markdown(f"**{len(sessions)} session(s)**")
