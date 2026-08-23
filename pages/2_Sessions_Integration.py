@@ -562,8 +562,32 @@ def display_correction_workflow(merged: dict, cfg: dict, pr: dict):
         }
         for a in corrigibles
     ]
+
+    # AJOUTÉ (23/08/2026) — même cause que le crash "Bad message format /
+    # SessionInfo before it was initialized" corrigé sur display_unified_
+    # results (Styler) : st.data_editor sans plafond sur des milliers de
+    # lignes (4199 anomalies constatées) sature aussi le payload WebSocket
+    # et provoque le rafraîchissement en boucle observé après ce fix-là.
+    # Plafond appliqué UNIQUEMENT à l'affichage/édition interactive — les
+    # lignes au-delà gardent EXACTEMENT le même comportement par défaut
+    # qu'une ligne jamais éditée manuellement (Appliquer = suggestion
+    # présente, Nouvelle valeur = suggestion), donc aucune correction perdue
+    # silencieusement. Seule perte réelle : impossible d'éditer à la main
+    # une ligne au-delà du plafond dans ce run — acceptable en dépannage
+    # avant démo, à revoir avec une vraie pagination par onglet après le 27.
+    _MAX_EDITABLE_ROWS = 300
+    _overflow_rows      = edit_rows[_MAX_EDITABLE_ROWS:]
+    edit_rows_display   = edit_rows[:_MAX_EDITABLE_ROWS]
+
+    if _overflow_rows:
+        st.caption(
+            f"⚠️ {len(_overflow_rows)} anomalie(s) corrigible(s) supplémentaire(s) non affichée(s) "
+            f"ci-dessous (volume trop important pour l'édition interactive) — incluses dans le "
+            f"fichier généré avec leur correction suggérée par défaut, non modifiables dans ce run."
+        )
+
     edited = st.data_editor(
-        pd.DataFrame(edit_rows),
+        pd.DataFrame(edit_rows_display),
         use_container_width=True,
         hide_index=True,
         disabled=["Onglet", "Ligne", "Identifiant métier", "Champ", "Valeur actuelle"],
@@ -607,6 +631,21 @@ def display_correction_workflow(merged: dict, cfg: dict, pr: dict):
                     "new_value":   row["Nouvelle valeur"],
                 }
                 for _, row in selected.iterrows()
+            ]
+            # AJOUTÉ (23/08/2026) — complète avec les lignes au-delà du
+            # plafond d'édition interactive (_overflow_rows), avec leur
+            # valeur par défaut (identique à une ligne jamais éditée à la
+            # main) : aucune correction silencieusement perdue à cause du
+            # plafond d'affichage.
+            corrections += [
+                {
+                    "sheet":       r["Onglet"],
+                    "excel_row":   int(r["Ligne"]),
+                    "column_name": r["Champ"],
+                    "new_value":   r["Nouvelle valeur"],
+                }
+                for r in _overflow_rows
+                if r["Appliquer"] and str(r["Nouvelle valeur"]).strip()
             ]
             try:
                 generated_bytes = (
