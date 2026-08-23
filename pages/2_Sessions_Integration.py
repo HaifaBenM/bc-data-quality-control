@@ -1961,131 +1961,131 @@ with tab_ses:
                     '<span style="color:#0F6E56">✅ Aucune anomalie</span>'
                 )
     
-                ck, ci, ca = st.columns([0.5, 6.5, 3])
-                with ck:
-                    _checked = st.checkbox(
-                        "Sélectionner", key=f"bulk_chk_{sid}_{st.session_state._bulk_gen}",
-                        value=sid in st.session_state.bulk_select_ids,
-                        label_visibility="collapsed",
-                    )
-                    if _checked:
-                        st.session_state.bulk_select_ids.add(sid)
-                    else:
-                        st.session_state.bulk_select_ids.discard(sid)
-                with ci:
-                    st.markdown(
-                        f'<div class="card-session">'
-                        f'<p class="session-name">{s.get("name", "")}</p>'
-                        f'<p class="session-meta">Client : <b>{s.get("profile_code", "")}</b> · '
-                        f'<span style="color:{sc};font-weight:500">{si} {status}</span></p>'
-                        f'<p class="session-meta">{an_s}</p>'
-                        f'<p class="session-meta">{"📄 " + fn + " · " if fn else ""}🕐 {crd}'
-                        f'{"  ·  ✏️ " + upd if upd != crd else ""}</p>'
-                        f'{"<p class=" + chr(34) + "session-meta" + chr(34) + ">📦 Fichier généré : " + gen_fn + "</p>" if gen_fn else ""}'
-                        f'{"<p class=" + chr(34) + "session-meta" + chr(34) + ">🟣 " + str(len(prereq_list)) + " prérequis BC</p>" if prereq_list else ""}'
-                        f'</div>',
-                        unsafe_allow_html=True
-                    )
-    
-                    # RÉVISÉ (23/08/2026) — perf : les blobs ne sont plus dans
-                    # `s` (liste allégée, voir sessions_db.py). Chargés à la
-                    # demande via get_session_file_blob() seulement au clic,
-                    # mis en cache le temps de la session navigateur pour
-                    # éviter de re-télécharger à chaque interaction ailleurs
-                    # dans l'app (st.tabs relance tous les onglets à chaque
-                    # rerun, y compris celui-ci).
-                    dcol1, dcol2, dcol3 = st.columns(3)
-                    with dcol1:
-                        if fn:
-                            _ck = f"_blob_orig_{sid}"
-                            if st.session_state.get(_ck):
-                                st.download_button(
-                                    "⬇️ Fichier chargé", data=base64.b64decode(st.session_state[_ck]),
-                                    file_name=fn or "fichier_charge.xlsx",
-                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                    key=f"dl_orig_{sid}", use_container_width=True,
-                                )
-                            else:
-                                if st.button("📄 Charger le fichier", key=f"load_orig_{sid}", use_container_width=True):
-                                    st.session_state[_ck] = get_session_file_blob(sid, "original_file_b64")
-                                    st.rerun()
-                    with dcol2:
-                        if gen_fn:
-                            _ck = f"_blob_gen_{sid}"
-                            if st.session_state.get(_ck):
-                                st.download_button(
-                                    "⬇️ Fichier corrigé", data=base64.b64decode(st.session_state[_ck]),
-                                    file_name=gen_fn or "fichier_corrige.xlsx",
-                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                    key=f"dl_gen_{sid}", use_container_width=True,
-                                )
-                            else:
-                                if st.button("📄 Charger le fichier corrigé", key=f"load_gen_{sid}", use_container_width=True):
-                                    st.session_state[_ck] = get_session_file_blob(sid, "generated_file_b64")
-                                    st.rerun()
-                    with dcol3:
-                        if prereq_list:
-                            st.download_button(
-                                "⬇️ Prérequis BC", data=build_prerequisites_excel(prereq_list),
-                                file_name=f"prerequis_bc_{sid}.xlsx",
-                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                key=f"dl_prereq_{sid}", use_container_width=True,
-                            )
-                with ca:
-                    st.markdown("<div style='padding-top:14px'>", unsafe_allow_html=True)
-                    ce, cd = st.columns(2)
-                    with ce:
-                        if st.button("✏️ Éditer", key=f"es_{sid}", use_container_width=True):
-                            st.session_state.edit_session_id    = sid
-                            st.session_state.confirm_delete_ses = None
-                    with cd:
-                        if st.button("🗑️", key=f"ds_{sid}", use_container_width=True):
-                            st.session_state.confirm_delete_ses = sid
-                            st.session_state.edit_session_id    = None
-                    st.markdown("</div>", unsafe_allow_html=True)
-    
-                if st.session_state.edit_session_id == sid:
-                    st.markdown("---")
-                    st.markdown(f"**✏️ Modifier — {s.get('name', '')}**")
-                    e1, e2 = st.columns(2)
-                    with e1:
-                        nn = st.text_input("Nom", value=s.get("name", ""), key=f"en_{sid}")
-                        ns = st.selectbox(
-                            "Statut", SESSION_STATUSES,
-                            index=SESSION_STATUSES.index(status) if status in SESSION_STATUSES else 0,
-                            key=f"est_{sid}"
+                # RÉVISÉ (23/08/2026) — refonte ergonomique (demande Rami) :
+                # avant, checkbox / carte / boutons Éditer-Supprimer étaient
+                # 3 colonnes disjointes, et les 3 boutons de téléchargement
+                # formaient un gros bloc toujours visible sous la carte.
+                # st.container(border=True) unifie tout en UNE carte
+                # cohérente ; les téléchargements (usage occasionnel)
+                # passent dans un expander replié par défaut.
+                with st.container(border=True):
+                    top_ck, top_info, top_actions = st.columns([0.6, 6.4, 1.6])
+                    with top_ck:
+                        _checked = st.checkbox(
+                            "Sélectionner", key=f"bulk_chk_{sid}_{st.session_state._bulk_gen}",
+                            value=sid in st.session_state.bulk_select_ids,
+                            label_visibility="collapsed",
                         )
-                    with e2:
-                        no = st.text_area("Notes", value=s.get("notes", ""), height=100, key=f"eno_{sid}")
-                    sv1, sv2, _ = st.columns([2, 2, 6])
-                    with sv1:
-                        if st.button("💾 Enregistrer", key=f"esv_{sid}", type="primary", use_container_width=True):
-                            ok, err = update_session(sid, {"name": nn.strip(), "status": ns, "notes": no.strip()})
-                            if ok:
-                                st.success("✅ Mis à jour !")
+                        if _checked:
+                            st.session_state.bulk_select_ids.add(sid)
+                        else:
+                            st.session_state.bulk_select_ids.discard(sid)
+                    with top_info:
+                        st.markdown(
+                            f'<p class="session-name" style="margin-bottom:.2rem">{s.get("name", "")}</p>'
+                            f'<p class="session-meta">Client : <b>{s.get("profile_code", "")}</b> · '
+                            f'<span style="color:{sc};font-weight:500">{si} {status}</span></p>'
+                            f'<p class="session-meta">{an_s}</p>'
+                            f'<p class="session-meta">{"📄 " + fn + " · " if fn else ""}🕐 {crd}'
+                            f'{"  ·  ✏️ " + upd if upd != crd else ""}'
+                            f'{"  ·  📦 corrigé" if gen_fn else ""}'
+                            f'{"  ·  🟣 " + str(len(prereq_list)) + " prérequis" if prereq_list else ""}</p>',
+                            unsafe_allow_html=True
+                        )
+                    with top_actions:
+                        te, td = st.columns(2)
+                        with te:
+                            if st.button("✏️", key=f"es_{sid}", use_container_width=True, help="Modifier"):
+                                st.session_state.edit_session_id    = sid
+                                st.session_state.confirm_delete_ses = None
+                        with td:
+                            if st.button("🗑️", key=f"ds_{sid}", use_container_width=True, help="Supprimer"):
+                                st.session_state.confirm_delete_ses = sid
+                                st.session_state.edit_session_id    = None
+
+                    # Fichiers & téléchargements — replié : usage occasionnel,
+                    # ne doit pas dominer visuellement la carte.
+                    if fn or gen_fn or prereq_list:
+                        with st.expander("📎 Fichiers"):
+                            dcol1, dcol2, dcol3 = st.columns(3)
+                            with dcol1:
+                                if fn:
+                                    _ck = f"_blob_orig_{sid}"
+                                    if st.session_state.get(_ck):
+                                        st.download_button(
+                                            "⬇️ Fichier chargé", data=base64.b64decode(st.session_state[_ck]),
+                                            file_name=fn or "fichier_charge.xlsx",
+                                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                            key=f"dl_orig_{sid}", use_container_width=True,
+                                        )
+                                    else:
+                                        if st.button("📄 Charger le fichier", key=f"load_orig_{sid}", use_container_width=True):
+                                            st.session_state[_ck] = get_session_file_blob(sid, "original_file_b64")
+                                            st.rerun()
+                            with dcol2:
+                                if gen_fn:
+                                    _ck = f"_blob_gen_{sid}"
+                                    if st.session_state.get(_ck):
+                                        st.download_button(
+                                            "⬇️ Fichier corrigé", data=base64.b64decode(st.session_state[_ck]),
+                                            file_name=gen_fn or "fichier_corrige.xlsx",
+                                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                            key=f"dl_gen_{sid}", use_container_width=True,
+                                        )
+                                    else:
+                                        if st.button("📄 Charger le fichier corrigé", key=f"load_gen_{sid}", use_container_width=True):
+                                            st.session_state[_ck] = get_session_file_blob(sid, "generated_file_b64")
+                                            st.rerun()
+                            with dcol3:
+                                if prereq_list:
+                                    st.download_button(
+                                        "⬇️ Prérequis BC", data=build_prerequisites_excel(prereq_list),
+                                        file_name=f"prerequis_bc_{sid}.xlsx",
+                                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                        key=f"dl_prereq_{sid}", use_container_width=True,
+                                    )
+
+                    if st.session_state.edit_session_id == sid:
+                        st.markdown("---")
+                        st.markdown(f"**✏️ Modifier — {s.get('name', '')}**")
+                        e1, e2 = st.columns(2)
+                        with e1:
+                            nn = st.text_input("Nom", value=s.get("name", ""), key=f"en_{sid}")
+                            ns = st.selectbox(
+                                "Statut", SESSION_STATUSES,
+                                index=SESSION_STATUSES.index(status) if status in SESSION_STATUSES else 0,
+                                key=f"est_{sid}"
+                            )
+                        with e2:
+                            no = st.text_area("Notes", value=s.get("notes", ""), height=100, key=f"eno_{sid}")
+                        sv1, sv2, _ = st.columns([2, 2, 6])
+                        with sv1:
+                            if st.button("💾 Enregistrer", key=f"esv_{sid}", type="primary", use_container_width=True):
+                                ok, err = update_session(sid, {"name": nn.strip(), "status": ns, "notes": no.strip()})
+                                if ok:
+                                    st.success("✅ Mis à jour !")
+                                    st.session_state.edit_session_id = None
+                                    st.rerun()
+                                else:
+                                    st.error(f"❌ {err}")
+                        with sv2:
+                            if st.button("Annuler", key=f"eca_{sid}", use_container_width=True):
                                 st.session_state.edit_session_id = None
                                 st.rerun()
-                            else:
-                                st.error(f"❌ {err}")
-                    with sv2:
-                        if st.button("Annuler", key=f"eca_{sid}", use_container_width=True):
-                            st.session_state.edit_session_id = None
-                            st.rerun()
-                    st.markdown("---")
-    
-                if st.session_state.confirm_delete_ses == sid:
-                    st.warning(f"⚠️ Supprimer **{s.get('name', '')}** ? Action irréversible.")
-                    dy, dn, _ = st.columns([2, 2, 6])
-                    with dy:
-                        if st.button("✅ Confirmer", key=f"dcy_{sid}", type="primary"):
-                            ok, err = delete_session(sid)
-                            if ok:
-                                st.success("Supprimée.")
+
+                    if st.session_state.confirm_delete_ses == sid:
+                        st.warning(f"⚠️ Supprimer **{s.get('name', '')}** ? Action irréversible.")
+                        dy, dn, _ = st.columns([2, 2, 6])
+                        with dy:
+                            if st.button("✅ Confirmer", key=f"dcy_{sid}", type="primary", use_container_width=True):
+                                ok, err = delete_session(sid)
+                                if ok:
+                                    st.success("Supprimée.")
+                                    st.session_state.confirm_delete_ses = None
+                                    st.rerun()
+                                else:
+                                    st.error(err)
+                        with dn:
+                            if st.button("❌ Annuler", key=f"dcn_{sid}", use_container_width=True):
                                 st.session_state.confirm_delete_ses = None
                                 st.rerun()
-                            else:
-                                st.error(err)
-                    with dn:
-                        if st.button("❌ Annuler", key=f"dcn_{sid}"):
-                            st.session_state.confirm_delete_ses = None
-                        st.rerun()
