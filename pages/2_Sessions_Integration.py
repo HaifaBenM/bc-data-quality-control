@@ -378,13 +378,22 @@ def display_unified_results(merged: dict, axe_c: dict, pr: dict = None):
     # de lignes chacune, ce recalcul systématique était payé à chaque clic,
     # même sans rapport avec cette section. Remplacé par un sélecteur — un
     # seul onglet est construit/envoyé au navigateur par rerun.
+    # RÉVISÉ (23/08/2026, 2e passe) — st.radio(horizontal=True) rendait mal
+    # (puces de radio + icône colorée qui s'enroulaient sur plusieurs lignes
+    # de façon désordonnée, "cassé" selon retour Rami). st.segmented_control
+    # est l'équivalent Streamlit natif pensé pour ce cas précis (rendu en
+    # pastilles façon onglets), disponible depuis 1.36 — compatible avec le
+    # pin requirements.txt (>=1.40) et la version réelle (1.59.1).
     _sheet_labels = dict(zip(sheet_names, tab_labels))
-    sn = st.radio(
+    sn = st.segmented_control(
         "Feuille", options=sheet_names,
         format_func=lambda s: _sheet_labels.get(s, s),
-        horizontal=True, key="unified_results_sheet_select",
+        key="unified_results_sheet_select",
         label_visibility="collapsed",
+        default=sheet_names[0],
     )
+    if sn is None:
+        sn = sheet_names[0]
     # (if True: if True: — conserve volontairement la même profondeur
     # d'indentation qu'avant, pour ne pas ré-indenter tout le bloc existant
     # ci-dessous et limiter le risque d'erreur avant la démo.)
@@ -1089,6 +1098,14 @@ with tab_main:
         cfg = st.session_state.config
         val = st.session_state.validation
         pr  = st.session_state.parse_result
+        # AJOUTÉ (23/08/2026) — bannière affichée une fois après un
+        # "▶️ Reprendre" depuis "Mes sessions" (voir plus bas dans le
+        # fichier) — Streamlit ne permet pas de changer l'onglet actif par
+        # le code, donc ce message guide l'utilisateur vers l'onglet à
+        # ouvrir manuellement.
+        _resume_banner = st.session_state.pop("_resume_banner", None)
+        if _resume_banner:
+            st.info(_resume_banner)
         st.markdown('<div class="step-header">Étape 3 — Vérification structurelle</div>', unsafe_allow_html=True)
         sv = val.get("summary", {})
         if val["is_valid"]:
@@ -2056,7 +2073,54 @@ with tab_ses:
                             unsafe_allow_html=True
                         )
                     with top_actions:
-                        te, td = st.columns(2)
+                        tr, te, td = st.columns(3)
+                        with tr:
+                            if st.button("▶️", key=f"resume_{sid}", use_container_width=True,
+                                         help="Reprendre — recharge le fichier et rouvre l'analyse (roadmap, niveaux)"):
+                                # AJOUTÉ (23/08/2026) — demande Rami : aucun moyen de
+                                # rouvrir une session sauvegardée dans le flux Étape
+                                # 1-4 (roadmap, Revérifier...) — seul le résumé
+                                # (nom/statut/notes + téléchargements) était
+                                # accessible. Recharge le fichier original depuis
+                                # Supabase et relance le parsing pour rouvrir
+                                # directement à l'Étape 3.
+                                _resume_b64 = get_session_file_blob(sid, "original_file_b64")
+                                if not _resume_b64:
+                                    st.error("Fichier original introuvable pour cette session — impossible de reprendre.")
+                                else:
+                                    import io as _io
+                                    _resume_bytes = base64.b64decode(_resume_b64)
+                                    _file_like = _io.BytesIO(_resume_bytes)
+                                    _file_like.name = fn or "fichier.xlsx"
+                                    _resume_pr = parse_uploaded_file(_file_like)
+                                    if not _resume_pr.get("success"):
+                                        st.error("Le fichier original n'a pas pu être ré-analysé (structure invalide).")
+                                    else:
+                                        reset_session()
+                                        st.session_state.original_file_bytes = _resume_bytes
+                                        st.session_state.parse_result = _resume_pr
+                                        st.session_state.validation   = validate_file_structure(_resume_pr)
+                                        st.session_state.config = {
+                                            "client_code":   s.get("profile_code", ""),
+                                            "client_name":   active_client_name,
+                                            "company_id":    s.get("company_id", ""),
+                                            "company_name":  s.get("company_name", ""),
+                                            "pkg_code":      s.get("pkg_code", ""),
+                                            "file_name":     s.get("file_name", ""),
+                                            "session_name":  s.get("name", ""),
+                                            "table_id":          s.get("table_id"),
+                                            "parent_session_id": s.get("parent_session_id"),
+                                            "is_root":           s.get("is_root", False),
+                                        }
+                                        st.session_state.step = 3
+                                        # Streamlit ne permet pas de changer l'onglet
+                                        # actif par le code — bannière persistée pour
+                                        # guider l'utilisateur vers l'autre onglet.
+                                        st.session_state["_resume_banner"] = (
+                                            f"▶️ Session « {s.get('name', '')} » rechargée — "
+                                            f"ouvre l'onglet **➕ Nouvelle session** pour continuer."
+                                        )
+                                        st.rerun()
                         with te:
                             if st.button("✏️", key=f"es_{sid}", use_container_width=True, help="Modifier"):
                                 st.session_state.edit_session_id    = sid
