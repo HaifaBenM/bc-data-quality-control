@@ -827,6 +827,9 @@ with tab_main:
         _just_saved = st.session_state.pop("_just_saved_banner", None)
         if _just_saved:
             st.success(_just_saved)
+        _just_saved_mem = st.session_state.pop("_just_saved_mem_warning", None)
+        if _just_saved_mem:
+            st.warning(_just_saved_mem)
         st.markdown('<div class="step-header">Étape 1 — Informations</div>', unsafe_allow_html=True)
         col1, col2 = st.columns(2)
 
@@ -1704,6 +1707,19 @@ with tab_main:
                         # non-bloquant pour la sauvegarde de session
                         # elle-même (déjà confirmée juste avant), mais
                         # affiche désormais l'échec au consultant.
+                        # RÉVISÉ (23/08/2026, 2e passe) — bug trouvé : le
+                        # st.warning() ci-dessous était placé juste avant
+                        # reset_session()+st.rerun() DANS LA MÊME EXÉCUTION —
+                        # Streamlit interrompt le script immédiatement à
+                        # st.rerun(), donc ce message n'avait jamais le temps
+                        # de s'afficher. Stocké en session_state pour survivre
+                        # au rerun et s'afficher sur le formulaire neuf (même
+                        # mécanisme que _just_saved_banner). Ajout aussi d'un
+                        # cas jusqu'ici totalement silencieux : extraction
+                        # réussie mais _codes_by_table vide (colonne clé
+                        # "Code"/"N°" introuvable dans le fichier) — jamais
+                        # signalé avant, aucune trace nulle part.
+                        _mem_warning = None
                         try:
                             _bytes_for_memory = generated_bytes or original_bytes
                             if _bytes_for_memory:
@@ -1717,11 +1733,16 @@ with tab_main:
                                         company_id=cfg.get("company_id", ""),
                                         codes_by_table=_codes_by_table,
                                     )
-                                    if not _mem_ok and is_consultant():
-                                        st.warning(f"⚠️ Mémoire inter-sessions non enregistrée : {_mem_err}")
+                                    if not _mem_ok:
+                                        _mem_warning = f"Mémoire inter-sessions non enregistrée : {_mem_err}"
+                                else:
+                                    _mem_warning = (
+                                        "Mémoire inter-sessions : aucun code extrait de ce fichier "
+                                        "(colonne clé \"Code\" ou \"N°\" introuvable sur un onglet, "
+                                        "ou fichier sans lignes de données)."
+                                    )
                         except Exception as _mem_exc:
-                            if is_consultant():
-                                st.warning(f"⚠️ Mémoire inter-sessions non enregistrée : {_mem_exc}")
+                            _mem_warning = f"Mémoire inter-sessions non enregistrée : {_mem_exc}"
                         # RÉVISÉ (23/08/2026) — demande Rami : repartir
                         # directement sur un formulaire neuf après la
                         # sauvegarde, plutôt que de rester sur l'Étape 4
@@ -1734,6 +1755,8 @@ with tab_main:
                             f"✅ Session « {_saved_name} » enregistrée avec succès. "
                             f"Retrouve le fichier et le rapport dans « 📋 Mes sessions »."
                         )
+                        if _mem_warning and is_consultant():
+                            st.session_state["_just_saved_mem_warning"] = f"⚠️ {_mem_warning}"
                         st.rerun()
                     else:
                         st.error(f"❌ {res}")
