@@ -110,8 +110,10 @@ st.markdown("""
 .conf-bar  { background: #E2E8F0; border-radius: 3px; height: 5px; margin: 4px 0; }
 .level-check-item {
     display: flex; align-items: center; gap: .65rem;
-    padding: .45rem 0; font-size: .92rem;
+    padding: .55rem .75rem; font-size: .92rem;
+    background: #F8FAFC; border-radius: 6px; margin-bottom: .3rem;
 }
+.level-check-sub { font-size: .78rem; color: #B45309; margin: .1rem 0 .3rem 2.6rem; }
 .level-check-circle-done {
     width: 22px; height: 22px; border-radius: 50%; background: #0F6E56;
     color: white; display: flex; align-items: center; justify-content: center;
@@ -1251,119 +1253,125 @@ with tab_main:
                 _roadmap = st.session_state[_roadmap_key]
 
                 if _roadmap:
-                    st.markdown("---")
-                    _hcol1, _hcol2 = st.columns([5, 2])
-                    with _hcol1:
-                        st.markdown('<div class="step-header">🧱 Prérequis BC détectés</div>', unsafe_allow_html=True)
-                    with _hcol2:
-                        if st.button("🔄 Revérifier", key="btn_refresh_levels", use_container_width=True):
-                            with st.spinner("Vérification BC en cours..."):
-                                def _gl_check():
-                                    _rc_company_id = cfg.get("company_id", "")
-                                    # Live BC en premier, l'onglet du fichier n'est qu'un
-                                    # repli (28/07/2026) — voir check_gl_account_prerequisites.
-                                    _rc_live = _try_live_gl_account(cfg["client_code"], _rc_company_id)
-                                    if _rc_live:
-                                        persist_gl_account_posting_fields(cfg["client_code"], _rc_company_id, _rc_live)
-                                        return check_gl_account_prerequisites(pr, _rc_live, prefer_fallback=True)
-                                    _rc_extract = extract_gl_account_posting_fields(pr)
-                                    if _rc_extract:
-                                        persist_gl_account_posting_fields(cfg["client_code"], _rc_company_id, _rc_extract)
-                                        _rc_fallback = None
-                                    else:
-                                        _rc_fallback = get_gl_account_posting_fields(cfg["client_code"], _rc_company_id)
-                                    return check_gl_account_prerequisites(pr, _rc_fallback)
+                    with st.container(border=True):
+                        _hcol1, _hcol2 = st.columns([5, 2])
+                        with _hcol1:
+                            st.markdown('<div class="step-header">🧱 Prérequis BC détectés</div>', unsafe_allow_html=True)
+                        with _hcol2:
+                            if st.button("🔄 Revérifier", key="btn_refresh_levels", use_container_width=True):
+                                with st.spinner("Vérification BC en cours..."):
+                                    def _gl_check():
+                                        _rc_company_id = cfg.get("company_id", "")
+                                        # Live BC en premier, l'onglet du fichier n'est qu'un
+                                        # repli (28/07/2026) — voir check_gl_account_prerequisites.
+                                        _rc_live = _try_live_gl_account(cfg["client_code"], _rc_company_id)
+                                        if _rc_live:
+                                            persist_gl_account_posting_fields(cfg["client_code"], _rc_company_id, _rc_live)
+                                            return check_gl_account_prerequisites(pr, _rc_live, prefer_fallback=True)
+                                        _rc_extract = extract_gl_account_posting_fields(pr)
+                                        if _rc_extract:
+                                            persist_gl_account_posting_fields(cfg["client_code"], _rc_company_id, _rc_extract)
+                                            _rc_fallback = None
+                                        else:
+                                            _rc_fallback = get_gl_account_posting_fields(cfg["client_code"], _rc_company_id)
+                                        return check_gl_account_prerequisites(pr, _rc_fallback)
 
-                                try:
-                                    st.session_state[_roadmap_key] = refresh_roadmap(
-                                        cfg["client_code"], cfg["company_id"], _roadmap,
-                                        gl_account_check=_gl_check,
-                                    )
-                                except Exception as _refresh_e:
-                                    st.error(f"Erreur lors de la revérification : {type(_refresh_e).__name__}: {_refresh_e}")
-                                    st.stop()
-                            st.rerun()
-
-                    _total   = len(_roadmap)
-                    _done    = sum(1 for e in _roadmap if e.status == "validated")
-                    _pct     = int(100 * _done / _total) if _total else 0
-
-                    st.markdown(f"**Progression — {_pct}%**")
-                    st.progress(_pct / 100)
-
-                    try:
-                        for _entry in _roadmap:
-                            _unlocked = is_level_unlocked(_entry.level_info.level, _roadmap)
-                            _label = _entry.level_info.table_name
-                            if _entry.level_info.sub_level:
-                                _label = f"{_label} ({_entry.level_info.sub_level})"
-
-                            if _entry.status == "validated":
-                                # AJOUTÉ (20/08/2026) — distinction honnête : le cercle
-                                # vert (✓) reste réservé au confirmé BC réel ; un statut
-                                # validé uniquement via la mémoire d'une autre session
-                                # affiche un repère orange (🟡) distinct, avec une légende
-                                # explicite — le client doit voir la différence, ce n'est
-                                # pas la même garantie (décision Rami, 20/08).
-                                if getattr(_entry, "validated_via", None) == "memory":
-                                    _circle, _lbl_cls = (
-                                        '<div class="level-check-circle-done" '
-                                        'style="background:#F59E0B;">🟡</div>',
-                                        "level-check-label-done",
-                                    )
-                                    _label += " — en attente d'intégration BC (mémoire)"
-                                else:
-                                    _circle, _lbl_cls = '<div class="level-check-circle-done">✓</div>', "level-check-label-done"
-                            elif not _unlocked:
-                                _circle, _lbl_cls = '<div class="level-check-circle-todo"></div>', "level-check-label-locked"
-                            else:
-                                _circle, _lbl_cls = '<div class="level-check-circle-todo"></div>', "level-check-label-todo"
-
-                            st.markdown(
-                                f'<div class="level-check-item">{_circle}'
-                                f'<span class="{_lbl_cls}">{_label}</span></div>',
-                                unsafe_allow_html=True,
-                            )
-                            # getattr défensif : un RoadmapEntry déjà présent dans
-                            # st.session_state (construit par une version antérieure du
-                            # code, avant l'ajout de ce champ) n'a pas sub_anomalies —
-                            # confirmé par l'AttributeError remontée par Rami le 27/07.
-                            #
-                            # AJOUTÉ (20/08/2026) : une fois le niveau validé (✓), le
-                            # détail des anomalies ne s'affiche plus — Rami : "une fois
-                            # un niveau validé les erreurs ne doivent plus être
-                            # affichées". sub_anomalies reste figé (scan initial, jamais
-                            # recalculé par Revérifier — voir _has_blocking_sub_anomalies)
-                            # donc continuer à l'afficher après validation montrerait des
-                            # anomalies déjà résolues comme si elles étaient encore là.
-                            _sub_anomalies = getattr(_entry, "sub_anomalies", None)
-                            if _sub_anomalies and _entry.status != "validated":
-                                # RÉVISÉ (23/08/2026) — simplification écran client (demande
-                                # Bilel) : le détail brut (dataframe technique) reste réservé
-                                # au consultant. Le client voit juste un compteur simple.
-                                if is_consultant():
-                                    with st.expander(
-                                        f"⚠️ {len(_sub_anomalies)} champ(s) manquant(s) sur des comptes référencés",
-                                        expanded=False,
-                                    ):
-                                        st.dataframe(
-                                            pd.DataFrame(_sub_anomalies),
-                                            use_container_width=True, hide_index=True,
+                                    try:
+                                        st.session_state[_roadmap_key] = refresh_roadmap(
+                                            cfg["client_code"], cfg["company_id"], _roadmap,
+                                            gl_account_check=_gl_check,
                                         )
+                                    except Exception as _refresh_e:
+                                        st.error(f"Erreur lors de la revérification : {type(_refresh_e).__name__}: {_refresh_e}")
+                                        st.stop()
+                                st.rerun()
+
+                        _total   = len(_roadmap)
+                        _done    = sum(1 for e in _roadmap if e.status == "validated")
+                        _pct     = int(100 * _done / _total) if _total else 0
+
+                        st.markdown(f"**Progression — {_pct}%**")
+                        st.progress(_pct / 100)
+
+                        try:
+                            for _entry in _roadmap:
+                                _unlocked = is_level_unlocked(_entry.level_info.level, _roadmap)
+                                _label = _entry.level_info.table_name
+                                if _entry.level_info.sub_level:
+                                    _label = f"{_label} ({_entry.level_info.sub_level})"
+                                _memory_sub = ""
+
+                                if _entry.status == "validated":
+                                    # AJOUTÉ (20/08/2026) — distinction honnête : le cercle
+                                    # vert (✓) reste réservé au confirmé BC réel ; un statut
+                                    # validé uniquement via la mémoire d'une autre session
+                                    # affiche un repère orange (🟡) distinct, avec une légende
+                                    # explicite — le client doit voir la différence, ce n'est
+                                    # pas la même garantie (décision Rami, 20/08).
+                                    if getattr(_entry, "validated_via", None) == "memory":
+                                        _circle, _lbl_cls = (
+                                            '<div class="level-check-circle-done" '
+                                            'style="background:#F59E0B;">🟡</div>',
+                                            "level-check-label-done",
+                                        )
+                                        # RÉVISÉ (23/08/2026) — refonte visuelle : légende
+                                        # séparée du libellé (avant concaténée avec un tiret
+                                        # dans la même ligne, moins lisible) — même info,
+                                        # affichée en petite ligne dédiée sous l'item.
+                                        _memory_sub = "🟡 En attente d'intégration BC (mémoire inter-sessions)"
+                                    else:
+                                        _circle, _lbl_cls = '<div class="level-check-circle-done">✓</div>', "level-check-label-done"
+                                elif not _unlocked:
+                                    _circle, _lbl_cls = '<div class="level-check-circle-todo"></div>', "level-check-label-locked"
                                 else:
-                                    st.caption(f"　　⚠️ {len(_sub_anomalies)} point(s) à vérifier avant l'intégration BC.")
-                    except Exception as _diag_e:
-                        # DIAGNOSTIC — laissé en place tant qu'on n'a pas une confirmation
-                        # de stabilité dans la durée. Sans impact visuel si tout va bien.
-                        # RÉVISÉ (23/08/2026) — simplification écran client (demande
-                        # Bilel) : la trace technique complète reste réservée au
-                        # consultant, le client voit un message neutre.
-                        if is_consultant():
-                            import traceback
-                            st.error("🔧 DIAGNOSTIC — erreur capturée dans la boucle d'affichage de la roadmap :")
-                            st.code(traceback.format_exc())
-                        else:
-                            st.warning("⚠️ Affichage des prérequis momentanément indisponible. Réessaie dans un instant.")
+                                    _circle, _lbl_cls = '<div class="level-check-circle-todo"></div>', "level-check-label-todo"
+
+                                st.markdown(
+                                    f'<div class="level-check-item">{_circle}'
+                                    f'<span class="{_lbl_cls}">{_label}</span></div>'
+                                    f'{"<div class=" + chr(34) + "level-check-sub" + chr(34) + ">" + _memory_sub + "</div>" if _memory_sub else ""}',
+                                    unsafe_allow_html=True,
+                                )
+                                # getattr défensif : un RoadmapEntry déjà présent dans
+                                # st.session_state (construit par une version antérieure du
+                                # code, avant l'ajout de ce champ) n'a pas sub_anomalies —
+                                # confirmé par l'AttributeError remontée par Rami le 27/07.
+                                #
+                                # AJOUTÉ (20/08/2026) : une fois le niveau validé (✓), le
+                                # détail des anomalies ne s'affiche plus — Rami : "une fois
+                                # un niveau validé les erreurs ne doivent plus être
+                                # affichées". sub_anomalies reste figé (scan initial, jamais
+                                # recalculé par Revérifier — voir _has_blocking_sub_anomalies)
+                                # donc continuer à l'afficher après validation montrerait des
+                                # anomalies déjà résolues comme si elles étaient encore là.
+                                _sub_anomalies = getattr(_entry, "sub_anomalies", None)
+                                if _sub_anomalies and _entry.status != "validated":
+                                    # RÉVISÉ (23/08/2026) — simplification écran client (demande
+                                    # Bilel) : le détail brut (dataframe technique) reste réservé
+                                    # au consultant. Le client voit juste un compteur simple.
+                                    if is_consultant():
+                                        with st.expander(
+                                            f"⚠️ {len(_sub_anomalies)} champ(s) manquant(s) sur des comptes référencés",
+                                            expanded=False,
+                                        ):
+                                            st.dataframe(
+                                                pd.DataFrame(_sub_anomalies),
+                                                use_container_width=True, hide_index=True,
+                                            )
+                                    else:
+                                        st.caption(f"　　⚠️ {len(_sub_anomalies)} point(s) à vérifier avant l'intégration BC.")
+                        except Exception as _diag_e:
+                            # DIAGNOSTIC — laissé en place tant qu'on n'a pas une confirmation
+                            # de stabilité dans la durée. Sans impact visuel si tout va bien.
+                            # RÉVISÉ (23/08/2026) — simplification écran client (demande
+                            # Bilel) : la trace technique complète reste réservée au
+                            # consultant, le client voit un message neutre.
+                            if is_consultant():
+                                import traceback
+                                st.error("🔧 DIAGNOSTIC — erreur capturée dans la boucle d'affichage de la roadmap :")
+                                st.code(traceback.format_exc())
+                            else:
+                                st.warning("⚠️ Affichage des prérequis momentanément indisponible. Réessaie dans un instant.")
 
                     # AJOUTÉ (07/08/2026) : export consolidé de TOUS les niveaux en
                     # un seul fichier — jusqu'ici chaque niveau n'était téléchargeable
@@ -1748,11 +1756,13 @@ with tab_ses:
             st.info("Aucune session rattachée à une société pour l'instant.")
         else:
             _company_labels = {cid: f"{cname} ({cid})" for cid, cname in _companies}
-            _sel_company = st.selectbox(
-                "Société", options=[c[0] for c in _companies],
-                format_func=lambda cid: _company_labels.get(cid, cid),
-                key="ses_tree_company",
-            )
+            _sel_col, _ = st.columns([1, 2])
+            with _sel_col:
+                _sel_company = st.selectbox(
+                    "Société", options=[c[0] for c in _companies],
+                    format_func=lambda cid: _company_labels.get(cid, cid),
+                    key="ses_tree_company",
+                )
             _tree_sessions_view = get_sessions_for_company(active_client or "", _sel_company)
             _tree = build_sessions_tree(_tree_sessions_view)
             if not _tree:
@@ -1873,10 +1883,12 @@ with tab_ses:
             # lot, pour nettoyer rapidement avant de retester la mémoire
             # inter-sessions sur une base propre. Recherche sur nom, client,
             # société et fichier — insensible à la casse, simple `in`.
-            _search = st.text_input(
-                "🔎 Rechercher une session", key="ses_search",
-                placeholder="Nom, client, société, fichier...",
-            )
+            _search_col, _ = st.columns([1, 2])
+            with _search_col:
+                _search = st.text_input(
+                    "🔎 Rechercher une session", key="ses_search",
+                    placeholder="Nom, client, société, fichier...",
+                )
             if _search.strip():
                 _q = _search.strip().lower()
                 sessions = [
