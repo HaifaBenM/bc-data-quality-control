@@ -1838,17 +1838,27 @@ with tab_ses:
                         # propre branche, récursivement — voir can_close_session).
                         if _status == _CLOSED_STATUS_LABEL:
                             st.success("🏁 Socle clôturé — tous les niveaux et sous-niveaux sont vérifiés.")
-                        elif st.button("🏁 Clôturer le socle", key=f"close_root_{_nid}", use_container_width=True):
-                            _ok, _reasons = can_close_session(_nid, _tree_sessions_view)
-                            if _ok:
-                                _uok, _uerr = update_session(_nid, {"status": _CLOSED_STATUS_LABEL})
-                                if _uok:
-                                    st.success("Socle clôturé.")
-                                    st.rerun()
+                        else:
+                            # RÉVISÉ (23/08/2026) — bouton plein largeur trop
+                            # imposant visuellement à côté des cartes compactes.
+                            # Contraint à une petite colonne, comme les boutons
+                            # par nœud (Revérifier/Clôturer) juste au-dessus.
+                            _rc, _ = st.columns([1, 3])
+                            with _rc:
+                                _close_root_clicked = st.button(
+                                    "🏁 Clôturer le socle", key=f"close_root_{_nid}", use_container_width=True
+                                )
+                            if _close_root_clicked:
+                                _ok, _reasons = can_close_session(_nid, _tree_sessions_view)
+                                if _ok:
+                                    _uok, _uerr = update_session(_nid, {"status": _CLOSED_STATUS_LABEL})
+                                    if _uok:
+                                        st.success("Socle clôturé.")
+                                        st.rerun()
+                                    else:
+                                        st.error(f"Échec de la clôture : {_uerr}")
                                 else:
-                                    st.error(f"Échec de la clôture : {_uerr}")
-                            else:
-                                st.warning("Le socle ne peut pas encore être clôturé :\n" + "\n".join(f"- {r}" for r in _reasons))
+                                    st.warning("Le socle ne peut pas encore être clôturé :\n" + "\n".join(f"- {r}" for r in _reasons))
                     for child in node.get("children", []):
                         _render_node(child, depth + 1)
 
