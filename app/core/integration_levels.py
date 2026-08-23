@@ -646,20 +646,20 @@ def refresh_roadmap(
     for e in roadmap:
         if e.status == "validated" and e.level_info.table_id != 15 and not getattr(e, "sub_anomalies", None):
             continue
-        # RÉVISÉ (19/08/2026) : G/L Account (table 15, niveau 0) contourne
-        # désormais le verrouillage en cascade — demandé par Rami : il est
-        # certain que GL Account est propre dans BC et veut le voir coché
-        # même si le niveau -1 n'est pas encore intégralement terminé
-        # (Code traçabilité, En-tête gamme encore en cours). Le blocage
-        # métier réel (GL Account dépend fonctionnellement des groupes
-        # comptables niveau -1) n'est pas remis en cause : son propre
-        # contrôle (check_table_filled + gl_account_check) continue de
-        # s'exécuter et de décider seul s'il est réellement propre — on
-        # retire juste l'attente artificielle du reste du niveau -1 pour
-        # AFFICHER ce résultat. Aucune autre table ne bénéficie de ce
-        # contournement — la cascade normale s'applique partout ailleurs.
-        if e.level_info.table_id != 15 and not is_level_unlocked(e.level_info.level, roadmap):
-            continue
+        # RÉVISÉ (23/08/2026) — demande Rami : généralisation du contournement
+        # jusque-là réservé à GL Account (table 15). Rami s'attendait à ce que
+        # TOUTE table déjà "prête" (BC live ou mémoire inter-sessions) soit
+        # revérifiée indépendamment des niveaux inférieurs — la cascade
+        # (is_level_unlocked) reste affichée comme information de dépendance
+        # fonctionnelle dans l'UI, mais ne bloque plus le RECALCUL du statut
+        # ici. Sans ce changement, une table de niveau 2 (ex. Devise) restait
+        # "non cochée" indéfiniment tant qu'un niveau -1/0/1 quelconque
+        # n'était pas validé, même si la mémoire inter-sessions ou BC
+        # confirmait déjà cette table précise comme prête.
+        #
+        # ANCIEN COMPORTEMENT (retiré) :
+        #   if e.level_info.table_id != 15 and not is_level_unlocked(e.level_info.level, roadmap):
+        #       continue
         result = fill_results.get(id(e))
         if result is None:
             continue  # pas dans to_check (ne devrait pas arriver ici, sécurité)
