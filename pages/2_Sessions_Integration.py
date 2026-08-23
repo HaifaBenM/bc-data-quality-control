@@ -36,6 +36,7 @@ from app.db.sessions_db import (
     get_all_sessions, SESSION_STATUSES, STATUS_COLORS, STATUS_ICONS,
     get_sessions_for_company, build_sessions_tree,
     resolve_parent_candidates, get_descendant_table_ids, can_close_session,
+    get_session_file_blob,
 )
 
 require_role()
@@ -597,7 +598,7 @@ def display_correction_workflow(merged: dict, cfg: dict, pr: dict):
             key=f"corrections_editor_{st.session_state[_editor_gen_key]}",
         )
 
-        cgen1, cgen2 = st.columns([2, 6])
+        cgen1, cgen2, cgen3 = st.columns([2, 2, 4])
         with cgen1:
             gen_clicked = st.button("🔧 Générer le fichier corrigé", type="primary", use_container_width=True)
 
@@ -696,13 +697,15 @@ def display_correction_workflow(merged: dict, cfg: dict, pr: dict):
                     st.error(f"❌ Erreur lors de la génération : {e}")
 
         if st.session_state.get("generated_file_bytes"):
-            st.download_button(
-                "⬇️ Télécharger le fichier corrigé",
-                data=st.session_state["generated_file_bytes"],
-                file_name=st.session_state.get("generated_file_name", "fichier_corrige.xlsx"),
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                key="dl_generated_file",
-            )
+            with cgen2:
+                st.download_button(
+                    "⬇️ Télécharger le fichier corrigé",
+                    data=st.session_state["generated_file_bytes"],
+                    file_name=st.session_state.get("generated_file_name", "fichier_corrige.xlsx"),
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="dl_generated_file",
+                    use_container_width=True,
+                )
 
 
 def reset_session():
@@ -1836,26 +1839,42 @@ with tab_ses:
                         unsafe_allow_html=True
                     )
     
-                    # Téléchargements : fichier chargé, fichier généré, rapport prérequis.
-                    orig_b64 = s.get("original_file_b64", "")
-                    gen_b64  = s.get("generated_file_b64", "")
+                    # RÉVISÉ (23/08/2026) — perf : les blobs ne sont plus dans
+                    # `s` (liste allégée, voir sessions_db.py). Chargés à la
+                    # demande via get_session_file_blob() seulement au clic,
+                    # mis en cache le temps de la session navigateur pour
+                    # éviter de re-télécharger à chaque interaction ailleurs
+                    # dans l'app (st.tabs relance tous les onglets à chaque
+                    # rerun, y compris celui-ci).
                     dcol1, dcol2, dcol3 = st.columns(3)
                     with dcol1:
-                        if orig_b64:
-                            st.download_button(
-                                "⬇️ Fichier chargé", data=base64.b64decode(orig_b64),
-                                file_name=fn or "fichier_charge.xlsx",
-                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                key=f"dl_orig_{sid}", use_container_width=True,
-                            )
+                        if fn:
+                            _ck = f"_blob_orig_{sid}"
+                            if st.session_state.get(_ck):
+                                st.download_button(
+                                    "⬇️ Fichier chargé", data=base64.b64decode(st.session_state[_ck]),
+                                    file_name=fn or "fichier_charge.xlsx",
+                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                    key=f"dl_orig_{sid}", use_container_width=True,
+                                )
+                            else:
+                                if st.button("📄 Charger le fichier", key=f"load_orig_{sid}", use_container_width=True):
+                                    st.session_state[_ck] = get_session_file_blob(sid, "original_file_b64")
+                                    st.rerun()
                     with dcol2:
-                        if gen_b64:
-                            st.download_button(
-                                "⬇️ Fichier corrigé", data=base64.b64decode(gen_b64),
-                                file_name=gen_fn or "fichier_corrige.xlsx",
-                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                key=f"dl_gen_{sid}", use_container_width=True,
-                            )
+                        if gen_fn:
+                            _ck = f"_blob_gen_{sid}"
+                            if st.session_state.get(_ck):
+                                st.download_button(
+                                    "⬇️ Fichier corrigé", data=base64.b64decode(st.session_state[_ck]),
+                                    file_name=gen_fn or "fichier_corrige.xlsx",
+                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                    key=f"dl_gen_{sid}", use_container_width=True,
+                                )
+                            else:
+                                if st.button("📄 Charger le fichier corrigé", key=f"load_gen_{sid}", use_container_width=True):
+                                    st.session_state[_ck] = get_session_file_blob(sid, "generated_file_b64")
+                                    st.rerun()
                     with dcol3:
                         if prereq_list:
                             st.download_button(

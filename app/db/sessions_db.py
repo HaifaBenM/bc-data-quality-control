@@ -36,7 +36,27 @@ existait déjà en mémoire pendant la session mais n'était JAMAIS sauvegardé
 en base : une session rechargée depuis Supabase n'avait donc aucune trace
 de quel package BC elle représentait. Colonne supplémentaire :
    ALTER TABLE qc_sessions ADD COLUMN pkg_code text;
+⚠️ AJOUTÉ (23/08/2026) — perf critique : get_all_sessions()/get_sessions_
+for_company() faisaient SELECT * (donc rapatriaient original_file_b64 +
+generated_file_b64 — des fichiers Excel entiers en base64 — pour TOUTES
+les sessions) à CHAQUE rerun Streamlit. Or `st.tabs()` exécute le contenu
+de TOUS les onglets à chaque interaction, même ceux non visibles à
+l'écran — donc chaque clic n'importe où dans l'app (y compris une simple
+case à cocher à l'Étape 4) redéclenchait ce rapatriement complet en
+arrière-plan. Cause du "temps d'attente énorme" observé y compris sur des
+actions qui n'ont rien à voir avec la liste des sessions. Fix : liste
+allégée (_SESSION_LIST_COLUMNS, sans les 2 blobs) pour l'affichage,
+get_session_file_blob() pour aller chercher un blob précis à la demande
+(1 seule colonne, 1 seule ligne) uniquement quand l'utilisateur clique
+pour le télécharger.
 """
+_SESSION_LIST_COLUMNS = (
+    "id,name,profile_code,file_name,status,iteration,total_anomalies,"
+    "major_anomalies,minor_anomalies,notes,date_controle,company_id,"
+    "company_name,generated_file_name,prerequisites_report,table_id,"
+    "parent_session_id,is_root,pkg_code,created_at,updated_at"
+)
+
 import uuid
 from datetime import datetime, timezone
 from app.db.supabase_client import get_supabase_client
@@ -166,16 +186,33 @@ def delete_session(session_id: str) -> tuple[bool, str]:
 
 
 def get_all_sessions(profile_code: str = None) -> list:
-    """Retourne toutes les sessions triées par date décroissante."""
+    """Retourne toutes les sessions triées par date décroissante — colonnes
+    allégées (sans original_file_b64/generated_file_b64, voir docstring
+    module). Utiliser get_session_file_blob() pour récupérer un fichier
+    précis à la demande."""
     try:
         client = get_supabase_client()
-        query  = client.table("qc_sessions").select("*").order("created_at", desc=True)
+        query  = client.table("qc_sessions").select(_SESSION_LIST_COLUMNS).order("created_at", desc=True)
         if profile_code:
             query = query.eq("profile_code", profile_code)
         res = query.execute()
         return res.data or []
     except Exception:
         return []
+
+
+def get_session_file_blob(session_id: str, field: str) -> str:
+    """Récupère À LA DEMANDE le contenu base64 d'un seul fichier
+    (field = 'original_file_b64' ou 'generated_file_b64') pour UNE session.
+    Requête légère (1 colonne, 1 ligne) — jamais chargée en liste."""
+    if field not in ("original_file_b64", "generated_file_b64"):
+        return ""
+    try:
+        client = get_supabase_client()
+        res = client.table("qc_sessions").select(field).eq("id", session_id).execute()
+        return (res.data[0].get(field, "") if res.data else "") or ""
+    except Exception:
+        return ""
 
 
 def get_session_by_id(session_id: str) -> dict:
@@ -199,12 +236,14 @@ def get_session_by_id(session_id: str) -> dict:
 
 def get_sessions_for_company(profile_code: str, company_id: str) -> list:
     """Toutes les sessions (racines + filles) d'une société donnée, triées
-    par date de création croissante — ordre stable pour l'affichage en arbre."""
+    par date de création croissante — ordre stable pour l'affichage en
+    arbre. Colonnes allégées (voir docstring module) : cette fonction ne
+    sert qu'à l'architecture mère/fille, jamais aux fichiers eux-mêmes."""
     try:
         client = get_supabase_client()
         res = (
             client.table("qc_sessions")
-            .select("*")
+            .select(_SESSION_LIST_COLUMNS)
             .eq("profile_code", profile_code)
             .eq("company_id",   company_id)
             .order("created_at", desc=False)
