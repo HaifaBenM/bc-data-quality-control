@@ -351,8 +351,25 @@ def display_unified_results(merged: dict, axe_c: dict, pr: dict = None):
     if not tab_labels:
         return
 
-    for tab, sn in zip(st.tabs(tab_labels), sheet_names):
-        with tab:
+    # RÉVISÉ (23/08/2026) — perf : st.tabs() calcule et sérialise le contenu
+    # de TOUS les onglets à CHAQUE rerun (y compris quand l'interaction vient
+    # d'ailleurs sur la page, ex. une case cochée dans le tableau de
+    # correction plus bas). Avec plusieurs feuilles à des centaines/milliers
+    # de lignes chacune, ce recalcul systématique était payé à chaque clic,
+    # même sans rapport avec cette section. Remplacé par un sélecteur — un
+    # seul onglet est construit/envoyé au navigateur par rerun.
+    _sheet_labels = dict(zip(sheet_names, tab_labels))
+    sn = st.radio(
+        "Feuille", options=sheet_names,
+        format_func=lambda s: _sheet_labels.get(s, s),
+        horizontal=True, key="unified_results_sheet_select",
+        label_visibility="collapsed",
+    )
+    # (if True: if True: — conserve volontairement la même profondeur
+    # d'indentation qu'avant, pour ne pas ré-indenter tout le bloc existant
+    # ci-dessous et limiter le risque d'erreur avant la démo.)
+    if True:
+        if True:
             anomalies      = by_sheet.get(sn, [])
             real_anomalies = [a for a in anomalies if a.get("Ligne", 0) > 0]
             info_anomalies = [a for a in anomalies if a.get("Ligne", 0) == 0]
@@ -370,7 +387,7 @@ def display_unified_results(merged: dict, axe_c: dict, pr: dict = None):
 
             if not real_anomalies and not info_anomalies:
                 st.success("✅ Aucune anomalie.")
-                continue
+                return
 
             if real_anomalies:
                 nb_maj = sum(1 for a in real_anomalies if a.get("Sévérité") == "Majeure")
