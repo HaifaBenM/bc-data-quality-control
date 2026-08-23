@@ -1080,16 +1080,23 @@ with tab_main:
             # AJOUTÉ (23/08/2026) — simplification écran client, demande Bilel :
             # ce bouton (rechargement config technique Supabase) n'a de sens que
             # pour le consultant, jamais pour le client. Masqué, pas supprimé.
-            if is_consultant() and st.button("🔄 Recharger classification niveaux (level_config)", key="btn_reload_level_config"):
-                try:
-                    st.session_state.level_config = load_level_config(get_supabase_client())
-                    for _k in list(st.session_state.keys()):
-                        if _k.startswith("level_roadmap_"):
-                            del st.session_state[_k]
-                    st.success("Classification rechargée depuis Supabase.")
-                except Exception as e:
-                    st.error(f"Échec du rechargement : {e}")
-                st.rerun()
+            # RÉVISÉ (23/08/2026) — le bouton pleine largeur avec libellé
+            # technique cassait visuellement l'enchaînement des cartes
+            # DONNÉES. Repris en petite icône ⚙️ (st.popover) qui ne
+            # s'ouvre qu'au clic — même fonctionnalité, aucune place prise
+            # tant qu'on n'en a pas besoin.
+            if is_consultant():
+                with st.popover("⚙️", help="Options consultant"):
+                    if st.button("🔄 Recharger classification niveaux", key="btn_reload_level_config", use_container_width=True):
+                        try:
+                            st.session_state.level_config = load_level_config(get_supabase_client())
+                            for _k in list(st.session_state.keys()):
+                                if _k.startswith("level_roadmap_"):
+                                    del st.session_state[_k]
+                            st.success("Classification rechargée depuis Supabase.")
+                        except Exception as e:
+                            st.error(f"Échec du rechargement : {e}")
+                        st.rerun()
 
             # AJOUTÉ (19/08/2026) : get_reference_values_by_table_id() n'a
             # aucune expiration — une entrée en cache reste utilisée
