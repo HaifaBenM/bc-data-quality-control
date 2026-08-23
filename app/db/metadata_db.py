@@ -276,7 +276,7 @@ def get_reference_values_by_table_id(
     company_id:   str,
     ref_table_id: int,
     ref_field_id: int = 0,
-    cache_ttl_hours: float = 1.0,
+    cache_ttl_hours: float = 6.0,
 ) -> tuple[set[str], bool]:
     """
     Retourne (valid_codes, found) pour une table référencée.
@@ -291,14 +291,20 @@ def get_reference_values_by_table_id(
     n'avait AUCUNE expiration (seul un clic manuel sur "Vider le cache"
     la rafraîchissait), ce qui a déjà causé un faux blocage confirmé le
     19/08 (table 251 "introuvable" alors que les groupes existaient dans
-    BC depuis leur création après la mise en cache). Un TTL court (1h par
-    défaut, même mécanisme que is_cache_valid déjà utilisé pour
-    gl_account_posting_fields à 24h) réduit ce risque sans reproduire le
-    coût mesuré du 18/08 (354s→7s) : à l'intérieur d'une même session de
-    travail les lookups répétés restent servis par le cache, seule une
-    entrée vieille de plus d'1h est ignorée et re-fetchée depuis BC. Le
-    bouton manuel "Vider le cache" (Étape 1) reste utile pour forcer un
-    rafraîchissement immédiat sans attendre le TTL.
+    BC depuis leur création après la mise en cache). Un TTL réduit ce
+    risque sans reproduire le coût mesuré du 18/08 (354s→7s).
+
+    RÉVISÉ (23/08/2026) — 1h abaissait trop souvent le cache pendant une
+    session de test rapprochée (plusieurs analyses par heure) : chaque
+    expiration force un aller-retour BC en direct sur TOUTES les tables de
+    référence du fichier, pas une seule, d'où l'Étape 3 perçue comme
+    "beaucoup plus lente" dès qu'une heure s'était écoulée depuis le
+    dernier passage. Remonté à 6h — assez long pour ne pas pénaliser des
+    tests rapprochés, assez court pour rester loin des délais de plusieurs
+    jours qui ont causé le faux blocage du 19/08. Le bouton manuel "Vider
+    le cache" (Étape 1) reste la bonne réponse pour un rafraîchissement
+    immédiat juste après une modif BC, plutôt que de redescendre encore le
+    TTL.
     """
     if not ref_table_id:
         return set(), False
