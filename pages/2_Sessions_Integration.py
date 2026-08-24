@@ -25,6 +25,7 @@ from app.core.correction_classifier import (
 from app.db.metadata_db import (
     persist_gl_account_posting_fields, get_gl_account_posting_fields,
     get_table_caption_cached, clear_reference_cache,
+    save_roadmap_table_history, get_roadmap_table_history,
 )
 from app.db.profiles_db import get_profile_by_code
 from app.core.bc_api import (
@@ -1114,6 +1115,83 @@ with tab_main:
                             st.error(f"Échec du vidage : {e}")
                         st.rerun()
 
+                    # AJOUTÉ (25/08/2026, lundi) — demande Rami : diagnostic brut
+                    # sans passer par le cache Supabase ni aucune heuristique
+                    # métier, pour trancher définitivement le blocage table 349
+                    # (Section analytique) — au lieu de deviner encore, on
+                    # affiche l'URL exacte envoyée à BC et la réponse JSON brute.
+                    # Réutilisable pour n'importe quelle table/champ futur.
+                    with st.expander("🔬 Diagnostic brut table/champ BC (sans cache)"):
+                        _dtid = st.number_input("Table ID", min_value=1, value=349, step=1, key="diag_tid")
+                        _dfno = st.number_input("Field No.", min_value=1, value=2, step=1, key="diag_fno")
+                        if st.button("Interroger BC en direct", key="diag_run"):
+                            try:
+                                from app.db.profiles_db import get_profile_by_code
+                                from app.core.bc_api import get_access_token, _qc_base, _headers
+                                import requests as _requests
+
+                                p = get_profile_by_code(active_client)
+                                if not p:
+                                    st.error("Profil introuvable.")
+                                else:
+                                    tid = p.get("bc_tenant_id", "").strip()
+                                    cid = p.get("bc_client_id", "").strip()
+                                    cs  = p.get("bc_client_secret", "").strip()
+                                    env = p.get("bc_environment", "").strip()
+                                    if not all([tid, cid, cs, env, sel_company_id]):
+                                        st.error("Credentials BC incomplets pour ce profil.")
+                                    else:
+                                        token = get_access_token(tid, cid, cs)
+                                        url = (
+                                            f"{_qc_base(tid, env, sel_company_id)}/tableValues"
+                                            f"?$filter=tableId eq {int(_dtid)} and fieldNo eq {int(_dfno)}"
+                                        )
+                                        st.code(url, language="text")
+                                        resp = _requests.get(url, headers=_headers(token), timeout=30)
+                                        st.write(f"Statut HTTP : {resp.status_code}")
+                                        st.json(resp.json())
+                            except Exception as e:
+                                st.error(f"Échec : {type(e).__name__} — {e}")
+
+                    # AJOUTÉ (25/08/2026, lundi) — demande Rami : "stabiliser
+                    # cette partie" — panneau de gestion manuelle de
+                    # l'historique roadmap persisté (voir save/get_
+                    # roadmap_table_history, ajouté le 23/08). Corrige le cas
+                    # concret Catégorie article/Code traçabilité : résolues
+                    # dans BC AVANT que ce mécanisme de persistance existe,
+                    # elles ont disparu de la roadmap sans laisser de trace —
+                    # ce panneau permet de les réinjecter manuellement, et
+                    # sert d'outil de secours pour tout cas similaire futur
+                    # (table retirée à tort, ou à réintégrer après une
+                    # correction BC faite en dehors de l'outil).
+                    with st.expander("🔧 Historique roadmap (tables mémorisées comme vues)"):
+                        _hist_pkg = st.text_input("Code package", key="hist_pkg_code", placeholder="ex. MDD-STOCK")
+                        if _hist_pkg:
+                            _hist_ids = get_roadmap_table_history(active_client, sel_company_id, _hist_pkg)
+                            st.write(f"Tables actuellement mémorisées pour « {_hist_pkg} » : "
+                                     f"{', '.join(str(t) for t in sorted(_hist_ids)) or '(aucune)'}")
+                            _hcol1, _hcol2 = st.columns(2)
+                            with _hcol1:
+                                _add_tid = st.number_input("Ajouter la table ID", min_value=1, step=1, key="hist_add_tid")
+                                if st.button("➕ Ajouter à l'historique", key="hist_add_btn", use_container_width=True):
+                                    ok, err = save_roadmap_table_history(
+                                        active_client, sel_company_id, _hist_pkg, _hist_ids | {int(_add_tid)}
+                                    )
+                                    if ok:
+                                        st.success(f"Table {int(_add_tid)} ajoutée — réapparaîtra cochée ✓ au prochain Revérifier si BC/mémoire la confirme propre.")
+                                    else:
+                                        st.error(err)
+                            with _hcol2:
+                                _rm_tid = st.number_input("Retirer la table ID", min_value=1, step=1, key="hist_rm_tid")
+                                if st.button("➖ Retirer de l'historique", key="hist_rm_btn", use_container_width=True):
+                                    ok, err = save_roadmap_table_history(
+                                        active_client, sel_company_id, _hist_pkg, _hist_ids - {int(_rm_tid)}
+                                    )
+                                    if ok:
+                                        st.success(f"Table {int(_rm_tid)} retirée de l'historique.")
+                                    else:
+                                        st.error(err)
+
         st.markdown("---")
         col_rc, _, col_btn = st.columns([2, 6, 2])
         with col_rc:
@@ -1408,10 +1486,26 @@ with tab_main:
                         _previous_table_ids = (
                             {e.level_info.table_id for e in _prev_roadmap} if _prev_roadmap else set()
                         )
+                        # RÉVISÉ (23/08/2026) — demande Rami : forcer TOUTES les
+                        # tables déjà résolues à rester cochées ✓ en permanence,
+                        # y compris à travers un "▶️ Reprendre" (qui vide
+                        # session_state, donc perd _prev_roadmap ci-dessus —
+                        # persisté séparément dans bc_metadata_cache, voir
+                        # save/get_roadmap_table_history).
+                        _persisted_table_ids = get_roadmap_table_history(
+                            client_code, cfg.get("company_id", ""), cfg.get("pkg_code", "")
+                        )
+                        _previous_table_ids |= _persisted_table_ids
                         st.session_state[_roadmap_key] = build_roadmap_from_prereqs(
                             _prereqs, _level_cfg, previous_table_ids=_previous_table_ids,
                             profile_code=client_code, company_id=cfg.get("company_id", ""),
                         )
+                        _current_table_ids = {e.level_info.table_id for e in st.session_state[_roadmap_key]}
+                        if _current_table_ids - _persisted_table_ids:
+                            save_roadmap_table_history(
+                                client_code, cfg.get("company_id", ""), cfg.get("pkg_code", ""),
+                                _persisted_table_ids | _current_table_ids,
+                            )
                     except Exception as e:
                         st.session_state[_roadmap_key] = []
                         st.warning(f"⚠️ Détection des niveaux impossible pour l'instant : {e}")
