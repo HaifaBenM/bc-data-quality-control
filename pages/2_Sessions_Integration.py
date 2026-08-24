@@ -357,60 +357,84 @@ def merge_results(axe_a: dict, axe_b: dict, axe_c: dict, parse_result: dict = No
     return merged
 
 
-def _filter_resolved_prereqs(all_anomalies: list, resolved_by_table: dict | None) -> tuple[list, int]:
+def _filter_resolved_prereqs(all_anomalies: list, resolved_by_table: dict | None, hide_all_prereqs: bool = False) -> tuple[list, int]:
     """AJOUTÉ (23/08/2026) — factorisé pour être utilisé à la fois pour les
     compteurs du haut de l'Étape 4 et pour le tableau détaillé
-    (display_unified_results), afin que les deux restent cohérents entre
-    eux. Voir le commentaire dans display_unified_results pour le contexte
-    complet (anomalies PREALABLE_BC_REQUIS déjà résolues dans la roadmap)."""
-    if not resolved_by_table:
+    (display_merged_analysis), afin que les deux restent cohérents entre
+    eux. Voir le commentaire dans display_merged_analysis pour le contexte
+    complet (anomalies PREALABLE_BC_REQUIS déjà résolues dans la roadmap).
+
+    hide_all_prereqs (AJOUTÉ 26/08/2026) — demande Rami : règle globale plus
+    simple en complément du filtrage par code précis ci-dessous — dès que
+    TOUTE la roadmap est cochée (verte ou mémoire inter-sessions, voir
+    all_validated()), on masque TOUTES les anomalies "Prérequis BC requis"
+    restantes d'un coup, même celles dont le code précis n'aurait pas été
+    retrouvé dans last_codes (correspondance imparfaite possible, ex.
+    variation de casse) — la roadmap fait foi une fois complète."""
+    if not resolved_by_table and not hide_all_prereqs:
         return all_anomalies, 0
     kept, resolved_count = [], 0
     for a in all_anomalies:
         if a.get("Classification") == "PREALABLE_BC_REQUIS":
+            if hide_all_prereqs:
+                resolved_count += 1
+                continue
             try:
                 tid = int(a.get("Table référencée", -1))
             except (TypeError, ValueError):
                 tid = -1
             val = str(a.get("Valeur", "")).strip()
-            if val and val in resolved_by_table.get(tid, set()):
+            if val and val in (resolved_by_table or {}).get(tid, set()):
                 resolved_count += 1
                 continue
         kept.append(a)
     return kept, resolved_count
 
 
-def display_unified_results(merged: dict, axe_c: dict, pr: dict = None, resolved_by_table: dict | None = None):
+def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = None, resolved_by_table: dict | None = None, roadmap: list | None = None):
+    """
+    RÉVISÉ (26/08/2026) — demande Rami : fusion de l'ancien tableau de
+    lecture (display_unified_results) et du tableau de correction
+    (display_correction_workflow) en UN SEUL tableau — Valeur source /
+    Correction suggérée / Nouvelle valeur, avec filtres par colonne
+    (Sévérité, Type d'anomalie, Champ, Classification) et un bouton
+    "Propager" (équivalent utile de la poignée de recopie Excel — pas de
+    glisser-déposer possible techniquement dans ce composant, mais même
+    résultat : appliquer une correction à toutes les lignes partageant la
+    même valeur source dans le même champ).
+
+    ⚠️ Le fichier généré n'a pas été validé par un import BC réel — à tester
+    avant de le présenter comme "100% intégrable" en démo.
+    """
     all_anomalies = merged.get("all_anomalies", [])
 
-    # AJOUTÉ (23/08/2026) — demande Rami : une anomalie "Prérequis BC
-    # requis" (Classification == PREALABLE_BC_REQUIS) restait affichée
-    # indéfiniment même après validation du niveau correspondant dans la
-    # roadmap (BC réel ou mémoire inter-sessions) — all_anomalies vient du
-    # scan initial (validate_file_axe_b), jamais recalculé par "Revérifier"
-    # (constaté sur MDD-Stock : ~4000 lignes affichées, la plupart déjà
-    # traitées). Filtre ici via resolved_by_table (codes vus au dernier
-    # Revérifier par table, réutilisés depuis la roadmap — aucun nouvel
-    # appel BC). Compteur affiché plutôt que disparition silencieuse.
-    all_anomalies, _resolved_count = _filter_resolved_prereqs(all_anomalies, resolved_by_table)
+    # AJOUTÉ (23/08/2026) ; RÉVISÉ (26/08/2026, règle globale hide_all_prereqs)
+    # — une anomalie "Prérequis BC requis" reste affichée tant que son code
+    # précis n'est pas retrouvé dans BC/mémoire (résolved_by_table), OU
+    # disparaît d'un coup dès que toute la roadmap est cochée (verte ou
+    # mémoire inter-sessions) — la roadmap fait foi une fois complète, même
+    # si une correspondance de code précise a pu échouer (accents/casse).
+    _hide_all_prereqs = bool(roadmap) and all_validated(roadmap)
+    all_anomalies, _resolved_count = _filter_resolved_prereqs(all_anomalies, resolved_by_table, hide_all_prereqs=_hide_all_prereqs)
 
-    real          = [a for a in all_anomalies if a.get("Ligne", 0) > 0]
-    info          = [a for a in all_anomalies if a.get("Ligne", 0) == 0]
+    real = [a for a in all_anomalies if a.get("Ligne", 0) > 0]
+    info = [a for a in all_anomalies if a.get("Ligne", 0) == 0]
 
     if not real and not info:
         if _resolved_count:
             st.success(
                 f"🎉 **Aucune anomalie active !** ({_resolved_count} prérequis BC "
-                f"déjà résolu(s) depuis le scan initial, retiré(s) de l'affichage.)"
+                f"déjà résolu(s) — roadmap complète ou codes confirmés, retiré(s) de l'affichage.)"
             )
         else:
             st.success("🎉 **Aucune anomalie détectée !** Les données sont conformes.")
+        st.session_state["prerequisites_report"] = []
         return
 
     if _resolved_count:
         st.caption(
             f"✅ {_resolved_count} anomalie(s) « Prérequis BC requis » déjà résolue(s) "
-            f"depuis le scan initial — retirée(s) de l'affichage ci-dessous."
+            f"— retirée(s) de l'affichage ci-dessous."
         )
 
     has_ia = axe_c.get("available") and axe_c.get("total_suggestions", 0) > 0
@@ -418,24 +442,16 @@ def display_unified_results(merged: dict, axe_c: dict, pr: dict = None, resolved
     if has_ia and auto_c > 0:
         st.info(f"🤖 **{auto_c} correction(s) appliquée(s) automatiquement** par l'IA")
 
-    # RÉVISÉ (23/08/2026) — reconstruit depuis `all_anomalies` (déjà filtré
-    # ci-dessus) plutôt que merged["by_sheet"] brut, sinon le filtrage
-    # n'aurait aucun effet sur les compteurs par onglet ni sur le tableau
-    # détaillé plus bas (qui lisent tous les deux by_sheet).
     by_sheet: dict[str, list] = {}
     for a in all_anomalies:
         by_sheet.setdefault(a.get("Onglet", ""), []).append(a)
-    # Conserve l'ordre d'origine des onglets (utile pour l'UI) — un onglet
-    # entièrement résolu (0 anomalie restante) garde son entrée (liste vide)
-    # au lieu de disparaître du sélecteur, pour rester cohérent avec
-    # merged["by_sheet"] d'origine.
     for _sn in merged.get("by_sheet", {}):
         by_sheet.setdefault(_sn, [])
     sheet_names = list(merged.get("by_sheet", {}).keys()) or list(by_sheet.keys())
-    tab_labels  = []
+    tab_labels = []
     for sn in sheet_names:
-        a    = by_sheet[sn]
-        nb   = len([x for x in a if x.get("Ligne", 0) > 0])
+        a = by_sheet[sn]
+        nb = len([x for x in a if x.get("Ligne", 0) > 0])
         nmaj = sum(1 for x in a if x.get("Sévérité") == "Majeure")
         icon = "🔴" if nmaj > 0 else ("🟠" if nb > 0 else "✅")
         tab_labels.append(f"{icon} {sn} ({nb})")
@@ -443,19 +459,6 @@ def display_unified_results(merged: dict, axe_c: dict, pr: dict = None, resolved
     if not tab_labels:
         return
 
-    # RÉVISÉ (23/08/2026) — perf : st.tabs() calcule et sérialise le contenu
-    # de TOUS les onglets à CHAQUE rerun (y compris quand l'interaction vient
-    # d'ailleurs sur la page, ex. une case cochée dans le tableau de
-    # correction plus bas). Avec plusieurs feuilles à des centaines/milliers
-    # de lignes chacune, ce recalcul systématique était payé à chaque clic,
-    # même sans rapport avec cette section. Remplacé par un sélecteur — un
-    # seul onglet est construit/envoyé au navigateur par rerun.
-    # RÉVISÉ (23/08/2026, 2e passe) — st.radio(horizontal=True) rendait mal
-    # (puces de radio + icône colorée qui s'enroulaient sur plusieurs lignes
-    # de façon désordonnée, "cassé" selon retour Rami). st.segmented_control
-    # est l'équivalent Streamlit natif pensé pour ce cas précis (rendu en
-    # pastilles façon onglets), disponible depuis 1.36 — compatible avec le
-    # pin requirements.txt (>=1.40) et la version réelle (1.59.1).
     _sheet_labels = dict(zip(sheet_names, tab_labels))
     sn = st.segmented_control(
         "Feuille", options=sheet_names,
@@ -466,259 +469,189 @@ def display_unified_results(merged: dict, axe_c: dict, pr: dict = None, resolved
     )
     if sn is None:
         sn = sheet_names[0]
-    # (if True: if True: — conserve volontairement la même profondeur
-    # d'indentation qu'avant, pour ne pas ré-indenter tout le bloc existant
-    # ci-dessous et limiter le risque d'erreur avant la démo.)
-    if True:
-        if True:
-            anomalies      = by_sheet.get(sn, [])
-            real_anomalies = [a for a in anomalies if a.get("Ligne", 0) > 0]
-            info_anomalies = [a for a in anomalies if a.get("Ligne", 0) == 0]
 
-            # Données source SCOPÉES à cet onglet uniquement — affichées
-            # avant le early-return "aucune anomalie" pour rester visibles
-            # même sur un onglet propre.
-            if pr:
-                df_sn = pr.get("sheets", {}).get(sn)
-                if df_sn is not None and not df_sn.empty:
-                    with st.expander(f"👀 Données source — {sn}"):
-                        meta_sn = pr.get("metadata", {}).get(sn, {})
-                        st.markdown(f"**{sn}** — {meta_sn.get('label', '')} · {len(df_sn)} lignes")
-                        st.dataframe(df_sn.head(10), use_container_width=True, hide_index=True)
+    anomalies = by_sheet.get(sn, [])
+    real_anomalies = [a for a in anomalies if a.get("Ligne", 0) > 0]
+    info_anomalies = [a for a in anomalies if a.get("Ligne", 0) == 0]
 
-            if not real_anomalies and not info_anomalies:
-                st.success("✅ Aucune anomalie.")
-                return
+    if pr:
+        df_sn = pr.get("sheets", {}).get(sn)
+        if df_sn is not None and not df_sn.empty:
+            with st.expander(f"👀 Données source — {sn}"):
+                meta_sn = pr.get("metadata", {}).get(sn, {})
+                st.markdown(f"**{sn}** — {meta_sn.get('label', '')} · {len(df_sn)} lignes")
+                st.dataframe(df_sn.head(10), use_container_width=True, hide_index=True)
 
-            if real_anomalies:
-                nb_maj = sum(1 for a in real_anomalies if a.get("Sévérité") == "Majeure")
-                nb_min = sum(1 for a in real_anomalies if a.get("Sévérité") == "Mineure")
-                nb_ia  = sum(1 for a in real_anomalies if a.get("suggestion_ia"))
-                t1, t2, t3, t4 = st.columns(4)
-                t1.metric("Anomalies",     len(real_anomalies))
-                t2.metric("🔴 Majeures",   nb_maj)
-                t3.metric("🟠 Mineures",   nb_min)
-                t4.metric("🤖 IA suggère", nb_ia)
-
-                cf1, cf2 = st.columns(2)
-                with cf1:
-                    sevs     = sorted(set(a.get("Sévérité", "") for a in real_anomalies))
-                    filt_sev = st.multiselect("Sévérité", sevs, default=sevs, key=f"fs_{sn}")
-                with cf2:
-                    types     = sorted(set(a.get("Type d'anomalie", "") for a in real_anomalies))
-                    filt_type = st.multiselect("Type d'anomalie", types, default=types, key=f"ft_{sn}")
-
-                filtered = [
-                    a for a in real_anomalies
-                    if a.get("Sévérité", "") in filt_sev
-                    and a.get("Type d'anomalie", "") in filt_type
-                ]
-
-                if filtered:
-                    # RÉVISÉ (23/08/2026) — simplification écran client (demande
-                    # Bilel : lisible et simple). Fusion de l'ancien tableau brut
-                    # + du bloc "Détail" (cartes HTML redondantes, IA/Prérequis
-                    # BC en HTML séparé) en UN SEUL tableau lisible. Rien perdu :
-                    # "Classification" (enum technique VALEUR_CORRIGIBLE /
-                    # PREALABLE_BC_REQUIS) devient un libellé clair, la
-                    # suggestion IA + confiance devient une colonne dédiée au
-                    # lieu d'une carte séparée avec barre de progression HTML.
-                    _sev_icon  = {"Majeure": "🔴 Majeure", "Mineure": "🟠 Mineure"}
-                    _cls_label = {
-                        "PREALABLE_BC_REQUIS": "🟣 Prérequis BC requis",
-                        "VALEUR_CORRIGIBLE":   "✏️ Corrigible",
-                    }
-                    _has_ia_col = any(a.get("suggestion_ia") for a in filtered)
-
-                    def _row(a: dict) -> dict:
-                        out = {
-                            "Ligne":              a.get("Ligne", ""),
-                            "Identifiant métier": a.get("Identifiant métier", ""),
-                            "Champ":              a.get("Champ", ""),
-                            "Valeur":             a.get("Valeur", ""),
-                            "Type d'anomalie":    a.get("Type d'anomalie", ""),
-                            "Sévérité":           _sev_icon.get(a.get("Sévérité", ""), a.get("Sévérité", "")),
-                            "Classification":     _cls_label.get(a.get("Classification", ""), ""),
-                            "Message":            a.get("Message", ""),
-                            "Correction suggérée": a.get("Correction suggérée", ""),
-                        }
-                        if _has_ia_col:
-                            sug = a.get("suggestion_ia", "")
-                            out["🤖 Suggestion IA"] = f"{sug} ({a.get('confiance_ia', 0)}%)" if sug else ""
-                        return out
-
-                    df_show = pd.DataFrame([_row(a) for a in filtered])
-
-                    st.dataframe(
-                        df_show,
-                        use_container_width=True, hide_index=True,
-                        height=min(400, 50 + len(filtered) * 35)
-                    )
-
-            if info_anomalies:
-                st.markdown("---")
-                st.markdown("**ℹ️ Champs non vérifiables (référence absente) :**")
-                for a in info_anomalies:
-                    st.markdown(
-                        f'<div class="card-info"><span class="tag tag-info">INFO</span>'
-                        f'<b>{a.get("Champ", "")}</b> — {a.get("Message", "")}</div>',
-                        unsafe_allow_html=True
-                    )
-
-
-def display_correction_workflow(merged: dict, cfg: dict, pr: dict):
-    """
-    Étape de correction : sépare les anomalies corrigibles dans le fichier
-    (VALEUR_CORRIGIBLE) des prérequis à créer côté BC (PREALABLE_BC_REQUIS),
-    laisse le consultant valider/éditer les corrections, génère un fichier
-    corrigé (mapping XML préservé) et un rapport de prérequis distinct.
-
-    ⚠️ Le fichier généré n'a pas été validé par un import BC réel — à tester
-    avant de le présenter comme "100% intégrable" en démo.
-    """
-    all_anomalies = merged.get("all_anomalies", [])
-    real          = [a for a in all_anomalies if a.get("Ligne", 0) > 0]
-
-    # Tout ce qui est classé VALEUR_CORRIGIBLE va dans le tableau éditable,
-    # QU'IL Y AIT ou non une suggestion automatique déjà calculée. La plupart
-    # des anomalies Axe A ("Champ obligatoire vide", "Type incorrect...")
-    # n'ont pas de suggestion précalculée -- c'est précisément là que le
-    # consultant doit pouvoir saisir la bonne valeur lui-même. Filtrer sur
-    # "Correction suggérée" non vide (version précédente) excluait la quasi-
-    # totalité des anomalies réelles du tableau, d'où : aucune ligne à
-    # cocher, aucun fichier généré.
-    corrigibles = [a for a in real if a.get("Classification") == "VALEUR_CORRIGIBLE"]
-    prereqs = build_prerequisites_report(
-        real, profile_code=cfg.get("client_code", ""), company_id=cfg.get("company_id", "")
-    )
-    # Le contrôle croisé GL Account (comptes GL référencés par 92/93/94 avec
-    # champs vides) a été retiré d'ici le 27/07/2026 : il appartient
-    # exclusivement à la roadmap de niveaux (Phase A, Étape 3, avant clic
-    # "Analyse qualité") — Phase B ne montre plus que les erreurs
-    # corrigibles, clarifié explicitement par Rami. Voir _prereqs plus loin
-    # dans ce fichier pour l'endroit où ce contrôle reste actif.
-
-    st.markdown("---")
-    st.markdown('<div class="step-header">🔧 Correction & génération du fichier</div>', unsafe_allow_html=True)
-
-    if not corrigibles:
-        st.info("Aucune correction directement applicable au fichier pour le moment.")
-        st.session_state["prerequisites_report"] = prereqs
+    if not real_anomalies and not info_anomalies:
+        st.success("✅ Aucune anomalie.")
+        st.session_state["prerequisites_report"] = build_prerequisites_report(
+            [a for a in all_anomalies if a.get("Ligne", 0) > 0],
+            profile_code=cfg.get("client_code", ""), company_id=cfg.get("company_id", ""),
+        )
         return
 
-    # AJOUTÉ (23/08/2026) — simplification écran client (demande Bilel) :
-    # replié par défaut pour ne pas surcharger l'écran avec un 3e tableau
-    # (déjà tableau + désormais fusionné avec le détail dans
-    # display_unified_results). Reste ouvert automatiquement dès que le
-    # consultant/client a commencé à interagir (sélection en lot ou fichier
-    # déjà généré) — jamais besoin de re-déplier soi-même en pleine action.
-    _editor_gen_key = "corrections_editor_gen"
-    _corr_expanded = (
-        st.session_state.get(_editor_gen_key, 0) > 0
-        or bool(st.session_state.get("generated_file_bytes"))
-    )
-    with st.expander("🔧 Corriger et générer le fichier", expanded=_corr_expanded):
-        st.markdown(
-            f"**✏️ {len(corrigibles)} anomalie(s) corrigible(s) dans le fichier — "
-            f"éditez « Nouvelle valeur » et cochez « Appliquer » pour chaque ligne à intégrer :**"
+    nb_maj = sum(1 for a in real_anomalies if a.get("Sévérité") == "Majeure")
+    nb_min = sum(1 for a in real_anomalies if a.get("Sévérité") == "Mineure")
+    nb_ia = sum(1 for a in real_anomalies if a.get("suggestion_ia"))
+    t1, t2, t3, t4 = st.columns(4)
+    t1.metric("Anomalies", len(real_anomalies))
+    t2.metric("🔴 Majeures", nb_maj)
+    t3.metric("🟠 Mineures", nb_min)
+    t4.metric("🤖 IA suggère", nb_ia)
+
+    # AJOUTÉ (26/08/2026) — demande Rami : filtres façon Excel. Streamlit
+    # n'a pas de filtre par en-tête de colonne comme Excel — ces menus
+    # déroulants au-dessus du tableau font le même travail (rétrécir les
+    # lignes affichées par valeur de colonne), juste présentés autrement.
+    # Champ et Classification ajoutés en plus de Sévérité/Type d'anomalie
+    # déjà existants, pour couvrir toutes les colonnes utiles à la
+    # recherche d'une ligne précise à corriger.
+    cf1, cf2, cf3, cf4 = st.columns(4)
+    with cf1:
+        sevs = sorted(set(a.get("Sévérité", "") for a in real_anomalies))
+        filt_sev = st.multiselect("Sévérité", sevs, default=sevs, key=f"fs_{sn}")
+    with cf2:
+        types = sorted(set(a.get("Type d'anomalie", "") for a in real_anomalies))
+        filt_type = st.multiselect("Type d'anomalie", types, default=types, key=f"ft_{sn}")
+    with cf3:
+        champs = sorted(set(a.get("Champ", "") for a in real_anomalies))
+        filt_champ = st.multiselect("Champ", champs, default=champs, key=f"fc_{sn}")
+    with cf4:
+        _cls_label = {"PREALABLE_BC_REQUIS": "🟣 Prérequis BC requis", "VALEUR_CORRIGIBLE": "✏️ Corrigible"}
+        clss = sorted(set(a.get("Classification", "") for a in real_anomalies))
+        filt_cls = st.multiselect(
+            "Classification", clss, default=clss, key=f"fcl_{sn}",
+            format_func=lambda c: _cls_label.get(c, c or "(aucune)"),
         )
-        # AJOUTÉ (20/08/2026) — sélection en lot, demande Rami : possibilité de
-        # cocher/décocher toutes les lignes d'un coup, en plus du cas par cas
-        # déjà existant. `_editor_gen` change de valeur à chaque clic pour
-        # forcer Streamlit à traiter le data_editor comme un widget neuf (sinon
-        # l'état interne déjà édité par l'utilisateur prime sur les nouvelles
-        # valeurs qu'on lui passe, et "Tout sélectionner" resterait sans effet
-        # visible).
+
+    filtered = [
+        a for a in real_anomalies
+        if a.get("Sévérité", "") in filt_sev
+        and a.get("Type d'anomalie", "") in filt_type
+        and a.get("Champ", "") in filt_champ
+        and a.get("Classification", "") in filt_cls
+    ]
+
+    if not filtered:
+        st.info("Aucune ligne ne correspond aux filtres sélectionnés.")
+    else:
+        _sev_icon = {"Majeure": "🔴 Majeure", "Mineure": "🟠 Mineure"}
+        _has_ia_col = any(a.get("suggestion_ia") for a in filtered)
+
+        # AJOUTÉ (26/08/2026) — demande Rami : sélection en lot, comme avant
+        # sur l'ancien tableau de correction, désormais applicable au
+        # tableau fusionné entier.
+        _editor_gen_key = f"merged_editor_gen_{sn}"
         if _editor_gen_key not in st.session_state:
             st.session_state[_editor_gen_key] = 0
 
-        csel1, csel2, csel3 = st.columns([1.3, 1.3, 4])
+        csel1, csel2, csel3, csel4 = st.columns([1.3, 1.3, 1.6, 3.8])
         with csel1:
-            if st.button("✅ Tout sélectionner", key="btn_select_all_corr", use_container_width=True):
-                st.session_state["_corrections_select_override"] = True
+            if st.button("✅ Tout sélectionner", key=f"btn_select_all_{sn}", use_container_width=True):
+                st.session_state[f"_merged_select_override_{sn}"] = True
                 st.session_state[_editor_gen_key] += 1
                 st.rerun()
         with csel2:
-            if st.button("⬜ Tout désélectionner", key="btn_deselect_all_corr", use_container_width=True):
-                st.session_state["_corrections_select_override"] = False
+            if st.button("⬜ Tout désélectionner", key=f"btn_deselect_all_{sn}", use_container_width=True):
+                st.session_state[f"_merged_select_override_{sn}"] = False
                 st.session_state[_editor_gen_key] += 1
                 st.rerun()
 
-        _select_override = st.session_state.pop("_corrections_select_override", None)
+        _select_override = st.session_state.pop(f"_merged_select_override_{sn}", None)
+        # AJOUTÉ (26/08/2026) — overrides posés par "🔁 Propager" ci-dessous
+        # (valeur manuelle appliquée à toutes les lignes de même Champ +
+        # Valeur source qui n'avaient pas encore de correction saisie).
+        _propagate_overrides: dict = st.session_state.get(f"_propagate_overrides_{sn}", {})
 
-        edit_rows = [
-            {
-            # Coché par défaut UNIQUEMENT si on a déjà une suggestion fiable
-            # (ex: code de référence proche trouvé). Sinon décoché : le
-            # consultant doit taper une valeur avant de pouvoir l'appliquer,
-            # jamais une case vide poussée par défaut dans le fichier généré.
-            # Si "Tout sélectionner/désélectionner" vient d'être cliqué,
-            # _select_override prime sur ce comportement par défaut.
-            "Appliquer": (
+        def _row(a: dict) -> dict:
+            _key = (a.get("Champ", ""), str(a.get("Valeur", "")).strip())
+            _is_corrigible = a.get("Classification") == "VALEUR_CORRIGIBLE"
+            _suggestion = a.get("Correction suggérée", "")
+            _nouvelle = _propagate_overrides.get(_key, _suggestion)
+            _appliquer = (
                 _select_override if _select_override is not None
-                else bool(str(a.get("Correction suggérée", "")).strip())
-            ),
-            "Onglet":          a.get("Onglet", ""),
-            "Ligne":           a.get("Ligne", 0),
-            # AJOUTÉ (20/08/2026) : clé métier (ex. N° article) — demande
-            # Rami : rend la ligne identifiable sans réouvrir le fichier,
-            # pour proposer une correction en connaissance de cause.
-            "Identifiant métier":  a.get("Identifiant métier", ""),
-            "Champ":           a.get("Champ", ""),
-            "Valeur actuelle": a.get("Valeur", ""),
-            # AJOUTÉ (23/08/2026) — demande Rami : colonne suggestion
-            # visible séparément de "Nouvelle valeur" (celle-ci pré-remplie
-            # avec la même valeur au départ, mais éditable — une fois
-            # modifiée, l'utilisateur perdait de vue la suggestion
-            # d'origine). Lecture seule, jamais utilisée pour la génération.
-            "Suggestion":      a.get("Correction suggérée", ""),
-            "Nouvelle valeur": a.get("Correction suggérée", ""),
-        }
-        for a in corrigibles
-    ]
+                else (_is_corrigible and bool(str(_nouvelle).strip()))
+            )
+            out = {
+                "Appliquer":          _appliquer,
+                "Onglet":             a.get("Onglet", ""),
+                "Ligne":              a.get("Ligne", ""),
+                "Identifiant métier": a.get("Identifiant métier", ""),
+                "Champ":              a.get("Champ", ""),
+                "Type d'anomalie":    a.get("Type d'anomalie", ""),
+                "Sévérité":           _sev_icon.get(a.get("Sévérité", ""), a.get("Sévérité", "")),
+                "Classification":     _cls_label.get(a.get("Classification", ""), ""),
+                "Message":            a.get("Message", ""),
+                "Valeur source":      a.get("Valeur", ""),
+                "Correction suggérée": _suggestion,
+                "Nouvelle valeur":    _nouvelle,
+            }
+            if _has_ia_col:
+                sug = a.get("suggestion_ia", "")
+                out["🤖 Suggestion IA"] = f"{sug} ({a.get('confiance_ia', 0)}%)" if sug else ""
+            return out
 
-        # AJOUTÉ (23/08/2026) — même cause que le crash "Bad message format /
-        # SessionInfo before it was initialized" corrigé sur display_unified_
-        # results (Styler) : st.data_editor sans plafond sur des milliers de
-        # lignes (4199 anomalies constatées) sature aussi le payload WebSocket
-        # et provoque le rafraîchissement en boucle observé après ce fix-là.
-        # Plafond appliqué UNIQUEMENT à l'affichage/édition interactive — les
-        # lignes au-delà gardent EXACTEMENT le même comportement par défaut
-        # qu'une ligne jamais éditée manuellement (Appliquer = suggestion
-        # présente, Nouvelle valeur = suggestion), donc aucune correction perdue
-        # silencieusement. Seule perte réelle : impossible d'éditer à la main
-        # une ligne au-delà du plafond dans ce run — acceptable en dépannage
-        # avant démo, à revoir avec une vraie pagination par onglet après le 27.
-        _MAX_EDITABLE_ROWS = 300
-        _overflow_rows      = edit_rows[_MAX_EDITABLE_ROWS:]
-        edit_rows_display   = edit_rows[:_MAX_EDITABLE_ROWS]
+        edit_rows = [_row(a) for a in filtered]
+
+        # RÉVISÉ (26/08/2026) — même plafond que l'ancien tableau de
+        # correction (perf/stabilité WebSocket, voir historique) — appliqué
+        # maintenant au tableau fusionné dans son ensemble. Les lignes hors
+        # plafond gardent leur comportement par défaut (calculé ci-dessus,
+        # overrides de propagation compris) et sont quand même incluses
+        # dans le fichier généré.
+        _MAX_EDITABLE_ROWS = 400
+        _overflow_rows = edit_rows[_MAX_EDITABLE_ROWS:]
+        edit_rows_display = edit_rows[:_MAX_EDITABLE_ROWS]
 
         if _overflow_rows:
             st.caption(
-                f"⚠️ {len(_overflow_rows)} anomalie(s) corrigible(s) supplémentaire(s) non affichée(s) "
-                f"ci-dessous (volume trop important pour l'édition interactive) — incluses dans le "
-                f"fichier généré avec leur correction suggérée par défaut, non modifiables dans ce run."
+                f"⚠️ {len(_overflow_rows)} ligne(s) supplémentaire(s) non affichée(s) ci-dessous "
+                f"(volume trop important pour l'édition interactive) — incluses dans le fichier "
+                f"généré avec leur valeur par défaut, non modifiables dans ce run."
             )
 
+        _column_config = {
+            "Appliquer": st.column_config.CheckboxColumn(help="Cocher pour inclure cette ligne dans le fichier généré"),
+            "Nouvelle valeur": st.column_config.TextColumn(help="Modifiable — tapez la valeur correcte pour cette cellule"),
+        }
         edited = st.data_editor(
             pd.DataFrame(edit_rows_display),
             use_container_width=True,
             hide_index=True,
-            disabled=["Onglet", "Ligne", "Identifiant métier", "Champ", "Valeur actuelle", "Suggestion"],
-            column_config={
-                "Appliquer": st.column_config.CheckboxColumn(
-                    help="Cocher pour inclure cette ligne dans le fichier généré"
-                ),
-                "Nouvelle valeur": st.column_config.TextColumn(
-                    help="Modifiable — tapez la valeur correcte pour cette cellule"
-                ),
-            },
-            key=f"corrections_editor_{st.session_state[_editor_gen_key]}",
+            height=min(450, 50 + len(edit_rows_display) * 35),
+            disabled=[
+                "Onglet", "Ligne", "Identifiant métier", "Champ", "Type d'anomalie",
+                "Sévérité", "Classification", "Message", "Valeur source", "Correction suggérée",
+            ] + (["🤖 Suggestion IA"] if _has_ia_col else []),
+            column_config=_column_config,
+            key=f"merged_editor_{sn}_{st.session_state[_editor_gen_key]}",
         )
+
+        with csel3:
+            if st.button("🔁 Propager", key=f"btn_propagate_{sn}", use_container_width=True,
+                         help="Applique chaque correction saisie à toutes les autres lignes ayant la même valeur source dans le même champ"):
+                _new_overrides = dict(_propagate_overrides)
+                _propagated = 0
+                for _, row in edited.iterrows():
+                    _nv = str(row["Nouvelle valeur"]).strip()
+                    _sugg = str(row["Correction suggérée"]).strip()
+                    if _nv and _nv != _sugg:
+                        _key = (row["Champ"], str(row["Valeur source"]).strip())
+                        _new_overrides[_key] = _nv
+                # Compte les lignes qui vont effectivement changer au prochain rerun
+                for r in edit_rows:
+                    _key = (r["Champ"], str(r["Valeur source"]).strip())
+                    if _key in _new_overrides and str(r["Nouvelle valeur"]).strip() != _new_overrides[_key]:
+                        _propagated += 1
+                st.session_state[f"_propagate_overrides_{sn}"] = _new_overrides
+                st.session_state[_editor_gen_key] += 1
+                if _propagated:
+                    st.toast(f"{_propagated} ligne(s) mise(s) à jour avec la même correction.")
+                st.rerun()
 
         cgen1, cgen2, cgen3 = st.columns([2, 2, 4])
         with cgen1:
-            gen_clicked = st.button("🔧 Générer le fichier corrigé", type="primary", use_container_width=True)
+            gen_clicked = st.button("🔧 Générer le fichier corrigé", type="primary", use_container_width=True, key=f"gen_{sn}")
 
         if gen_clicked:
             original_bytes = st.session_state.get("original_file_bytes")
@@ -729,54 +662,19 @@ def display_correction_workflow(merged: dict, cfg: dict, pr: dict):
                     (edited["Appliquer"] == True)
                     & (edited["Nouvelle valeur"].astype(str).str.strip() != "")
                 ]
-                # RÉVISÉ (19/08/2026) : le vidage des colonnes Guid
-                # (clear_id_reference_columns) est indépendant des corrections
-                # de valeur — il ne devrait pas être bloqué par "aucune ligne
-                # cochée". Avant ce fix, le bouton refusait purement et
-                # simplement de générer un fichier s'il n'y avait rien à
-                # corriger, empêchant de tester le nettoyage Guid seul (cas
-                # Rami du 19/08 : 251 déjà correct dans BC, rien à corriger,
-                # mais besoin de télécharger le fichier nettoyé quand même).
                 corrections = [
-                    {
-                        "sheet":       row["Onglet"],
-                        "excel_row":   int(row["Ligne"]),
-                        "column_name": row["Champ"],
-                        "new_value":   row["Nouvelle valeur"],
-                    }
+                    {"sheet": row["Onglet"], "excel_row": int(row["Ligne"]), "column_name": row["Champ"], "new_value": row["Nouvelle valeur"]}
                     for _, row in selected.iterrows()
                 ]
-                # AJOUTÉ (23/08/2026) — complète avec les lignes au-delà du
-                # plafond d'édition interactive (_overflow_rows), avec leur
-                # valeur par défaut (identique à une ligne jamais éditée à la
-                # main) : aucune correction silencieusement perdue à cause du
-                # plafond d'affichage.
                 corrections += [
-                    {
-                        "sheet":       r["Onglet"],
-                        "excel_row":   int(r["Ligne"]),
-                        "column_name": r["Champ"],
-                        "new_value":   r["Nouvelle valeur"],
-                    }
+                    {"sheet": r["Onglet"], "excel_row": int(r["Ligne"]), "column_name": r["Champ"], "new_value": r["Nouvelle valeur"]}
                     for r in _overflow_rows
                     if r["Appliquer"] and str(r["Nouvelle valeur"]).strip()
                 ]
                 try:
-                    generated_bytes = (
-                        apply_corrections(original_bytes, corrections)
-                        if corrections else original_bytes
-                    )
-                    # RÉVISÉ (18/08/2026, 2e passe) : calcule les colonnes de
-                    # type Guid par feuille depuis l'execution_plan déjà en
-                    # cache (early_axeab_*), plutôt que de deviner par le nom
-                    # "ID X" — extension-agnostique (voir docstring de
-                    # clear_id_reference_columns). Repli automatique sur
-                    # l'ancien préfixe si le plan est indisponible.
+                    generated_bytes = apply_corrections(original_bytes, corrections) if corrections else original_bytes
                     _guid_cols_by_sheet: dict[str, set[str]] | None = None
-                    _early_key = (
-                        f"early_axeab_{cfg.get('pkg_code', '')}_"
-                        f"{cfg.get('company_id', '')}_{cfg.get('file_name', '')}"
-                    )
+                    _early_key = f"early_axeab_{cfg.get('pkg_code', '')}_{cfg.get('company_id', '')}_{cfg.get('file_name', '')}"
                     _cached_plan = st.session_state.get(_early_key, {}).get("exec_plan")
                     if _cached_plan is not None:
                         try:
@@ -792,25 +690,11 @@ def display_correction_workflow(merged: dict, cfg: dict, pr: dict):
                                 if _guid_names:
                                     _guid_cols_by_sheet[_si["sheet_name"]] = _guid_names
                         except Exception:
-                            _guid_cols_by_sheet = None  # repli silencieux sur l'heuristique par nom
-                    # AJOUTÉ (18/08/2026) : les colonnes Guid (SystemId BC)
-                    # ne sont jamais portables d'une société à l'autre — BC
-                    # rejette l'import sur ces colonnes même quand le Code
-                    # associé est correct. On les vide pour laisser BC
-                    # résoudre uniquement via Code à l'import.
-                    generated_bytes = clear_id_reference_columns(generated_bytes, _guid_cols_by_sheet)
+                            _guid_cols_by_sheet = None
+                    generated_bytes = clear_id_reference_columns(generated_bytes, guid_columns_by_sheet=_guid_cols_by_sheet)
                     st.session_state["generated_file_bytes"] = generated_bytes
-                    st.session_state["generated_file_name"]  = (
-                        f"CORRIGE_{cfg.get('file_name', 'fichier.xlsx')}"
-                    )
-                    st.session_state["prerequisites_report"] = prereqs
-                    if corrections:
-                        st.success(f"✅ Fichier généré avec {len(corrections)} correction(s) appliquée(s).")
-                    else:
-                        st.success(
-                            "✅ Fichier généré sans correction de valeur — colonnes Guid (SystemId) "
-                            "vidées uniquement."
-                        )
+                    st.session_state["generated_file_name"] = f"CORRIGE_{cfg.get('file_name', 'fichier.xlsx')}"
+                    st.success(f"✅ Fichier généré — {len(corrections)} correction(s) appliquée(s).")
                 except Exception as e:
                     st.error(f"❌ Erreur lors de la génération : {e}")
 
@@ -824,6 +708,22 @@ def display_correction_workflow(merged: dict, cfg: dict, pr: dict):
                     key="dl_generated_file",
                     use_container_width=True,
                 )
+
+    if info_anomalies:
+        st.markdown("---")
+        st.markdown("**ℹ️ Champs non vérifiables (référence absente) :**")
+        for a in info_anomalies:
+            st.markdown(
+                f'<div class="card-info"><span class="tag tag-info">INFO</span>'
+                f'<b>{a.get("Champ", "")}</b> — {a.get("Message", "")}</div>',
+                unsafe_allow_html=True
+            )
+
+    st.session_state["prerequisites_report"] = build_prerequisites_report(
+        [a for a in all_anomalies if a.get("Ligne", 0) > 0],
+        profile_code=cfg.get("client_code", ""), company_id=cfg.get("company_id", ""),
+    )
+
 
 
 def reset_session():
@@ -1872,8 +1772,7 @@ with tab_main:
             st.markdown('<span class="tag tag-plus">⭐ Plus</span> Valeur ajoutée de notre outil', unsafe_allow_html=True)
         st.markdown("---")
 
-        display_unified_results(merged, axe_c, pr, resolved_by_table=_resolved_by_table)
-        display_correction_workflow(merged, cfg, pr)
+        display_merged_analysis(merged, axe_c, cfg, pr, resolved_by_table=_resolved_by_table, roadmap=_roadmap_e4)
 
         st.markdown("---")
         cb, cr, cs, cst = st.columns([2, 2, 3, 3])
