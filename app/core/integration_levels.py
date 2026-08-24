@@ -24,6 +24,72 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ── Config niveau (dynamique — chargée depuis Supabase, rien en dur ici) ─────
 
+def compute_dynamic_levels(fields_ref: dict[int, dict[str, int]], forced_root_table_id: int = 15) -> dict[int, int]:
+    """
+    AJOUTÉ (26/08/2026, mercredi) — demande Rami : "rendre la solution
+    dynamique" — remplace la classification manuelle table par table
+    (level_config.level), source de presque tous les bugs de stabilité
+    rencontrés cette semaine (tables oubliées, mal classées, disparues).
+
+    Calcule le niveau de CHAQUE table référencée par le fichier de façon
+    purement DÉRIVÉE de la structure réelle du package BC (fields_ref,
+    construit depuis packageFields — voir execution_planner.py), sans
+    aucune classification à maintenir à la main :
+
+        niveau(A) = 0                                    si A ne référence
+                                                           aucune autre table
+                                                           suivie (feuille)
+        niveau(A) = 1 + max(niveau(B) pour B référencée par A)   sinon
+
+    Exemple réel validé sur MDD-Comptabilité (26/08/2026) : le graphe
+    calculé seul retrouve exactement l'ordre établi manuellement plus tôt
+    cette semaine — 323/324 (Groupes compta. TVA, aucune référence sortante)
+    → 250/251 (référencent 323/324 via "Gpe compta. X TVA défaut") →
+    15 Compte général (référence 250/251 via ses propres champs "Groupe
+    compta. marché/produit") → 92/93/94 (référencent 15 via leurs champs
+    "Compte X"). Confirme que le graphe seul suffit, sans intervention
+    manuelle table par table.
+
+    forced_root_table_id (défaut 15, G/L Account) : le niveau calculé de
+    cette table sert de POINT ZÉRO — tous les niveaux sont décalés
+    (shift = niveau_brut(15)) pour que G/L Account reste "niveau 0", comme
+    dans la convention déjà utilisée partout ailleurs dans l'app (niveaux
+    négatifs = prérequis AVANT le plan comptable, positifs = après). Si la
+    table n'est pas dans le fichier (pas de fields_ref pour elle), shift=0
+    — comportement inoffensif, pas de décalage.
+
+    Gère les cycles (rare, mais possible si deux tables se référencent
+    mutuellement) via une détection de visite en cours : coupe court à 0
+    plutôt que de boucler à l'infini.
+    """
+    referenced_by: dict[int, set[int]] = {}
+    all_tables: set[int] = set()
+    for src_tid, fields in fields_ref.items():
+        all_tables.add(src_tid)
+        refs = {tid for tid in fields.values() if tid and tid != src_tid}
+        referenced_by[src_tid] = refs
+        all_tables |= refs
+
+    memo: dict[int, int] = {}
+    visiting: set[int] = set()
+
+    def _raw_level(tid: int) -> int:
+        if tid in memo:
+            return memo[tid]
+        if tid in visiting:
+            return 0  # cycle détecté — coupe court, ne bloque jamais le calcul
+        visiting.add(tid)
+        refs = referenced_by.get(tid, set())
+        lvl = 0 if not refs else 1 + max(_raw_level(r) for r in refs)
+        visiting.discard(tid)
+        memo[tid] = lvl
+        return lvl
+
+    levels = {tid: _raw_level(tid) for tid in all_tables}
+    shift = levels.get(forced_root_table_id, 0)
+    return {tid: lvl - shift for tid, lvl in levels.items()}
+
+
 @dataclass(frozen=True)
 class LevelInfo:
     table_id:   int
@@ -241,6 +307,7 @@ def build_roadmap_from_prereqs(
     profile_code: str | None = None,
     company_id: str | None = None,
     file_referenced_table_ids: set[int] | None = None,
+    dynamic_levels: dict[int, int] | None = None,
 ) -> list[RoadmapEntry]:
     """
     Construit la roadmap à partir des vraies anomalies Axe B (sortie de
@@ -320,6 +387,19 @@ def build_roadmap_from_prereqs(
     previous_table_ids et l'historique persisté restent en filet de sécurité
     secondaire (utile pour des cas hors fields_ref, ex. règles dynamiques
     GL Account), mais ne sont plus le SEUL mécanisme de continuité.
+
+    dynamic_levels (AJOUTÉ 26/08/2026, mercredi) — demande Rami : "classifie
+    toutes les tables selon Microsoft, rends la solution dynamique". Sortie
+    de compute_dynamic_levels() : le niveau de dépendance de chaque table,
+    calculé depuis le graphe réel des relations du fichier (fields_ref),
+    plus fiable et générique qu'une classification maintenue à la main
+    table par table (source de presque tous les bugs de la semaine — tables
+    oubliées dans level_config, mal classées, disparues). Quand une table a
+    un niveau calculé ici, il PRIME sur level_config.level (repli utilisé
+    seulement si la table n'apparaît pas dans le graphe de CE fichier —
+    ex. table vue uniquement via l'historique persisté). level_config
+    continue de servir pour `ignored` (liste noire explicite de tables
+    techniques à ne jamais afficher) et comme repli de dernier recours.
     """
     prereqs_by_table: dict[int, list[dict]] = {}
     for row in prereqs:
@@ -333,15 +413,20 @@ def build_roadmap_from_prereqs(
     if previous_table_ids:
         table_ids |= previous_table_ids
     if file_referenced_table_ids:
-        # Filtré à level_config (tables classées) : même principe déjà
-        # appliqué ailleurs — évite de faire remonter des tables système/
-        # techniques référencées par le fichier mais jamais pertinentes
-        # comme prérequis (bruit, cf. docstring plus haut).
-        table_ids |= (file_referenced_table_ids & set(level_config.keys()))
+        # RÉVISÉ (26/08/2026) — avant, restreint aux tables déjà présentes
+        # dans level_config ("tables classées") : contredisait l'objectif
+        # "dynamique" (une table nouvellement rencontrée, jamais classée à
+        # la main, doit quand même apparaître — son niveau vient maintenant
+        # de dynamic_levels, plus besoin de l'avoir déjà vue). Seul filtre
+        # restant : ignored (liste noire explicite), appliqué plus bas.
+        table_ids |= file_referenced_table_ids
 
     for _tid, _info in level_config.items():
         if _info.level == 0 and not _info.ignored:
             table_ids.add(_tid)
+
+    _ignored_ids = {tid for tid, info in level_config.items() if info.ignored}
+    table_ids -= _ignored_ids
 
     roadmap: list[RoadmapEntry] = []
     for table_id in table_ids:
@@ -367,6 +452,16 @@ def build_roadmap_from_prereqs(
                 level=None,
                 sub_level=None,
                 note="Anomalie Axe B réelle sur cette table, absente de level_config — à classer, mais quand même vérifiée.",
+            )
+        # AJOUTÉ (26/08/2026) — niveau dynamique PRIME sur level_config.level
+        # (voir docstring dynamic_levels). Ne remplace que `level` — nom,
+        # sub_level, note, ignored restent ceux de level_config le cas
+        # échéant.
+        if dynamic_levels is not None and table_id in dynamic_levels:
+            info = LevelInfo(
+                table_id=info.table_id, table_name=info.table_name,
+                level=dynamic_levels[table_id], sub_level=info.sub_level,
+                note=info.note, ignored=info.ignored,
             )
         # AJOUTÉ (20/08/2026) : unifie la langue du nom de table affiché —
         # voir docstring. Ne modifie que l'affichage (table_name), jamais

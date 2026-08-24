@@ -12,7 +12,7 @@ from app.core.execution_planner import get_execution_plan, build_plan_from_bc
 from app.core.integration_levels import (
     load_level_config, traverse_dependencies, build_roadmap, build_roadmap_from_prereqs,
     is_level_unlocked, refresh_roadmap, all_validated,
-    check_table_filled, _has_blocking_sub_anomalies,
+    check_table_filled, _has_blocking_sub_anomalies, compute_dynamic_levels,
 )
 from app.db.supabase_client import get_supabase_client
 from app.core.simulation_context import SimulationContext
@@ -1443,6 +1443,13 @@ with tab_main:
                             for _rtid in _tbl_fields.values()
                             if _rtid
                         }
+                        # AJOUTÉ (26/08/2026, mercredi) — demande Rami : niveau
+                        # calculé dynamiquement depuis le graphe réel de
+                        # dépendances du fichier (fields_ref), au lieu d'une
+                        # classification maintenue à la main table par table.
+                        # Voir compute_dynamic_levels() pour le détail complet
+                        # et la validation sur MDD-Comptabilité.
+                        _dynamic_levels = compute_dynamic_levels(_exec_plan.fields_ref, forced_root_table_id=15)
                         # RÉVISÉ (23/08/2026) — demande Rami : forcer TOUTES les
                         # tables déjà résolues à rester cochées ✓ en permanence,
                         # y compris à travers un "▶️ Reprendre" (qui vide
@@ -1457,6 +1464,7 @@ with tab_main:
                             _prereqs, _level_cfg, previous_table_ids=_previous_table_ids,
                             profile_code=client_code, company_id=cfg.get("company_id", ""),
                             file_referenced_table_ids=_file_referenced_table_ids,
+                            dynamic_levels=_dynamic_levels,
                         )
                         _current_table_ids = {e.level_info.table_id for e in st.session_state[_roadmap_key]}
                         if _current_table_ids - _persisted_table_ids:
