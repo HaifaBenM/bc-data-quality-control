@@ -115,6 +115,18 @@ st.markdown("""
     background: #F8FAFC; border-radius: 6px; margin-bottom: .3rem;
 }
 .level-check-sub { font-size: .78rem; color: #B45309; margin: .1rem 0 .3rem 2.6rem; }
+/* AJOUTÉ (26/08/2026) — demande Rami : l'expander natif Streamlit (bordure
+   grise plate) jurait avec les cartes .level-check-item (fond bleu clair,
+   coins arrondis) utilisées partout ailleurs dans la roadmap. Harmonise
+   tous les expanders de la page avec ce même langage visuel — bénéfice
+   valable aussi pour "Données source" et le détail des sub_anomalies, pas
+   seulement le nouveau groupe "Plan comptable". */
+div[data-testid="stExpander"] {
+    border: 1px solid #DCE7F5; border-radius: 8px; background: #F8FAFC;
+}
+div[data-testid="stExpander"] summary {
+    font-size: .92rem; padding: .55rem .75rem;
+}
 .level-check-circle-done {
     width: 22px; height: 22px; border-radius: 50%; background: #0F6E56;
     color: white; display: flex; align-items: center; justify-content: center;
