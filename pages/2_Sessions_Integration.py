@@ -1512,10 +1512,31 @@ with tab_main:
                         st.progress(_pct / 100)
 
                         try:
-                            for _entry in _roadmap:
+                            # RÉVISÉ (25/08/2026) — demande Rami : un vrai groupe visuel
+                            # "COMPTABILITÉ" (en-tête + tables regroupées dessous), pas
+                            # juste un tag entre parenthèses collé au libellé. Les tables
+                            # d'un même sub_level peuvent être sur des niveaux numériques
+                            # différents (ex. Comptabilité : -2 à 1, pour respecter le vrai
+                            # ordre de dépendance Microsoft — 323/324 avant 250/251 avant
+                            # Compte général avant 92/93/94) — donc un simple tri
+                            # (niveau, sub_level) ne les garde PAS contigus si d'autres
+                            # tables sans sub_level partagent ces mêmes niveaux. On
+                            # partitionne explicitement : chaque sub_level devient UN bloc
+                            # contigu (trié par niveau/table_id en interne), affiché avant
+                            # les entrées sans sub_level (comportement inchangé pour elles).
+                            _grouped: dict[str, list] = {}
+                            _ungrouped: list = []
+                            for _e in _roadmap:
+                                _sl = _e.level_info.sub_level
+                                if _sl:
+                                    _grouped.setdefault(_sl, []).append(_e)
+                                else:
+                                    _ungrouped.append(_e)
+
+                            def _render_level_card(_entry, _show_sub_level_tag: bool = True):
                                 _unlocked = is_level_unlocked(_entry.level_info.level, _roadmap)
-                                _label = _entry.level_info.table_name
-                                if _entry.level_info.sub_level:
+                                _label = f"{_entry.level_info.table_id} — {_entry.level_info.table_name}"
+                                if _show_sub_level_tag and _entry.level_info.sub_level:
                                     _label = f"{_label} ({_entry.level_info.sub_level})"
                                 _memory_sub = ""
 
@@ -1532,10 +1553,6 @@ with tab_main:
                                             'style="background:#F59E0B;">🟡</div>',
                                             "level-check-label-done",
                                         )
-                                        # RÉVISÉ (23/08/2026) — refonte visuelle : légende
-                                        # séparée du libellé (avant concaténée avec un tiret
-                                        # dans la même ligne, moins lisible) — même info,
-                                        # affichée en petite ligne dédiée sous l'item.
                                         _memory_sub = "🟡 En attente d'intégration BC (mémoire inter-sessions)"
                                     else:
                                         _circle, _lbl_cls = '<div class="level-check-circle-done">✓</div>', "level-check-label-done"
@@ -1589,6 +1606,19 @@ with tab_main:
                                                 st.caption("🔎 Aucun code BC/mémoire trouvé pour cette table.")
                                     else:
                                         st.caption(f"　　⚠️ {len(_sub_anomalies)} point(s) à vérifier avant l'intégration BC.")
+
+                            for _sl_name, _sl_entries in _grouped.items():
+                                st.markdown(
+                                    f'<div style="font-size:.78rem;font-weight:700;letter-spacing:.04em;'
+                                    f'color:#64748B;text-transform:uppercase;margin:.9rem 0 .35rem 0">'
+                                    f'{_sl_name}</div>',
+                                    unsafe_allow_html=True,
+                                )
+                                for _entry in sorted(_sl_entries, key=lambda e: (e.level_info.level or 0, e.level_info.table_id)):
+                                    _render_level_card(_entry, _show_sub_level_tag=False)
+
+                            for _entry in _ungrouped:
+                                _render_level_card(_entry, _show_sub_level_tag=True)
                         except Exception as _diag_e:
                             # DIAGNOSTIC — laissé en place tant qu'on n'a pas une confirmation
                             # de stabilité dans la durée. Sans impact visuel si tout va bien.
