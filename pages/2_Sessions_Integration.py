@@ -1551,7 +1551,7 @@ with tab_main:
                                 else:
                                     _ungrouped.append(_e)
 
-                            def _render_level_card(_entry, _show_sub_level_tag: bool = True):
+                            def _render_level_card(_entry, _show_sub_level_tag: bool = True, _nested: bool = False):
                                 _unlocked = is_level_unlocked(_entry.level_info.level, _roadmap)
                                 _label = f"{_entry.level_info.table_id} — {_entry.level_info.table_name}"
                                 if _show_sub_level_tag and _entry.level_info.sub_level:
@@ -1579,8 +1579,13 @@ with tab_main:
                                 else:
                                     _circle, _lbl_cls = '<div class="level-check-circle-todo"></div>', "level-check-label-todo"
 
+                                # AJOUTÉ (26/08/2026, 2e passe) — demande Rami : les membres
+                                # d'un groupe (ex. Plan comptable) affichés en point/sous-point
+                                # indenté, même langage visuel que la légende mémoire
+                                # inter-sessions (pas de drill-down/expander qui détonne).
+                                _nested_style = "margin-left:1.8rem" if _nested else ""
                                 st.markdown(
-                                    f'<div class="level-check-item">{_circle}'
+                                    f'<div class="level-check-item" style="{_nested_style}">{_circle}'
                                     f'<span class="{_lbl_cls}">{_label}</span></div>'
                                     f'{"<div class=" + chr(34) + "level-check-sub" + chr(34) + ">" + _memory_sub + "</div>" if _memory_sub else ""}',
                                     unsafe_allow_html=True,
@@ -1646,19 +1651,25 @@ with tab_main:
                                 if _kind == 0:
                                     _render_level_card(_payload, _show_sub_level_tag=True)
                                     continue
-                                # AJOUTÉ (26/08/2026) — demande Rami : le groupe ("Plan
-                                # comptable") devient un vrai drill-down (repliable), et son
-                                # propre statut (✓ vert) ne s'affiche QUE si TOUTES ses
-                                # tables membres sont validées — un agrégat, pas un simple
-                                # en-tête décoratif. st.expander ne supporte pas le HTML des
-                                # cercles personnalisés (.level-check-circle-*), d'où un
-                                # simple préfixe emoji ✅/⬜ pour rester dans les
-                                # possibilités du composant natif.
+                                # RÉVISÉ (26/08/2026, 2e passe) — demande Rami : plus de
+                                # drill-down/expander ("trop moche", cercle incohérent avec
+                                # le reste) — le groupe devient une carte de tête (même
+                                # cercle .level-check-item que tout le reste, vert seulement
+                                # si TOUS les membres sont validés) suivie de ses membres
+                                # en point/sous-point indenté, toujours visibles — même
+                                # langage visuel que la légende mémoire inter-sessions.
                                 _all_validated = all(m.status == "validated" for m in _members)
-                                _icon = "✅" if _all_validated else "⬜"
-                                with st.expander(f"{_icon} {_payload}", expanded=not _all_validated):
-                                    for _m in _members:
-                                        _render_level_card(_m, _show_sub_level_tag=False)
+                                if _all_validated:
+                                    _grp_circle, _grp_cls = '<div class="level-check-circle-done">✓</div>', "level-check-label-done"
+                                else:
+                                    _grp_circle, _grp_cls = '<div class="level-check-circle-todo"></div>', "level-check-label-todo"
+                                st.markdown(
+                                    f'<div class="level-check-item">{_grp_circle}'
+                                    f'<span class="{_grp_cls}"><b>{_payload}</b></span></div>',
+                                    unsafe_allow_html=True,
+                                )
+                                for _m in _members:
+                                    _render_level_card(_m, _show_sub_level_tag=False, _nested=True)
                         except Exception as _diag_e:
                             # DIAGNOSTIC — laissé en place tant qu'on n'a pas une confirmation
                             # de stabilité dans la durée. Sans impact visuel si tout va bien.
