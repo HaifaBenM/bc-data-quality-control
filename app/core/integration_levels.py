@@ -306,7 +306,6 @@ def build_roadmap_from_prereqs(
     previous_table_ids: set[int] | None = None,
     profile_code: str | None = None,
     company_id: str | None = None,
-    file_referenced_table_ids: set[int] | None = None,
     dynamic_levels: dict[int, int] | None = None,
 ) -> list[RoadmapEntry]:
     """
@@ -367,26 +366,18 @@ def build_roadmap_from_prereqs(
     Repli silencieux sur le nom stocké si la résolution échoue ou n'est pas
     fournie — jamais bloquant.
 
-    file_referenced_table_ids (AJOUTÉ 25/08/2026, mardi) — demande Rami :
-    "garantir la fiabilité" de la roadmap. Jusqu'ici, une table qui n'avait
-    PLUS d'anomalie active (résolue dans BC) disparaissait purement et
-    simplement de prereqs — previous_table_ids/l'historique persisté
-    (bc_metadata_cache) ne couvraient QUE ce qui avait déjà été vu par CET
-    outil depuis leur mise en place, jamais les tables résolues avant coup
-    (cas réel : Catégorie article/Code traçabilité, corrigées dans BC avant
-    que ce mécanisme existe — disparues sans laisser de trace, aucun
-    rattrapage automatique possible).
-
-    Fix structurel : ce paramètre attend l'ensemble COMPLET des table_id
-    référencés par LA STRUCTURE du fichier (execution_plan.fields_ref,
-    dérivé de packageFields — indépendant de l'état actuel des données).
-    Ce set est déterministe et STABLE pour un package donné : il ne dépend
-    QUE des colonnes présentes dans le fichier, jamais de la propreté des
-    données à un instant T. Une table y figure du premier scan jusqu'au
-    dernier, qu'elle ait 0 ou 1000 anomalies actives — la garantie demandée.
-    previous_table_ids et l'historique persisté restent en filet de sécurité
-    secondaire (utile pour des cas hors fields_ref, ex. règles dynamiques
-    GL Account), mais ne sont plus le SEUL mécanisme de continuité.
+    RETIRÉ (26/08/2026, 2e passe) — file_referenced_table_ids : la
+    tentative du 25/08 (garder visible toute table référencée par la
+    STRUCTURE du fichier, indépendamment des anomalies réelles) a été
+    annulée — confirmée fautive par comparaison directe avec les vraies
+    erreurs BC (Rami, 26/08) : une trentaine de tables sans aucune anomalie
+    réelle remontaient dans la roadmap simplement parce qu'une table du
+    fichier a un CHAMP avec une relation théorique vers elles (ex. Article
+    a des dizaines de champs avec TableRelation vers des tables jamais
+    réellement invalides dans les données). Le problème initial que ce
+    paramètre visait à résoudre (Catégorie article/Code traçabilité
+    disparues) reste couvert par previous_table_ids/l'historique persisté
+    (bc_metadata_cache) — mécanisme plus étroit mais sans faux positifs.
 
     dynamic_levels (AJOUTÉ 26/08/2026, mercredi) — demande Rami : "classifie
     toutes les tables selon Microsoft, rends la solution dynamique". Sortie
@@ -412,14 +403,21 @@ def build_roadmap_from_prereqs(
     table_ids: set[int] = set(prereqs_by_table.keys())
     if previous_table_ids:
         table_ids |= previous_table_ids
-    if file_referenced_table_ids:
-        # RÉVISÉ (26/08/2026) — avant, restreint aux tables déjà présentes
-        # dans level_config ("tables classées") : contredisait l'objectif
-        # "dynamique" (une table nouvellement rencontrée, jamais classée à
-        # la main, doit quand même apparaître — son niveau vient maintenant
-        # de dynamic_levels, plus besoin de l'avoir déjà vue). Seul filtre
-        # restant : ignored (liste noire explicite), appliqué plus bas.
-        table_ids |= file_referenced_table_ids
+    # RÉVISÉ (26/08/2026, 2e passe) — CORRIGÉ : la ligne qui élargissait
+    # table_ids à TOUT file_referenced_table_ids (sans condition) a été
+    # retirée — confirmée fautive par comparaison avec les vraies erreurs
+    # BC (exports "Erreurs package config.", Rami, 26/08) : une trentaine
+    # de tables sans aucune anomalie réelle (Fabricant, Zone, Calendrier
+    # principal, Code postal...) remontaient dans la roadmap simplement
+    # parce qu'Article (27) a des CHAMPS avec une relation théorique vers
+    # ces tables — sans qu'aucune valeur invalide n'existe réellement dans
+    # le fichier. Le critère d'inclusion redevient : anomalie Axe B réelle
+    # détectée (prereqs_by_table) OU déjà vue/validée avant (previous_
+    # table_ids / historique persisté) — jamais la seule structure théorique
+    # du schéma BC. file_referenced_table_ids et dynamic_levels restent
+    # utilisés UNIQUEMENT pour calculer le NIVEAU des tables qui, par
+    # ailleurs, remplissent déjà ce critère — jamais pour décider si une
+    # table apparaît.
 
     for _tid, _info in level_config.items():
         if _info.level == 0 and not _info.ignored:

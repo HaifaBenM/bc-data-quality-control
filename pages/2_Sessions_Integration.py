@@ -1429,26 +1429,25 @@ with tab_main:
                         _previous_table_ids = (
                             {e.level_info.table_id for e in _prev_roadmap} if _prev_roadmap else set()
                         )
-                        # AJOUTÉ (25/08/2026, mardi) — demande Rami : "garantir la
-                        # fiabilité" de la roadmap. Ensemble STATIQUE des tables
-                        # réellement référencées par la structure du fichier
-                        # (execution_plan.fields_ref — dérivé de packageFields,
-                        # indépendant de l'état actuel des données). Stable pour
-                        # ce package quel que soit l'avancement des corrections —
-                        # voir le paramètre file_referenced_table_ids de
-                        # build_roadmap_from_prereqs pour le détail complet.
-                        _file_referenced_table_ids = {
-                            _rtid
-                            for _tbl_fields in _exec_plan.fields_ref.values()
-                            for _rtid in _tbl_fields.values()
-                            if _rtid
-                        }
+                        # RETIRÉ (26/08/2026, 2e passe) — _file_referenced_table_ids
+                        # (25/08) causait du bruit : une trentaine de tables sans
+                        # aucune anomalie réelle remontaient dans la roadmap
+                        # (simple relation de champ théorique, jamais une vraie
+                        # valeur invalide). Voir le commentaire dans
+                        # build_roadmap_from_prereqs (integration_levels.py) pour
+                        # le détail complet — confirmé par comparaison directe
+                        # avec les vraies erreurs BC (Rami, 26/08).
+                        #
                         # AJOUTÉ (26/08/2026, mercredi) — demande Rami : niveau
                         # calculé dynamiquement depuis le graphe réel de
                         # dépendances du fichier (fields_ref), au lieu d'une
                         # classification maintenue à la main table par table.
                         # Voir compute_dynamic_levels() pour le détail complet
-                        # et la validation sur MDD-Comptabilité.
+                        # et la validation sur MDD-Comptabilité. Ce calcul reste
+                        # valable et utile — seule l'INCLUSION des tables (ci-
+                        # dessus) est revenue à l'ancien critère (anomalie réelle
+                        # ou déjà vue), le NIVEAU continue d'être calculé pour
+                        # toute table qui, par ailleurs, qualifie déjà.
                         _dynamic_levels = compute_dynamic_levels(_exec_plan.fields_ref, forced_root_table_id=15)
                         # RÉVISÉ (23/08/2026) — demande Rami : forcer TOUTES les
                         # tables déjà résolues à rester cochées ✓ en permanence,
@@ -1463,7 +1462,6 @@ with tab_main:
                         st.session_state[_roadmap_key] = build_roadmap_from_prereqs(
                             _prereqs, _level_cfg, previous_table_ids=_previous_table_ids,
                             profile_code=client_code, company_id=cfg.get("company_id", ""),
-                            file_referenced_table_ids=_file_referenced_table_ids,
                             dynamic_levels=_dynamic_levels,
                         )
                         _current_table_ids = {e.level_info.table_id for e in st.session_state[_roadmap_key]}
