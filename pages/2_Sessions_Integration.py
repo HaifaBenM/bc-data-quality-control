@@ -1607,18 +1607,40 @@ with tab_main:
                                     else:
                                         st.caption(f"　　⚠️ {len(_sub_anomalies)} point(s) à vérifier avant l'intégration BC.")
 
+                            # RÉVISÉ (26/08/2026) — demande Rami : le setup fonctionnel
+                            # transverse (n'appartenant à aucun MDD) doit apparaître AVANT
+                            # le groupe "Plan comptable", donc "groupes toujours en premier"
+                            # ne convient plus — on ordonnance maintenant TOUT (groupes +
+                            # entrées seules) par niveau réel, un groupe étant positionné à
+                            # son propre niveau minimum (celui de son premier membre).
+                            _render_items = []
                             for _sl_name, _sl_entries in _grouped.items():
-                                st.markdown(
-                                    f'<div style="font-size:.78rem;font-weight:700;letter-spacing:.04em;'
-                                    f'color:#64748B;text-transform:uppercase;margin:.9rem 0 .35rem 0">'
-                                    f'{_sl_name}</div>',
-                                    unsafe_allow_html=True,
+                                _sorted_members = sorted(
+                                    _sl_entries, key=lambda e: (e.level_info.level or 0, e.level_info.table_id)
                                 )
-                                for _entry in sorted(_sl_entries, key=lambda e: (e.level_info.level or 0, e.level_info.table_id)):
-                                    _render_level_card(_entry, _show_sub_level_tag=False)
-
+                                _min_level = _sorted_members[0].level_info.level or 0
+                                _render_items.append((_min_level, 1, _sl_name, _sorted_members))
                             for _entry in _ungrouped:
-                                _render_level_card(_entry, _show_sub_level_tag=True)
+                                _render_items.append((_entry.level_info.level or 0, 0, _entry, None))
+                            _render_items.sort(key=lambda x: (x[0], x[1]))
+
+                            for _lvl, _kind, _payload, _members in _render_items:
+                                if _kind == 0:
+                                    _render_level_card(_payload, _show_sub_level_tag=True)
+                                    continue
+                                # AJOUTÉ (26/08/2026) — demande Rami : le groupe ("Plan
+                                # comptable") devient un vrai drill-down (repliable), et son
+                                # propre statut (✓ vert) ne s'affiche QUE si TOUTES ses
+                                # tables membres sont validées — un agrégat, pas un simple
+                                # en-tête décoratif. st.expander ne supporte pas le HTML des
+                                # cercles personnalisés (.level-check-circle-*), d'où un
+                                # simple préfixe emoji ✅/⬜ pour rester dans les
+                                # possibilités du composant natif.
+                                _all_validated = all(m.status == "validated" for m in _members)
+                                _icon = "✅" if _all_validated else "⬜"
+                                with st.expander(f"{_icon} {_payload}", expanded=not _all_validated):
+                                    for _m in _members:
+                                        _render_level_card(_m, _show_sub_level_tag=False)
                         except Exception as _diag_e:
                             # DIAGNOSTIC — laissé en place tant qu'on n'a pas une confirmation
                             # de stabilité dans la durée. Sans impact visuel si tout va bien.
