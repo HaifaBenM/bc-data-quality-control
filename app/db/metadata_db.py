@@ -31,6 +31,35 @@ def save_metadata(
         return False, str(e)
 
 
+def save_roadmap_table_history(profile_code: str, company_id: str, pkg_code: str, table_ids) -> tuple[bool, str]:
+    """AJOUTÉ (23/08/2026) — demande Rami : forcer TOUTES les tables déjà
+    résolues (✓ vert) à rester affichées dans la roadmap en permanence,
+    même après un "▶️ Reprendre" (qui vide session_state et donc perd la
+    mémoire in-memory `previous_table_ids` déjà en place pour la même
+    session de travail continue). Réutilise le mécanisme générique
+    bc_metadata_cache (save_metadata/get_cached_metadata, déjà utilisé
+    pour gl_account_posting_fields et table_captions) plutôt qu'une
+    nouvelle table/migration Supabase — clé synthétique par package
+    (entity_name=f"roadmap_tables_{pkg_code}"), aucune expiration
+    (contrairement au TTL des valeurs de référence : une table une fois
+    vue dans la roadmap d'un package doit y rester indéfiniment)."""
+    return save_metadata(
+        profile_code, company_id, f"roadmap_tables_{pkg_code}",
+        "roadmap_history", sorted(set(table_ids)),
+    )
+
+
+def get_roadmap_table_history(profile_code: str, company_id: str, pkg_code: str) -> set:
+    """Voir save_roadmap_table_history. set() si rien de persisté encore."""
+    row = get_cached_metadata(profile_code, company_id, f"roadmap_tables_{pkg_code}")
+    if not row:
+        return set()
+    try:
+        return set(int(t) for t in row.get("fields", []))
+    except (TypeError, ValueError):
+        return set()
+
+
 def save_reference_data(
     profile_code: str,
     company_id:   str,
