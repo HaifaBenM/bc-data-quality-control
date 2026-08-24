@@ -1417,6 +1417,20 @@ with tab_main:
                         _previous_table_ids = (
                             {e.level_info.table_id for e in _prev_roadmap} if _prev_roadmap else set()
                         )
+                        # AJOUTÉ (25/08/2026, mardi) — demande Rami : "garantir la
+                        # fiabilité" de la roadmap. Ensemble STATIQUE des tables
+                        # réellement référencées par la structure du fichier
+                        # (execution_plan.fields_ref — dérivé de packageFields,
+                        # indépendant de l'état actuel des données). Stable pour
+                        # ce package quel que soit l'avancement des corrections —
+                        # voir le paramètre file_referenced_table_ids de
+                        # build_roadmap_from_prereqs pour le détail complet.
+                        _file_referenced_table_ids = {
+                            _rtid
+                            for _tbl_fields in _exec_plan.fields_ref.values()
+                            for _rtid in _tbl_fields.values()
+                            if _rtid
+                        }
                         # RÉVISÉ (23/08/2026) — demande Rami : forcer TOUTES les
                         # tables déjà résolues à rester cochées ✓ en permanence,
                         # y compris à travers un "▶️ Reprendre" (qui vide
@@ -1430,6 +1444,7 @@ with tab_main:
                         st.session_state[_roadmap_key] = build_roadmap_from_prereqs(
                             _prereqs, _level_cfg, previous_table_ids=_previous_table_ids,
                             profile_code=client_code, company_id=cfg.get("company_id", ""),
+                            file_referenced_table_ids=_file_referenced_table_ids,
                         )
                         _current_table_ids = {e.level_info.table_id for e in st.session_state[_roadmap_key]}
                         if _current_table_ids - _persisted_table_ids:

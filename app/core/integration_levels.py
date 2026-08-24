@@ -240,6 +240,7 @@ def build_roadmap_from_prereqs(
     previous_table_ids: set[int] | None = None,
     profile_code: str | None = None,
     company_id: str | None = None,
+    file_referenced_table_ids: set[int] | None = None,
 ) -> list[RoadmapEntry]:
     """
     Construit la roadmap à partir des vraies anomalies Axe B (sortie de
@@ -298,6 +299,27 @@ def build_roadmap_from_prereqs(
     l'arbre mère/fille, qui lisaient tous les deux le nom brut stocké.
     Repli silencieux sur le nom stocké si la résolution échoue ou n'est pas
     fournie — jamais bloquant.
+
+    file_referenced_table_ids (AJOUTÉ 25/08/2026, mardi) — demande Rami :
+    "garantir la fiabilité" de la roadmap. Jusqu'ici, une table qui n'avait
+    PLUS d'anomalie active (résolue dans BC) disparaissait purement et
+    simplement de prereqs — previous_table_ids/l'historique persisté
+    (bc_metadata_cache) ne couvraient QUE ce qui avait déjà été vu par CET
+    outil depuis leur mise en place, jamais les tables résolues avant coup
+    (cas réel : Catégorie article/Code traçabilité, corrigées dans BC avant
+    que ce mécanisme existe — disparues sans laisser de trace, aucun
+    rattrapage automatique possible).
+
+    Fix structurel : ce paramètre attend l'ensemble COMPLET des table_id
+    référencés par LA STRUCTURE du fichier (execution_plan.fields_ref,
+    dérivé de packageFields — indépendant de l'état actuel des données).
+    Ce set est déterministe et STABLE pour un package donné : il ne dépend
+    QUE des colonnes présentes dans le fichier, jamais de la propreté des
+    données à un instant T. Une table y figure du premier scan jusqu'au
+    dernier, qu'elle ait 0 ou 1000 anomalies actives — la garantie demandée.
+    previous_table_ids et l'historique persisté restent en filet de sécurité
+    secondaire (utile pour des cas hors fields_ref, ex. règles dynamiques
+    GL Account), mais ne sont plus le SEUL mécanisme de continuité.
     """
     prereqs_by_table: dict[int, list[dict]] = {}
     for row in prereqs:
@@ -310,6 +332,12 @@ def build_roadmap_from_prereqs(
     table_ids: set[int] = set(prereqs_by_table.keys())
     if previous_table_ids:
         table_ids |= previous_table_ids
+    if file_referenced_table_ids:
+        # Filtré à level_config (tables classées) : même principe déjà
+        # appliqué ailleurs — évite de faire remonter des tables système/
+        # techniques référencées par le fichier mais jamais pertinentes
+        # comme prérequis (bruit, cf. docstring plus haut).
+        table_ids |= (file_referenced_table_ids & set(level_config.keys()))
 
     for _tid, _info in level_config.items():
         if _info.level == 0 and not _info.ignored:
