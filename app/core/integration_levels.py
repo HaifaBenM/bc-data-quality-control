@@ -379,18 +379,24 @@ def build_roadmap_from_prereqs(
     disparues) reste couvert par previous_table_ids/l'historique persisté
     (bc_metadata_cache) — mécanisme plus étroit mais sans faux positifs.
 
-    dynamic_levels (AJOUTÉ 26/08/2026, mercredi) — demande Rami : "classifie
-    toutes les tables selon Microsoft, rends la solution dynamique". Sortie
-    de compute_dynamic_levels() : le niveau de dépendance de chaque table,
-    calculé depuis le graphe réel des relations du fichier (fields_ref),
-    plus fiable et générique qu'une classification maintenue à la main
-    table par table (source de presque tous les bugs de la semaine — tables
-    oubliées dans level_config, mal classées, disparues). Quand une table a
-    un niveau calculé ici, il PRIME sur level_config.level (repli utilisé
-    seulement si la table n'apparaît pas dans le graphe de CE fichier —
-    ex. table vue uniquement via l'historique persisté). level_config
-    continue de servir pour `ignored` (liste noire explicite de tables
-    techniques à ne jamais afficher) et comme repli de dernier recours.
+    dynamic_levels (AJOUTÉ 26/08/2026, mercredi ; RÉVISÉ 26/08/2026, 3e
+    passe) — demande Rami : "classifie toutes les tables selon Microsoft,
+    rends la solution dynamique". Sortie de compute_dynamic_levels() : le
+    niveau de dépendance de chaque table, calculé depuis le graphe réel des
+    relations du FICHIER COURANT (fields_ref) — utile pour les tables
+    encore "non classées" (level=None), qui n'ont ainsi plus jamais besoin
+    d'être ajoutées à la main pour apparaître à un niveau sensé.
+
+    RÉVISÉ : ne prime PLUS sur une classification manuelle explicite
+    (level_config.level déjà renseigné) — une classification humaine
+    délibérée (ex. Plan comptable, setup fonctionnel transverse) gagne
+    toujours. Raison : le graphe d'un fichier donné (ex. un fichier Stock)
+    ignore totalement l'existence d'autres regroupements métier (ex. Plan
+    comptable) — appliquer son échelle de niveaux à TOUTES les tables,
+    classées ou non, mélangeait deux échelles sans rapport entre elles.
+    Un décalage fixe (+1000) est appliqué aux niveaux calculés pour
+    garantir qu'ils se positionnent toujours APRÈS tout ce qui est classé
+    à la main, jamais mélangés au milieu.
     """
     prereqs_by_table: dict[int, list[dict]] = {}
     for row in prereqs:
@@ -451,14 +457,28 @@ def build_roadmap_from_prereqs(
                 sub_level=None,
                 note="Anomalie Axe B réelle sur cette table, absente de level_config — à classer, mais quand même vérifiée.",
             )
-        # AJOUTÉ (26/08/2026) — niveau dynamique PRIME sur level_config.level
-        # (voir docstring dynamic_levels). Ne remplace que `level` — nom,
-        # sub_level, note, ignored restent ceux de level_config le cas
-        # échéant.
-        if dynamic_levels is not None and table_id in dynamic_levels:
+        # RÉVISÉ (26/08/2026, 3e passe) — demande Rami : ordre attendu =
+        # setup fonctionnel PUIS Plan comptable PUIS le reste. Problème du
+        # comportement précédent ("dynamic_levels PRIME toujours") : les
+        # tables classées à la main (setup fonctionnel forcé à -3, Plan
+        # comptable de -2 à 1) et les tables non classées (niveau calculé
+        # depuis le graphe du fichier COURANT, une échelle sans rapport —
+        # ex. le graphe d'un fichier Stock ignore totalement l'existence du
+        # Plan comptable) se retrouvaient mélangées sur des échelles de
+        # niveaux incomparables entre elles.
+        #
+        # Nouvelle priorité : une classification MANUELLE explicite
+        # (level_config.level déjà renseigné, ex. Plan comptable, setup
+        # fonctionnel) est un choix humain délibéré et gagne toujours — le
+        # calcul dynamique ne comble que les tables encore "non classées"
+        # (level=None), et reçoit un décalage fixe (+1000) pour garantir
+        # qu'il se positionne TOUJOURS après tout ce qui est classé à la
+        # main, quelle que soit sa propre valeur brute.
+        _DYNAMIC_LEVEL_OFFSET = 1000
+        if info.level is None and dynamic_levels is not None and table_id in dynamic_levels:
             info = LevelInfo(
                 table_id=info.table_id, table_name=info.table_name,
-                level=dynamic_levels[table_id], sub_level=info.sub_level,
+                level=dynamic_levels[table_id] + _DYNAMIC_LEVEL_OFFSET, sub_level=info.sub_level,
                 note=info.note, ignored=info.ignored,
             )
         # AJOUTÉ (20/08/2026) : unifie la langue du nom de table affiché —
