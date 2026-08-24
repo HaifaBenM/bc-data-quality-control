@@ -344,22 +344,81 @@ def merge_results(axe_a: dict, axe_b: dict, axe_c: dict, parse_result: dict = No
     return merged
 
 
-def display_unified_results(merged: dict, axe_c: dict, pr: dict = None):
+def _filter_resolved_prereqs(all_anomalies: list, resolved_by_table: dict | None) -> tuple[list, int]:
+    """AJOUTÉ (23/08/2026) — factorisé pour être utilisé à la fois pour les
+    compteurs du haut de l'Étape 4 et pour le tableau détaillé
+    (display_unified_results), afin que les deux restent cohérents entre
+    eux. Voir le commentaire dans display_unified_results pour le contexte
+    complet (anomalies PREALABLE_BC_REQUIS déjà résolues dans la roadmap)."""
+    if not resolved_by_table:
+        return all_anomalies, 0
+    kept, resolved_count = [], 0
+    for a in all_anomalies:
+        if a.get("Classification") == "PREALABLE_BC_REQUIS":
+            try:
+                tid = int(a.get("Table référencée", -1))
+            except (TypeError, ValueError):
+                tid = -1
+            val = str(a.get("Valeur", "")).strip()
+            if val and val in resolved_by_table.get(tid, set()):
+                resolved_count += 1
+                continue
+        kept.append(a)
+    return kept, resolved_count
+
+
+def display_unified_results(merged: dict, axe_c: dict, pr: dict = None, resolved_by_table: dict | None = None):
     all_anomalies = merged.get("all_anomalies", [])
+
+    # AJOUTÉ (23/08/2026) — demande Rami : une anomalie "Prérequis BC
+    # requis" (Classification == PREALABLE_BC_REQUIS) restait affichée
+    # indéfiniment même après validation du niveau correspondant dans la
+    # roadmap (BC réel ou mémoire inter-sessions) — all_anomalies vient du
+    # scan initial (validate_file_axe_b), jamais recalculé par "Revérifier"
+    # (constaté sur MDD-Stock : ~4000 lignes affichées, la plupart déjà
+    # traitées). Filtre ici via resolved_by_table (codes vus au dernier
+    # Revérifier par table, réutilisés depuis la roadmap — aucun nouvel
+    # appel BC). Compteur affiché plutôt que disparition silencieuse.
+    all_anomalies, _resolved_count = _filter_resolved_prereqs(all_anomalies, resolved_by_table)
+
     real          = [a for a in all_anomalies if a.get("Ligne", 0) > 0]
     info          = [a for a in all_anomalies if a.get("Ligne", 0) == 0]
 
     if not real and not info:
-        st.success("🎉 **Aucune anomalie détectée !** Les données sont conformes.")
+        if _resolved_count:
+            st.success(
+                f"🎉 **Aucune anomalie active !** ({_resolved_count} prérequis BC "
+                f"déjà résolu(s) depuis le scan initial, retiré(s) de l'affichage.)"
+            )
+        else:
+            st.success("🎉 **Aucune anomalie détectée !** Les données sont conformes.")
         return
+
+    if _resolved_count:
+        st.caption(
+            f"✅ {_resolved_count} anomalie(s) « Prérequis BC requis » déjà résolue(s) "
+            f"depuis le scan initial — retirée(s) de l'affichage ci-dessous."
+        )
 
     has_ia = axe_c.get("available") and axe_c.get("total_suggestions", 0) > 0
     auto_c = axe_c.get("auto_corrected", 0)
     if has_ia and auto_c > 0:
         st.info(f"🤖 **{auto_c} correction(s) appliquée(s) automatiquement** par l'IA")
 
-    by_sheet    = merged.get("by_sheet", {})
-    sheet_names = list(by_sheet.keys())
+    # RÉVISÉ (23/08/2026) — reconstruit depuis `all_anomalies` (déjà filtré
+    # ci-dessus) plutôt que merged["by_sheet"] brut, sinon le filtrage
+    # n'aurait aucun effet sur les compteurs par onglet ni sur le tableau
+    # détaillé plus bas (qui lisent tous les deux by_sheet).
+    by_sheet: dict[str, list] = {}
+    for a in all_anomalies:
+        by_sheet.setdefault(a.get("Onglet", ""), []).append(a)
+    # Conserve l'ordre d'origine des onglets (utile pour l'UI) — un onglet
+    # entièrement résolu (0 anomalie restante) garde son entrée (liste vide)
+    # au lieu de disparaître du sélecteur, pour rester cohérent avec
+    # merged["by_sheet"] d'origine.
+    for _sn in merged.get("by_sheet", {}):
+        by_sheet.setdefault(_sn, [])
+    sheet_names = list(merged.get("by_sheet", {}).keys()) or list(by_sheet.keys())
     tab_labels  = []
     for sn in sheet_names:
         a    = by_sheet[sn]
@@ -1645,6 +1704,30 @@ with tab_main:
         lines = cfg.get("lines", 0)
         auto  = axe_c.get("auto_corrected", 0)
 
+        # AJOUTÉ (23/08/2026) — demande Rami : recalcule total/major/minor en
+        # excluant les anomalies "Prérequis BC requis" déjà résolues dans la
+        # roadmap (BC ou mémoire inter-sessions), au lieu de garder les
+        # compteurs figés du scan initial — sinon incohérent avec le tableau
+        # détaillé juste en dessous (display_unified_results), qui applique
+        # déjà ce même filtre. Utilisé aussi pour la sauvegarde de session
+        # plus bas (total_anomalies/major_anomalies/minor_anomalies) — un
+        # bénéfice secondaire bienvenu : la session sauvegardée reflète l'état
+        # réel plutôt que le scan figé.
+        _roadmap_key_e4 = f"level_roadmap_{cfg.get('pkg_code', '')}_{cfg.get('company_id', '')}_{cfg.get('file_name', '')}"
+        _roadmap_e4 = st.session_state.get(_roadmap_key_e4) or []
+        _resolved_by_table: dict[int, set] = {
+            e.level_info.table_id: (e.last_codes or set())
+            for e in _roadmap_e4
+            if getattr(e, "last_codes", None)
+        }
+        _all_anomalies_e4 = merged.get("all_anomalies", [])
+        _filtered_e4, _resolved_count_e4 = _filter_resolved_prereqs(_all_anomalies_e4, _resolved_by_table)
+        if _resolved_count_e4:
+            _real_e4 = [a for a in _filtered_e4 if a.get("Ligne", 0) > 0]
+            total = len(_real_e4)
+            major = sum(1 for a in _real_e4 if a.get("Sévérité") == "Majeure")
+            minor = sum(1 for a in _real_e4 if a.get("Sévérité") == "Mineure")
+
         c1, c2, c3, c4, c5 = st.columns(5)
         for cw, v, l, col in [
             (c1, lines, "Lignes analysées",  "#1B3A6B"),
@@ -1668,7 +1751,7 @@ with tab_main:
             st.markdown('<span class="tag tag-plus">⭐ Plus</span> Valeur ajoutée de notre outil', unsafe_allow_html=True)
         st.markdown("---")
 
-        display_unified_results(merged, axe_c, pr)
+        display_unified_results(merged, axe_c, pr, resolved_by_table=_resolved_by_table)
         display_correction_workflow(merged, cfg, pr)
 
         st.markdown("---")
