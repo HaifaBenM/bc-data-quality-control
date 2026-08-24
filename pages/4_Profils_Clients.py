@@ -132,14 +132,19 @@ with tab1:
 
             with col_actions:
                 st.markdown("<div style='padding-top:14px'>", unsafe_allow_html=True)
-                c1, c2, c3 = st.columns(3)
+                # RÉVISÉ (24/08/2026) — demande Rami : icône seule (pas de texte
+                # "Éditer"), et les 2 boutons de même taille — l'ancienne mise en
+                # page (3 colonnes, dont une vide) laissait "✏️ Éditer" plus
+                # large que "🗑️" à cause du texte en plus. 2 colonnes égales,
+                # icônes seules des deux côtés.
+                c2, c3 = st.columns(2)
                 with c2:
-                    if st.button("✏️ Éditer", key=f"edit_{code}", use_container_width=True):
+                    if st.button("✏️", key=f"edit_{code}", use_container_width=True, help="Modifier"):
                         st.session_state.edit_profile   = code
                         st.session_state.bc_test_result = {}
                         st.session_state.companies_list = {}
                 with c3:
-                    if st.button("🗑️", key=f"del_{code}", use_container_width=True):
+                    if st.button("🗑️", key=f"del_{code}", use_container_width=True, help="Supprimer"):
                         st.session_state.confirm_delete = code
                 st.markdown("</div>", unsafe_allow_html=True)
 
