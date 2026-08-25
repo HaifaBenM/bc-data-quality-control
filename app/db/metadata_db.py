@@ -375,11 +375,24 @@ def get_reference_values_by_table_id(
     _DIMENSION_VALUE_TABLE_ID = 349
     _DIMENSION_VALUE_CODE_FIELD_NO = 2
 
-    # 2. Lazy load via AL tableValues
-    if ref_field_id > 0:
-        _field_no = ref_field_id
-    elif ref_table_id == _DIMENSION_VALUE_TABLE_ID:
+    # RÉVISÉ (26/08/2026) — FIX DÉFINITIF : l'ancienne priorité
+    # ("ref_field_id explicite non nul toujours prioritaire") supposait que
+    # packageFields ne résolvait JAMAIS un numéro de champ pour cette
+    # relation composite — hypothèse fausse. Diagnostic brut (26/08,
+    # Rami) confirmé : l'appel direct à BC avec field_no=2 renvoie bien les
+    # 3 bonnes valeurs (LOCATIONS DIVERSES, TOP ASSISTANCE, LOCATION ET
+    # MAINTENA) — donc si le résultat affiché était quand même "SECTION",
+    # c'est que packageFields renvoyait un ref_field_id non nul (mais FAUX,
+    # champ 1 "Dimension Code") pour CETTE relation composite précise,
+    # écrasant le repli table-349 ci-dessous à chaque scan initial (Axe B),
+    # qui repolluait le cache Supabase avant même que le contrôle roadmap
+    # (qui appelle sans ref_field_id, donc correctement) n'ait sa chance.
+    # Fix : table 349 = champ 2 TOUJOURS, aucune exception — un seul point
+    # de vérité prouvé exact, plus de course entre deux appelants.
+    if ref_table_id == _DIMENSION_VALUE_TABLE_ID:
         _field_no = _DIMENSION_VALUE_CODE_FIELD_NO
+    elif ref_field_id > 0:
+        _field_no = ref_field_id
     else:
         _field_no = 1
     if profile_code and company_id:
