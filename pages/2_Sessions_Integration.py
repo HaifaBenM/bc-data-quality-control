@@ -357,7 +357,7 @@ def merge_results(axe_a: dict, axe_b: dict, axe_c: dict, parse_result: dict = No
     return merged
 
 
-def _filter_resolved_prereqs(all_anomalies: list, resolved_by_table: dict | None, hide_all_prereqs: bool = False) -> tuple[list, int]:
+def _filter_resolved_prereqs(all_anomalies: list, resolved_by_table: dict | None, hide_all_prereqs: bool = False, validated_table_ids: set | None = None) -> tuple[list, int]:
     """AJOUTÉ (23/08/2026) — factorisé pour être utilisé à la fois pour les
     compteurs du haut de l'Étape 4 et pour le tableau détaillé
     (display_merged_analysis), afin que les deux restent cohérents entre
@@ -370,8 +370,19 @@ def _filter_resolved_prereqs(all_anomalies: list, resolved_by_table: dict | None
     all_validated()), on masque TOUTES les anomalies "Prérequis BC requis"
     restantes d'un coup, même celles dont le code précis n'aurait pas été
     retrouvé dans last_codes (correspondance imparfaite possible, ex.
-    variation de casse) — la roadmap fait foi une fois complète."""
-    if not resolved_by_table and not hide_all_prereqs:
+    variation de casse) — la roadmap fait foi une fois complète.
+
+    validated_table_ids (AJOUTÉ 26/08/2026, 2e passe) — bug trouvé : le
+    filtrage par code précis (`val in resolved_by_table[tid]`) exige une
+    valeur non vide (`if val and ...`) — une anomalie cascade comme
+    "Souches de n° n'existe pas... Code=''" (valeur VIDE par construction,
+    ce n'est pas un code invalide mais une absence totale de souche
+    configurée) ne peut donc JAMAIS être filtrée par cette voie, même si la
+    table 308 est déjà validée ✓ dans la roadmap. Ce nouveau critère
+    complète le premier : si le NIVEAU de la table référencée est validé
+    (peu importe BC réel ou mémoire), on masque TOUTES ses anomalies
+    PREALABLE_BC_REQUIS, avec ou sans valeur précise à faire correspondre."""
+    if not resolved_by_table and not hide_all_prereqs and not validated_table_ids:
         return all_anomalies, 0
     kept, resolved_count = [], 0
     for a in all_anomalies:
@@ -383,6 +394,9 @@ def _filter_resolved_prereqs(all_anomalies: list, resolved_by_table: dict | None
                 tid = int(a.get("Table référencée", -1))
             except (TypeError, ValueError):
                 tid = -1
+            if validated_table_ids and tid in validated_table_ids:
+                resolved_count += 1
+                continue
             val = str(a.get("Valeur", "")).strip()
             if val and val in (resolved_by_table or {}).get(tid, set()):
                 resolved_count += 1
@@ -415,7 +429,15 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
     # mémoire inter-sessions) — la roadmap fait foi une fois complète, même
     # si une correspondance de code précise a pu échouer (accents/casse).
     _hide_all_prereqs = bool(roadmap) and all_validated(roadmap)
-    all_anomalies, _resolved_count = _filter_resolved_prereqs(all_anomalies, resolved_by_table, hide_all_prereqs=_hide_all_prereqs)
+    # AJOUTÉ (26/08/2026, 2e passe) — voir docstring validated_table_ids de
+    # _filter_resolved_prereqs : masque les anomalies d'une table dont le
+    # NIVEAU est déjà validé, même sans correspondance de code précise
+    # (cas des anomalies cascade à valeur vide, ex. "Souches de n°").
+    _validated_table_ids = {e.level_info.table_id for e in (roadmap or []) if e.status == "validated"}
+    all_anomalies, _resolved_count = _filter_resolved_prereqs(
+        all_anomalies, resolved_by_table, hide_all_prereqs=_hide_all_prereqs,
+        validated_table_ids=_validated_table_ids,
+    )
 
     real = [a for a in all_anomalies if a.get("Ligne", 0) > 0]
     info = [a for a in all_anomalies if a.get("Ligne", 0) == 0]
@@ -1413,9 +1435,24 @@ with tab_main:
                                         return check_gl_account_prerequisites(pr, _rc_fallback)
 
                                     try:
+                                        # RÉVISÉ (26/08/2026) — bug trouvé : la session en
+                                        # cours (si déjà sauvegardée une première fois —
+                                        # checkpoint ou complète) n'était jamais exclue de
+                                        # sa propre vérification mémoire inter-sessions.
+                                        # Résultat : ses propres codes fraîchement extraits
+                                        # à la sauvegarde se comptaient comme une
+                                        # "confirmation externe" — la session se validait
+                                        # elle-même en boucle (cas réel : Article validé en
+                                        # mémoire 🟡 sans aucune autre session ni BC réel
+                                        # derrière).
+                                        _current_session_id = (
+                                            st.session_state.get("resumed_session_id")
+                                            or st.session_state.get("saved_session_id")
+                                        )
                                         st.session_state[_roadmap_key] = refresh_roadmap(
                                             cfg["client_code"], cfg["company_id"], _roadmap,
                                             gl_account_check=_gl_check,
+                                            exclude_session_id=_current_session_id,
                                         )
                                     except Exception as _refresh_e:
                                         st.error(f"Erreur lors de la revérification : {type(_refresh_e).__name__}: {_refresh_e}")
@@ -1742,7 +1779,12 @@ with tab_main:
             if getattr(e, "last_codes", None)
         }
         _all_anomalies_e4 = merged.get("all_anomalies", [])
-        _filtered_e4, _resolved_count_e4 = _filter_resolved_prereqs(_all_anomalies_e4, _resolved_by_table)
+        _validated_table_ids_e4 = {e.level_info.table_id for e in _roadmap_e4 if e.status == "validated"}
+        _filtered_e4, _resolved_count_e4 = _filter_resolved_prereqs(
+            _all_anomalies_e4, _resolved_by_table,
+            hide_all_prereqs=bool(_roadmap_e4) and all_validated(_roadmap_e4),
+            validated_table_ids=_validated_table_ids_e4,
+        )
         if _resolved_count_e4:
             _real_e4 = [a for a in _filtered_e4 if a.get("Ligne", 0) > 0]
             total = len(_real_e4)
@@ -2094,6 +2136,11 @@ with tab_ses:
                                         company_id=_sel_company,
                                         roadmap=st.session_state[_roadmap_key_guess],
                                         scope_table_ids=_scope,
+                                        # RÉVISÉ (26/08/2026) — même fix qu'à l'Étape 3 :
+                                        # exclut la session elle-même de sa propre
+                                        # vérification mémoire (même bug de
+                                        # self-confirmation en boucle).
+                                        exclude_session_id=_nid,
                                     )
                                     st.success(f"Sous-arbre revérifié ({len(_scope)} table(s)).")
                                 else:
