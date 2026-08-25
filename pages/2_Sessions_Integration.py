@@ -6,7 +6,7 @@ from app.core.file_parser import parse_uploaded_file, get_file_summary
 from app.core.structure_validator import validate_file_structure
 from app.core.validator_axe_a import validate_file_axe_a
 from app.core.validator_axe_b import validate_file_axe_b
-from app.core.validator_axe_c import validate_file_axe_c, get_gemini_api_key, is_gemini_available
+from app.core.validator_axe_c import validate_file_axe_c, get_gemini_api_key, is_gemini_available, validate_coherence_axe_c
 from app.core.auth import require_role, is_consultant
 from app.core.execution_planner import get_execution_plan, build_plan_from_bc
 from app.core.integration_levels import (
@@ -539,7 +539,7 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
         champs = sorted(set(a.get("Champ", "") for a in real_anomalies))
         filt_champ = st.multiselect("Champ", champs, default=champs, key=f"fc_{sn}")
     with cf4:
-        _cls_label = {"PREALABLE_BC_REQUIS": "🟣 Prérequis BC requis", "VALEUR_CORRIGIBLE": "✏️ Corrigible"}
+        _cls_label = {"PREALABLE_BC_REQUIS": "🟣 Prérequis BC requis", "VALEUR_CORRIGIBLE": "✏️ Corrigible", "SUGGESTION_IA": "🧠 Suggestion IA"}
         clss = sorted(set(a.get("Classification", "") for a in real_anomalies))
         filt_cls = st.multiselect(
             "Classification", clss, default=clss, key=f"fcl_{sn}",
@@ -557,7 +557,7 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
     if not filtered:
         st.info("Aucune ligne ne correspond aux filtres sélectionnés.")
     else:
-        _sev_icon = {"Majeure": "🔴 Majeure", "Mineure": "🟠 Mineure"}
+        _sev_icon = {"Majeure": "🔴 Majeure", "Mineure": "🟠 Mineure", "Info": "🔵 Info"}
         _has_ia_col = any(a.get("suggestion_ia") for a in filtered)
 
         # AJOUTÉ (26/08/2026) — demande Rami : sélection en lot, comme avant
@@ -1721,7 +1721,29 @@ with tab_main:
                         with st.spinner("🤖 Suggestions IA en cours..."):
                             axe_c = validate_file_axe_c(axe_a, axe_b, pr, api_key=api_key)
 
+                    # AJOUTÉ — Axe C, détection de cohérence inter-champs (IA).
+                    # _exec_plan n'existe déjà que dans la branche "else" ci-dessus
+                    # (quand _early est vide) — on le recalcule ici sans condition
+                    # pour couvrir aussi le cas _early (coût mineur, à optimiser
+                    # plus tard en le stockant dans _early comme axe_a/axe_b).
+                    if "_exec_plan" not in dir():
+                        _exec_plan = get_execution_plan(
+                            profile_code = client_code,
+                            company_id   = cfg.get("company_id", ""),
+                            package_code = cfg.get("pkg_code", ""),
+                        )
+
+                    coherence_result = {"available": False, "by_sheet": {}}
+                    if api_key:
+                        with st.spinner("🧠 Détection de cohérence (IA)..."):
+                            coherence_result = validate_coherence_axe_c(pr, _exec_plan, api_key=api_key)
+
                     merged = merge_results(axe_a, axe_b, axe_c, parse_result=pr)
+
+                    for sn, anomalies in coherence_result.get("by_sheet", {}).items():
+                        merged["by_sheet"].setdefault(sn, []).extend(anomalies)
+                        merged["all_anomalies"].extend(anomalies)
+
                     st.session_state.merged_result = merged
                     st.session_state.axe_c_result  = axe_c
 

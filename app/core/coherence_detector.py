@@ -45,7 +45,7 @@ def detect_rare_pairs(df: pd.DataFrame, eligible_fields: list[str],
                 continue
             dominant_b = sub[sub[field_a] == val_a][field_b].mode().iloc[0]
             if dominant_b == val_b:
-                continue
+                continue  # la "valeur rare" est en fait la valeur majoritaire
             candidates.append({
                 "champ_a": field_a, "valeur_a": val_a,
                 "champ_b": field_b, "valeur_b": val_b,
