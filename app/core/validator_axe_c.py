@@ -240,3 +240,86 @@ def validate_file_axe_c(
                     result["low_confidence"] += 1
 
     return result
+
+
+def _build_coherence_prompt(candidates: list, table_label: str) -> str:
+    lines = []
+    for i, c in enumerate(candidates, 1):
+        lines.append(
+            f'{i}. Champ "{c["champ_a"]}"="{c["valeur_a"]}" (fréquent, {c["total_a"]} occurrences) '
+            f'associé à "{c["champ_b"]}"="{c["valeur_b"]}" seulement {c["occurrences"]} fois '
+            f'(habituellement "{c["valeur_b_habituelle"]}")'
+        )
+    return f"""Tu es un expert Microsoft Dynamics 365 Business Central.
+Voici des combinaisons de champs statistiquement rares dans un fichier "{table_label}" à importer.
+Pour chacune, indique si c'est probablement une VRAIE incohérence de saisie ou un cas légitime.
+
+Combinaisons :
+{chr(10).join(lines)}
+
+Réponds UNIQUEMENT avec un tableau JSON valide (sans markdown) :
+[{{"id": 1, "incoherence_probable": true, "confiance": 70, "justification": "...", "valeur_suggeree": ""}}]
+
+Règles :
+- incoherence_probable = false si le cas est plausible (ex. facturation export)
+- valeur_suggeree : uniquement si tu es raisonnablement confiant, sinon chaîne vide
+- Réponds avec exactement {len(candidates)} objets"""
+
+
+def enrich_coherence_with_ai(candidates: list, table_label: str, api_key: str) -> list:
+    if not candidates or not api_key:
+        return []
+    enriched = []
+    for batch_start in range(0, len(candidates), MAX_ANOMALIES_PER_BATCH):
+        batch = candidates[batch_start: batch_start + MAX_ANOMALIES_PER_BATCH]
+        response = _call_gemini(_build_coherence_prompt(batch, table_label), api_key)
+        if not response or not isinstance(response, list):
+            continue
+        for j, res in enumerate(response):
+            if j >= len(batch):
+                break
+            c = dict(batch[j])
+            c["incoherence_probable"] = bool(res.get("incoherence_probable", False))
+            c["confiance_ia"] = int(res.get("confiance", 0))
+            c["justification_ia"] = str(res.get("justification", "")).strip()
+            c["valeur_suggeree_ia"] = str(res.get("valeur_suggeree", "")).strip()
+            enriched.append(c)
+    return enriched
+
+
+def validate_coherence_axe_c(parse_result: dict, execution_plan, api_key: str,
+                              max_candidates_per_sheet: int = 15) -> dict:
+    from app.core.coherence_detector import get_eligible_fields, detect_rare_pairs, map_candidates_to_rows
+
+    result = {"available": bool(api_key), "by_sheet": {}, "total_flagged": 0}
+    if not api_key:
+        return result
+
+    for sheet_name in parse_result.get("data_tables", []):
+        df = parse_result.get("sheets", {}).get(sheet_name)
+        meta = parse_result.get("metadata", {}).get(sheet_name, {})
+        table_id = meta.get("table_id", "")
+        if df is None or df.empty or not table_id:
+            result["by_sheet"][sheet_name] = []
+            continue
+        try:
+            eligible = [f for f in get_eligible_fields(execution_plan, int(table_id)) if f in df.columns]
+        except (ValueError, TypeError):
+            eligible = []
+        if len(eligible) < 2:
+            result["by_sheet"][sheet_name] = []
+            continue
+
+        candidates = detect_rare_pairs(df, eligible)[:max_candidates_per_sheet]
+        if not candidates:
+            result["by_sheet"][sheet_name] = []
+            continue
+
+        enriched = enrich_coherence_with_ai(candidates, meta.get("label", sheet_name), api_key)
+        flagged = [c for c in enriched if c.get("incoherence_probable")]
+        key_field = execution_plan.get_key_field(int(table_id))
+        anomalies = map_candidates_to_rows(df, flagged, sheet_name, key_field)
+        result["by_sheet"][sheet_name] = anomalies
+        result["total_flagged"] += len(anomalies)
+
+    return result
