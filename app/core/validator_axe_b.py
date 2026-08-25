@@ -48,6 +48,34 @@ def validate_axe_b(
         table_id_int = 0
 
     if execution_plan and table_id_int:
+        # AJOUTÉ (26/08/2026) — FIX RÉEL : une table qui référence ELLE-MÊME
+        # (ex. Client → "N° client facturé", TableRelation = Customer, sur
+        # la fiche Customer elle-même — auto-facturation par défaut, valeur
+        # = son propre N° pour la quasi-totalité des lignes en pratique)
+        # ne pouvait JAMAIS se valider correctement : sim_context n'est
+        # peuplé pour une table qu'APRÈS l'avoir entièrement validée (pour
+        # respecter l'ordre de dépendance BC entre tables DIFFÉRENTES) —
+        # mais pendant qu'on valide CETTE table, son propre contexte est
+        # encore vide, donc une auto-référence légitime ne matche jamais
+        # rien. Diagnostic réel (26/08, fichier Client Aquachiara) : 1648
+        # lignes sur 1664 avaient ce champ strictement égal à leur propre
+        # N°, 0 vraie valeur différente — confirmé faux positif à 100%,
+        # pas une vraie erreur BC. Fix ciblé : si sim_context ne connaît pas
+        # encore CETTE table, on la pré-peuple avec ses propres clés
+        # primaires (1ère colonne) AVANT la boucle de validation — ne
+        # change rien à l'ordre inter-tables, comble seulement le cas
+        # d'auto-référence intra-table.
+        if sim_context is not None and not sim_context.has_table(table_id_int):
+            try:
+                _self_pks = [
+                    str(v).strip() for v in df.iloc[:, 0]
+                    if v is not None and str(v).strip() not in ("", "nan", "None")
+                ]
+                if _self_pks:
+                    sim_context.add(table_id_int, _self_pks)
+            except Exception:
+                pass
+
         # AJOUTÉ (07/08/2026) — PERFORMANCE : avant ce fix, chaque colonne
         # validée déclenchait son propre appel get_reference_values_by_table_id
         # l'un après l'autre (jusqu'à 15+ appels séquentiels sur un onglet
