@@ -166,6 +166,25 @@ class TablePlan:
     delete_before:    bool = False
 
 
+# AJOUTÉ (26/08/2026) — demande Rami, cas réel Client/Ville : même bug déjà
+# diagnostiqué et corrigé côté AL pour Fournisseur.Ville en juillet
+# (GetRelationFieldId(), page 50102) — packageFields résout mal le numéro
+# de champ d'une relation composite/filtrée (ex. TableRelation =
+# "Post Code".City WHERE(Code=FIELD(...))) et retombe sur le champ 1
+# ("Code", le code postal lui-même) au lieu du vrai champ ciblé ("City").
+# Le fix AL de juillet ne couvrait QUE Fournisseur (table 23, champ
+# "Ville") — Client (table 18) a son PROPRE champ "Ville" (numéro de champ
+# différent), jamais couvert par cette exception. Plutôt que de dépendre
+# d'une republication AL à chaque nouveau cas découvert, cette table
+# d'exceptions vit ici côté Python (déployée par un simple git push,
+# jamais bloquée par un oubli de republication d'extension côté BC) et
+# prime sur la résolution packageFields normale.
+_KNOWN_COMPOSITE_RELATION_FIXES: dict[tuple[int, str], int] = {
+    (23, "Ville"): 2,   # Fournisseur.Ville -> "Post Code".City (déjà connu, dupliqué ici en filet de sécurité)
+    (18, "Ville"): 2,   # Client.Ville -> "Post Code".City (nouveau, diagnostiqué 26/08 via comparaison erreurs BC réelles)
+}
+
+
 @dataclass
 class ExecutionPlan:
     package_code:     str
@@ -190,6 +209,8 @@ class ExecutionPlan:
         return self.fields_ref.get(table_id, {}).get(field_name, 0)
 
     def get_ref_field_id(self, table_id: int, field_name: str) -> int:
+        if (table_id, field_name) in _KNOWN_COMPOSITE_RELATION_FIXES:
+            return _KNOWN_COMPOSITE_RELATION_FIXES[(table_id, field_name)]
         return self.fields_ref_field.get(table_id, {}).get(field_name, 0)
 
     def get_field_def(self, table_id: int, field_name: str) -> FieldMeta | None:

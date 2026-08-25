@@ -124,6 +124,16 @@ def validate_axe_b(
             ref_tid = execution_plan.get_ref_table_id(table_id_int, col)
             if not ref_tid:
                 continue
+            # AJOUTÉ (26/08/2026) — demande Rami, cas réel Language Selection
+            # (2000000050) : plage d'ID >= 2000000000 réservée par Microsoft
+            # aux tables système/plateforme (System Application) — jamais des
+            # données métier qu'un client peut ou doit créer. Confirmé faux
+            # positif par comparaison avec les vraies erreurs BC (absent de
+            # l'export réel). Exclu ici, avant même la collecte réseau —
+            # aucune table de cette plage ne devrait jamais apparaître comme
+            # prérequis, quel que soit le fichier.
+            if ref_tid >= 2_000_000_000:
+                continue
             ref_fid = execution_plan.get_ref_field_id(table_id_int, col)
             _needed[(ref_tid, ref_fid)] = None
 
@@ -164,6 +174,11 @@ def validate_axe_b(
 
             ref_tid = execution_plan.get_ref_table_id(table_id_int, col)
             if not ref_tid:
+                continue
+            # AJOUTÉ (26/08/2026) — voir commentaire identique plus haut
+            # (collecte _needed) : tables système Microsoft (ID >= 2 Md),
+            # jamais un vrai prérequis client.
+            if ref_tid >= 2_000_000_000:
                 continue
 
             # refFieldId — PK de la table relation (nouveau)
