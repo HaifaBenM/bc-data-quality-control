@@ -1711,6 +1711,16 @@ with tab_main:
                         # Axe A/Axe B une seconde fois pour le même fichier/package.
                         axe_a = _early["axe_a"]
                         axe_b = _early["axe_b"]
+                        # CORRIGÉ (26/08/2026, jour J) — BUG RÉEL trouvé : _exec_plan
+                        # n'était JAMAIS défini dans cette branche (seulement dans le
+                        # else ci-dessous) — toute la détection de cohérence IA plus
+                        # bas (qui a besoin de _exec_plan) plantait silencieusement
+                        # (NameError) à chaque fois qu'un cache _early existait déjà —
+                        # c'est-à-dire À CHAQUE FOIS en pratique, puisque l'Étape 3
+                        # calcule toujours ce cache avant qu'on clique "Lancer
+                        # l'analyse qualité". Cause racine probable de "aucune
+                        # suggestion IA, jamais, même après tous les autres fixes".
+                        _exec_plan = _early["exec_plan"]
                     else:
                         with st.spinner("⏳ Analyse des contraintes..."):
                             _exec_plan = get_execution_plan(
