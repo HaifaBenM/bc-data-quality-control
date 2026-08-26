@@ -531,7 +531,28 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
     t1.metric("Anomalies", len(real_anomalies))
     t2.metric("🔴 Majeures", nb_maj)
     t3.metric("🟠 Mineures", nb_min)
-    t4.metric("🤖 IA suggère", nb_ia)
+    # RÉVISÉ (26/08/2026) — demande Rami : rendre "IA suggère" cliquable,
+    # avec le détail des modifications proposées par l'IA — st.metric ne
+    # supporte aucune interaction, remplacé par un st.popover (même
+    # composant déjà utilisé ailleurs dans l'app) qui affiche le chiffre
+    # comme libellé et le détail de chaque suggestion au clic.
+    with t4:
+        with st.popover(f"🤖 IA suggère : {nb_ia}", use_container_width=True):
+            _ia_rows = [a for a in real_anomalies if a.get("suggestion_ia")]
+            if not _ia_rows:
+                st.caption("Aucune suggestion IA sur cet onglet pour l'instant.")
+            for _a in _ia_rows[:30]:
+                st.markdown(
+                    f"**{_a.get('Champ', '')}** (ligne {_a.get('Ligne', '')}, "
+                    f"{_a.get('Identifiant métier', '')}) : "
+                    f"`{_a.get('Valeur', '')}` → **{_a.get('suggestion_ia', '')}** "
+                    f"({_a.get('confiance_ia', 0)}% de confiance)"
+                )
+                if _a.get("Message"):
+                    st.caption(_a["Message"])
+                st.markdown("---")
+            if len(_ia_rows) > 30:
+                st.caption(f"... et {len(_ia_rows) - 30} autre(s), non affichée(s) ici.")
 
     # AJOUTÉ (26/08/2026) — demande Rami : filtres façon Excel. Streamlit
     # n'a pas de filtre par en-tête de colonne comme Excel — ces menus
@@ -597,15 +618,42 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
                 st.session_state[f"_merged_select_override_{sn}"] = False
                 st.session_state[_editor_gen_key] += 1
                 st.rerun()
-
+        with csel4:
+            # AJOUTÉ (26/08/2026, 2e passe) — demande Rami : "copie d'une
+            # colonne à une autre comme dans Excel" — le glisser-déposer
+            # littéral n'existe pas dans ce composant ; équivalent
+            # fonctionnel : choisir une colonne source et copier sa valeur
+            # dans "Nouvelle valeur" pour toutes les lignes affichées, en
+            # un clic. Le vrai copiage se fait plus bas (après la lecture
+            # du tableau édité), ce sélecteur ne fait que retenir le choix.
+            _copy_src_options = ["Valeur source", "Correction suggérée"] + (
+                ["🤖 Suggestion IA"] if _has_ia_col else []
+            )
+            _cc1, _cc2 = st.columns([2, 1])
+            with _cc1:
+                _copy_src_col = st.selectbox(
+                    "Copier vers Nouvelle valeur", _copy_src_options,
+                    key=f"copy_src_{sn}", label_visibility="collapsed",
+                )
+            with _cc2:
+                _copy_col_clicked = st.button("📋 Copier", key=f"btn_copy_col_{sn}", use_container_width=True)
         _select_override = st.session_state.pop(f"_merged_select_override_{sn}", None)
         # AJOUTÉ (26/08/2026) — overrides posés par "🔁 Propager" ci-dessous
         # (valeur manuelle appliquée à toutes les lignes de même Champ +
         # Valeur source qui n'avaient pas encore de correction saisie).
         _propagate_overrides: dict = st.session_state.get(f"_propagate_overrides_{sn}", {})
+        # AJOUTÉ (26/08/2026, 2e passe) — demande Rami : "copie d'une colonne
+        # à une autre comme dans Excel". Le glisser-déposer littéral n'est
+        # pas possible dans ce composant — équivalent utile : copier en un
+        # clic toute une colonne source (Correction suggérée ou Suggestion
+        # IA) vers "Nouvelle valeur", pour toutes les lignes affichées.
+        # Overrides PAR LIGNE (Ligne, Champ) — priment sur le repli par
+        # défaut ET sur "Propager" (par valeur), car plus spécifiques.
+        _copy_col_overrides: dict = st.session_state.get(f"_copy_col_overrides_{sn}", {})
 
         def _row(a: dict) -> dict:
             _key = (a.get("Champ", ""), str(a.get("Valeur", "")).strip())
+            _row_key = (a.get("Ligne", ""), a.get("Champ", ""))
             _is_corrigible = a.get("Classification") in ("VALEUR_CORRIGIBLE", "SUGGESTION_IA")
             _suggestion = a.get("Correction suggérée", "")
             # RÉVISÉ (26/08/2026, jour J) — demande Rami : une anomalie
@@ -618,7 +666,11 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
             # bout comme les autres.
             if not _suggestion:
                 _suggestion = a.get("suggestion_ia", "")
-            _nouvelle = _propagate_overrides.get(_key, _suggestion)
+            # Priorité : copie ligne par ligne > propagation par valeur > repli par défaut.
+            if _row_key in _copy_col_overrides:
+                _nouvelle = _copy_col_overrides[_row_key]
+            else:
+                _nouvelle = _propagate_overrides.get(_key, _suggestion)
             _appliquer = (
                 _select_override if _select_override is not None
                 else (_is_corrigible and bool(str(_nouvelle).strip()))
@@ -699,6 +751,28 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
                 if _propagated:
                     st.toast(f"{_propagated} ligne(s) mise(s) à jour avec la même correction.")
                 st.rerun()
+
+        # AJOUTÉ (26/08/2026, 2e passe) — exécution réelle de la copie
+        # colonne à colonne (choix fait plus haut, dans csel4). Copie la
+        # colonne source choisie vers "Nouvelle valeur", ligne par ligne,
+        # pour toutes les lignes actuellement affichées (respecte les
+        # filtres) — équivalent au glisser-déposer Excel entre colonnes.
+        if _copy_col_clicked:
+            _new_row_overrides = dict(_copy_col_overrides)
+            _copied = 0
+            for _, row in edited.iterrows():
+                _src_val = str(row.get(_copy_src_col, "")).strip()
+                if not _src_val:
+                    continue
+                _rk = (row["Ligne"], row["Champ"])
+                if str(row.get("Nouvelle valeur", "")).strip() != _src_val:
+                    _copied += 1
+                _new_row_overrides[_rk] = _src_val
+            st.session_state[f"_copy_col_overrides_{sn}"] = _new_row_overrides
+            st.session_state[_editor_gen_key] += 1
+            if _copied:
+                st.toast(f"« {_copy_src_col} » copiée vers « Nouvelle valeur » sur {_copied} ligne(s).")
+            st.rerun()
 
         cgen1, cgen2, cgen3 = st.columns([2, 2, 4])
         with cgen1:
