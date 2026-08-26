@@ -21,9 +21,16 @@ import streamlit as st
 # renouvellement rapide cette année : si ce modèle devait à son tour être
 # retiré, LAST_GEMINI_ERROR affichera désormais l'erreur réelle au lieu
 # de disparaître silencieusement comme avant.
+# RÉVISÉ (26/08/2026, jour J, 3e passe) — gemini-2.5-flash retiré à son tour
+# ("no longer available to new users") — confirmé par l'erreur HTTP 404
+# elle-même, qui indique EXPLICITEMENT le modèle de remplacement recommandé
+# par Google : gemini-3.6-flash. Plus fiable qu'une supposition : c'est
+# l'API elle-même qui le dit. Diagnostic LAST_GEMINI_ERROR (voir plus haut)
+# ayant enfin permis de voir le message d'erreur réel au lieu d'un échec
+# silencieux comme toute la semaine.
 GEMINI_URL = (
     "https://generativelanguage.googleapis.com/v1beta/"
-    "models/gemini-2.5-flash:generateContent"
+    "models/gemini-3.6-flash:generateContent"
 )
 AUTO_CORRECT_THRESHOLD = 90  # % de confiance minimum pour auto-correction
 MAX_ANOMALIES_PER_BATCH = 15 # Nb max d'anomalies par appel API
