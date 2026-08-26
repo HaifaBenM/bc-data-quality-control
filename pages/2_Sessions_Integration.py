@@ -816,7 +816,7 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
                                     _guid_cols_by_sheet[_si["sheet_name"]] = _guid_names
                         except Exception:
                             _guid_cols_by_sheet = None
-                    generated_bytes = clear_id_reference_columns(generated_bytes, guid_columns_by_sheet=_guid_cols_by_sheet)
+                    generated_bytes = clear_id_reference_columns(generated_bytes, guid_column_names=_guid_cols_by_sheet)
                     st.session_state["generated_file_bytes"] = generated_bytes
                     st.session_state["generated_file_name"] = f"CORRIGE_{cfg.get('file_name', 'fichier.xlsx')}"
                     st.success(f"✅ Fichier généré — {len(corrections)} correction(s) appliquée(s).")
