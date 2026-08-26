@@ -295,7 +295,7 @@ def validate_coherence_axe_c(parse_result: dict, execution_plan, api_key: str,
     if not api_key:
         return result
 
-    for sheet_name in parse_result.get("data_tables", []) + parse_result.get("ref_tables", []):
+    for sheet_name in parse_result.get("data_tables", []):
         df = parse_result.get("sheets", {}).get(sheet_name)
         meta = parse_result.get("metadata", {}).get(sheet_name, {})
         table_id = meta.get("table_id", "")
@@ -310,7 +310,18 @@ def validate_coherence_axe_c(parse_result: dict, execution_plan, api_key: str,
             result["by_sheet"][sheet_name] = []
             continue
 
-        candidates = detect_rare_pairs(df, eligible)[:max_candidates_per_sheet]
+        # RÉVISÉ (26/08/2026, jour J) — demande Rami, diagnostic confirmé
+        # dans la conversation de calibration Axe C (25-26/08) : le seuil
+        # par défaut (max_pair_ratio=0.08) est calibré pour des fichiers
+        # volumineux (centaines de lignes) — sur un petit fichier de
+        # démo (~18 lignes), un cas clairement suspect (2 occurrences sur
+        # 18, ratio 0.083) rate le seuil DE JUSTESSE, mécaniquement, sans
+        # rapport avec la pertinence réelle du cas. Relevé à 0.12 pour
+        # rester fiable aussi bien sur un petit fichier de démo que sur un
+        # gros fichier réel (candidats restent peu nombreux et pertinents
+        # aux deux échelles, testé sur ce fichier précis : 6 candidats à
+        # 0.12, tous plausibles).
+        candidates = detect_rare_pairs(df, eligible, max_pair_ratio=0.12)[:max_candidates_per_sheet]
         if not candidates:
             result["by_sheet"][sheet_name] = []
             continue
