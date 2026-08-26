@@ -1752,6 +1752,15 @@ with tab_main:
                                     continue
                                 merged["all_anomalies"].extend(_coh_anomalies)
                                 merged["by_sheet"].setdefault(_sn, []).extend(_coh_anomalies)
+                            # AJOUTÉ (26/08/2026, jour J) — diagnostic : affiche la
+                            # vraie erreur Gemini (jamais visible avant aujourd'hui)
+                            # si aucune suggestion n'a été trouvée du tout, pour
+                            # enfin distinguer "rien de suspect dans ce fichier" de
+                            # "l'appel IA a échoué silencieusement".
+                            if _coherence.get("total_flagged", 0) == 0 and is_consultant():
+                                from app.core.validator_axe_c import LAST_GEMINI_ERROR
+                                if LAST_GEMINI_ERROR:
+                                    st.warning(f"⚠️ Détection de cohérence : dernier appel IA en échec — {LAST_GEMINI_ERROR}")
                         except Exception as _coh_exc:
                             if is_consultant():
                                 st.warning(f"⚠️ Détection de cohérence indisponible : {_coh_exc}")

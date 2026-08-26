@@ -10,9 +10,20 @@ import streamlit as st
 
 
 # ── Configuration ─────────────────────────────────────────────────────────────
+# RÉVISÉ (26/08/2026, jour J) — FIX CRITIQUE, cause racine de tout un
+# historique de "0 suggestion IA" toute la semaine, jamais visible faute
+# de remontée d'erreur (voir LAST_GEMINI_ERROR ci-dessous, ajouté pour ce
+# diagnostic) : gemini-1.5-flash est DÉFINITIVEMENT retiré par Google —
+# toute requête vers ce modèle renvoie une erreur 404, silencieusement
+# avalée par _call_gemini jusqu'à aujourd'hui. Remplacé par gemini-2.5-flash
+# (stable, disponible en production à ce jour, date de retrait annoncée
+# mi-octobre 2026 — largement après la démo). Écosystème Gemini en
+# renouvellement rapide cette année : si ce modèle devait à son tour être
+# retiré, LAST_GEMINI_ERROR affichera désormais l'erreur réelle au lieu
+# de disparaître silencieusement comme avant.
 GEMINI_URL = (
     "https://generativelanguage.googleapis.com/v1beta/"
-    "models/gemini-1.5-flash:generateContent"
+    "models/gemini-2.5-flash:generateContent"
 )
 AUTO_CORRECT_THRESHOLD = 90  # % de confiance minimum pour auto-correction
 MAX_ANOMALIES_PER_BATCH = 15 # Nb max d'anomalies par appel API
@@ -34,8 +45,19 @@ def is_gemini_available() -> bool:
     return bool(get_gemini_api_key())
 
 
+# AJOUTÉ (26/08/2026, jour J) — diagnostic : aucune suggestion IA n'est
+# jamais remontée depuis le début de la semaine, sans le moindre message
+# d'erreur — _call_gemini avalait systématiquement l'échec (mauvaise clé,
+# quota, modèle retiré, erreur réseau...). Ce module-level ne change AUCUN
+# comportement existant (le retour reste None en cas d'échec, identique
+# partout ailleurs) — il garde juste une trace de la dernière erreur réelle,
+# consultable côté page pour enfin voir ce qui se passe.
+LAST_GEMINI_ERROR: str = ""
+
+
 def _call_gemini(prompt: str, api_key: str) -> dict | None:
     """Appel direct à l'API Gemini. Retourne le JSON parsé ou None."""
+    global LAST_GEMINI_ERROR
     try:
         resp = requests.post(
             f"{GEMINI_URL}?key={api_key}",
@@ -51,6 +73,7 @@ def _call_gemini(prompt: str, api_key: str) -> dict | None:
             timeout=30,
         )
         if resp.status_code != 200:
+            LAST_GEMINI_ERROR = f"HTTP {resp.status_code} : {resp.text[:500]}"
             return None
 
         data    = resp.json()
@@ -61,15 +84,18 @@ def _call_gemini(prompt: str, api_key: str) -> dict | None:
                 .get("text", "")
         )
         if not content:
+            LAST_GEMINI_ERROR = f"Réponse Gemini sans contenu exploitable : {str(data)[:500]}"
             return None
 
         # Nettoyer les balises markdown si présentes
         clean = content.strip()
         for tag in ["```json", "```"]:
             clean = clean.replace(tag, "")
+        LAST_GEMINI_ERROR = ""
         return json.loads(clean.strip())
 
-    except Exception:
+    except Exception as e:
+        LAST_GEMINI_ERROR = f"{type(e).__name__} : {e}"
         return None
 
 
