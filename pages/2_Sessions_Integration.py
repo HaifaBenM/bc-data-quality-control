@@ -651,6 +651,17 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
         # défaut ET sur "Propager" (par valeur), car plus spécifiques.
         _copy_col_overrides: dict = st.session_state.get(f"_copy_col_overrides_{sn}", {})
 
+        # AJOUTÉ (26/08/2026, 2e passe) — affichage des messages persistés
+        # (Propager / Copier) posés lors du run précédent, juste avant leur
+        # propre st.rerun() — voir commentaire sur le piège "message avant
+        # rerun jamais visible" plus bas.
+        _propagate_fb = st.session_state.pop(f"_propagate_feedback_{sn}", None)
+        if _propagate_fb:
+            (st.success if _propagate_fb[0] == "success" else st.info)(_propagate_fb[1])
+        _copy_fb = st.session_state.pop(f"_copy_col_feedback_{sn}", None)
+        if _copy_fb:
+            (st.success if _copy_fb[0] == "success" else st.info)(_copy_fb[1])
+
         def _row(a: dict) -> dict:
             _key = (a.get("Champ", ""), str(a.get("Valeur", "")).strip())
             _row_key = (a.get("Ligne", ""), a.get("Champ", ""))
@@ -748,8 +759,16 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
                         _propagated += 1
                 st.session_state[f"_propagate_overrides_{sn}"] = _new_overrides
                 st.session_state[_editor_gen_key] += 1
+                # RÉVISÉ (26/08/2026, 2e passe) — bug trouvé : st.success/
+                # st.info juste avant st.rerun() ne s'affichaient jamais (le
+                # rerun efface le rendu en cours avant qu'il atteigne
+                # l'écran — même piège déjà rencontré cette semaine).
+                # Message persisté en session_state, affiché au prochain
+                # rendu à la place.
                 if _propagated:
-                    st.toast(f"{_propagated} ligne(s) mise(s) à jour avec la même correction.")
+                    st.session_state[f"_propagate_feedback_{sn}"] = ("success", f"✅ {_propagated} ligne(s) mise(s) à jour avec la même correction.")
+                else:
+                    st.session_state[f"_propagate_feedback_{sn}"] = ("info", "ℹ️ Rien à propager — soit aucune autre ligne ne partage la même valeur source dans ce champ, soit toutes l'ont déjà.")
                 st.rerun()
 
         # AJOUTÉ (26/08/2026, 2e passe) — exécution réelle de la copie
@@ -770,8 +789,12 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
                 _new_row_overrides[_rk] = _src_val
             st.session_state[f"_copy_col_overrides_{sn}"] = _new_row_overrides
             st.session_state[_editor_gen_key] += 1
+            # RÉVISÉ (26/08/2026, 2e passe) — même fix que Propager :
+            # message persisté, jamais affiché juste avant un st.rerun().
             if _copied:
-                st.toast(f"« {_copy_src_col} » copiée vers « Nouvelle valeur » sur {_copied} ligne(s).")
+                st.session_state[f"_copy_col_feedback_{sn}"] = ("success", f"✅ « {_copy_src_col} » copiée vers « Nouvelle valeur » sur {_copied} ligne(s).")
+            else:
+                st.session_state[f"_copy_col_feedback_{sn}"] = ("info", "ℹ️ Rien à copier — toutes les lignes affichées ont déjà cette valeur, ou la colonne source est vide partout.")
             st.rerun()
 
         cgen1, cgen2, cgen3 = st.columns([2, 2, 4])
