@@ -133,6 +133,22 @@ def validate_axe_a(
         resolve_key_field_in_columns(int(table_id), df.columns) or "N°"
         if execution_plan and table_id else "N°"
     )
+    # RÉVISÉ (26/08/2026, 2e passe) — demande Rami : rendre la détection de
+    # clé composite VRAIMENT générique, sans liste de tables à maintenir à
+    # la main (source de régressions si une nouvelle table composite
+    # apparaît sans qu'on l'ait rencontrée avant). Principe réel des
+    # exports BC Config Package : les colonnes de la clé primaire sont
+    # TOUJOURS placées en tête de l'onglet, dans l'ordre de la clé. Donc :
+    # si key_field n'est PAS la toute première colonne du fichier, la vraie
+    # clé unique est (1ère colonne, key_field) — sinon (cas le plus
+    # courant, ex. Devise/Article où key_field EST déjà la 1ère colonne),
+    # rien ne change par rapport à avant. Validé sur les 2 cas connus
+    # (Unité article, Variante article : "N° article" 1ère colonne, "Code"
+    # 2e) sans qu'aucun des deux table_id n'ait besoin d'être codé en dur.
+    _first_col = df.columns[0] if len(df.columns) > 0 else None
+    _composite_parent_field = (
+        _first_col if (_first_col and _first_col != key_field) else None
+    )
 
     has_plan   = (
         execution_plan is not None
@@ -328,15 +344,24 @@ def validate_axe_a(
         if key_field in df.columns:
             key_val = _to_str(row.get(key_field))
             if key_val:
-                if key_val in seen_keys:
+                # AJOUTÉ (26/08/2026) — clé composite (voir plus haut) :
+                # combine avec la colonne parente pour former la vraie clé
+                # unique, au lieu de comparer "Code" seul (faisait remonter
+                # ~400 faux doublons sur Unité article : plusieurs articles
+                # différents ont chacun légitimement une unité "PCS").
+                _dedup_key = (
+                    f"{_to_str(row.get(_composite_parent_field))}|{key_val}"
+                    if _composite_parent_field else key_val
+                )
+                if _dedup_key in seen_keys:
                     anomalies.append(_anomaly(
                         key_value=key_val,
                         line=line_num, field=key_field, value=key_val, sheet=sheet_name,
                         error_type="Doublon (clé primaire)", severity="Majeure",
-                        message=f"'{key_field}' = '{key_val}' dupliqué. Déjà présent à la ligne {seen_keys[key_val]}.",
+                        message=f"'{key_field}' = '{key_val}' dupliqué. Déjà présent à la ligne {seen_keys[_dedup_key]}.",
                     ))
                 else:
-                    seen_keys[key_val] = line_num
+                    seen_keys[_dedup_key] = line_num
 
     return anomalies
 
