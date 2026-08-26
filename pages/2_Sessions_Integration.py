@@ -840,23 +840,20 @@ def _quick_save_session(cfg: dict, status: str = "Nouvelle") -> None:
     else:
         ok, res = save_session(_payload)
     if ok:
+        # RÉVISÉ (26/08/2026) — demande Rami : "pourquoi c'est moi qui dois
+        # supprimer manuellement" — la vraie cause n'était pas l'ancienneté
+        # des sessions, mais le fait qu'un simple CHECKPOINT (Étape 2/3, où
+        # on ne sait pas encore si la session sera racine ou fille — ce
+        # choix ne se fait qu'à l'Étape 4) alimentait déjà la mémoire pour
+        # TOUS les onglets du fichier. Un fichier Stock a naturellement un
+        # onglet "27 Article" (son sujet principal, pas un prérequis pour
+        # quelqu'un d'autre) — le déclarer "en attente d'intégration"
+        # n'avait jamais de sens ici. Un checkpoint ne contribue plus du
+        # tout à la mémoire inter-sessions ; seule la sauvegarde complète
+        # (Étape 4, qui connaît le rôle racine/fille et la table précise)
+        # le fait désormais, et seulement pour la table concernée — voir
+        # plus bas dans ce fichier, bloc "💾 Sauvegarder la session".
         _mem_warning = None
-        try:
-            if original_bytes:
-                from app.core.bc_excel_processor import extract_key_values_by_table
-                from app.db.metadata_db import save_pending_codes
-                _codes_by_table = extract_key_values_by_table(original_bytes)
-                if _codes_by_table:
-                    _mem_ok, _mem_err = save_pending_codes(
-                        session_id=res,
-                        profile_code=cfg.get("client_code", ""),
-                        company_id=cfg.get("company_id", ""),
-                        codes_by_table=_codes_by_table,
-                    )
-                    if not _mem_ok:
-                        _mem_warning = f"Mémoire inter-sessions non enregistrée : {_mem_err}"
-        except Exception as _mem_exc:
-            _mem_warning = f"Mémoire inter-sessions non enregistrée : {_mem_exc}"
 
         _saved_name = cfg.get("session_name", "")
         reset_session()
@@ -1995,29 +1992,47 @@ with tab_main:
                         # "Code"/"N°" introuvable dans le fichier) — jamais
                         # signalé avant, aucune trace nulle part.
                         _mem_warning = None
-                        try:
-                            _bytes_for_memory = generated_bytes or original_bytes
-                            if _bytes_for_memory:
-                                from app.core.bc_excel_processor import extract_key_values_by_table
-                                from app.db.metadata_db import save_pending_codes
-                                _codes_by_table = extract_key_values_by_table(_bytes_for_memory)
-                                if _codes_by_table:
-                                    _mem_ok, _mem_err = save_pending_codes(
-                                        session_id=res,
-                                        profile_code=cfg["client_code"],
-                                        company_id=cfg.get("company_id", ""),
-                                        codes_by_table=_codes_by_table,
-                                    )
-                                    if not _mem_ok:
-                                        _mem_warning = f"Mémoire inter-sessions non enregistrée : {_mem_err}"
-                                else:
-                                    _mem_warning = (
-                                        "Mémoire inter-sessions : aucun code extrait de ce fichier "
-                                        "(colonne clé \"Code\" ou \"N°\" introuvable sur un onglet, "
-                                        "ou fichier sans lignes de données)."
-                                    )
-                        except Exception as _mem_exc:
-                            _mem_warning = f"Mémoire inter-sessions non enregistrée : {_mem_exc}"
+                        # RÉVISÉ (26/08/2026) — demande Rami : la mémoire ne
+                        # doit s'appliquer QUE quand cette session résout
+                        # spécifiquement UNE table prérequis pour d'autres
+                        # (session fille, table_id connu) — jamais pour une
+                        # session racine (le fichier entier, ex. tout le
+                        # Stock), dont les onglets (Article inclus) ne sont
+                        # pas des "prérequis en attente" mais le sujet même
+                        # de la session. Sans ça, chaque sauvegarde
+                        # déclarait TOUS ses onglets comme prêts, y compris
+                        # sa propre table principale — cause réelle
+                        # d'Article validé à tort en mémoire. Filtré aussi
+                        # à la SEULE table concernée (pas tous les onglets
+                        # du fichier), même pour une fille.
+                        _is_child_session = (_node_kind == "Fille (une table de la roadmap)" and _sel_table_id)
+                        if _is_child_session:
+                            try:
+                                _bytes_for_memory = generated_bytes or original_bytes
+                                if _bytes_for_memory:
+                                    from app.core.bc_excel_processor import extract_key_values_by_table
+                                    from app.db.metadata_db import save_pending_codes
+                                    _codes_by_table_all = extract_key_values_by_table(_bytes_for_memory)
+                                    _codes_by_table = {
+                                        k: v for k, v in _codes_by_table_all.items() if k == _sel_table_id
+                                    }
+                                    if _codes_by_table:
+                                        _mem_ok, _mem_err = save_pending_codes(
+                                            session_id=res,
+                                            profile_code=cfg["client_code"],
+                                            company_id=cfg.get("company_id", ""),
+                                            codes_by_table=_codes_by_table,
+                                        )
+                                        if not _mem_ok:
+                                            _mem_warning = f"Mémoire inter-sessions non enregistrée : {_mem_err}"
+                                    else:
+                                        _mem_warning = (
+                                            "Mémoire inter-sessions : aucun code extrait pour la table "
+                                            f"{_sel_table_id} (colonne clé \"Code\"/\"N°\" introuvable, "
+                                            "ou onglet correspondant absent du fichier)."
+                                        )
+                            except Exception as _mem_exc:
+                                _mem_warning = f"Mémoire inter-sessions non enregistrée : {_mem_exc}"
                         # RÉVISÉ (23/08/2026) — demande Rami : repartir
                         # directement sur un formulaire neuf après la
                         # sauvegarde, plutôt que de rester sur l'Étape 4
