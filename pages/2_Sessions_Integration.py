@@ -567,14 +567,14 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
         if _editor_gen_key not in st.session_state:
             st.session_state[_editor_gen_key] = 0
 
-        csel1, csel2, csel3, csel4 = st.columns([1.3, 1.3, 1.6, 3.8])
+        csel1, csel2, csel3, csel4 = st.columns([1.5, 1.7, 1.3, 3.5])
         with csel1:
-            if st.button("✅ Tout sélectionner", key=f"btn_select_all_{sn}", use_container_width=True):
+            if st.button("✅ Sélectionner", key=f"btn_select_all_{sn}", use_container_width=True):
                 st.session_state[f"_merged_select_override_{sn}"] = True
                 st.session_state[_editor_gen_key] += 1
                 st.rerun()
         with csel2:
-            if st.button("⬜ Tout désélectionner", key=f"btn_deselect_all_{sn}", use_container_width=True):
+            if st.button("⬜ Désélectionner", key=f"btn_deselect_all_{sn}", use_container_width=True):
                 st.session_state[f"_merged_select_override_{sn}"] = False
                 st.session_state[_editor_gen_key] += 1
                 st.rerun()
