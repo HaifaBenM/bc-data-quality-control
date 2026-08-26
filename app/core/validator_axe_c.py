@@ -295,7 +295,7 @@ def validate_coherence_axe_c(parse_result: dict, execution_plan, api_key: str,
     if not api_key:
         return result
 
-    for sheet_name in parse_result.get("data_tables", []):
+    for sheet_name in parse_result.get("data_tables", []) + parse_result.get("ref_tables", []):
         df = parse_result.get("sheets", {}).get(sheet_name)
         meta = parse_result.get("metadata", {}).get(sheet_name, {})
         table_id = meta.get("table_id", "")
