@@ -1765,34 +1765,43 @@ with tab_main:
                     # de plein droit, sans toucher à merge_results() (déjà
                     # fragile un jour de démo, on ne touche pas à ce qui
                     # fonctionne).
+                    if not api_key:
+                        st.warning("⚠️ Détection de cohérence IA sautée : clé API vide à ce point précis du code (get_gemini_api_key() a renvoyé une valeur vide).")
                     if api_key:
                         try:
                             # AJOUTÉ (26/08/2026, jour J) — diagnostic : montre
                             # précisément où la chaîne s'arrête (champs éligibles
                             # trouvés ? candidats statistiques avant l'IA ?) au
                             # lieu de deviner encore à l'aveugle.
-                            if is_consultant():
-                                from app.core.coherence_detector import get_eligible_fields, detect_rare_pairs
-                                _diag_lines = []
-                                for _sn_diag in pr.get("data_tables", []):
-                                    _df_diag = pr.get("sheets", {}).get(_sn_diag)
-                                    _meta_diag = pr.get("metadata", {}).get(_sn_diag, {})
-                                    _tid_diag = _meta_diag.get("table_id", "")
-                                    if _df_diag is None or _df_diag.empty or not _tid_diag:
-                                        continue
-                                    try:
-                                        _elig = [f for f in get_eligible_fields(_exec_plan, int(_tid_diag)) if f in _df_diag.columns]
-                                    except (ValueError, TypeError):
-                                        _elig = []
-                                    _cands = detect_rare_pairs(_df_diag, _elig, max_pair_ratio=0.12) if len(_elig) >= 2 else []
-                                    _diag_lines.append(
-                                        f"{_sn_diag} (table {_tid_diag}) : {len(_elig)} champ(s) éligible(s) {_elig[:6]}, "
-                                        f"{len(_cands)} candidat(s) avant IA"
-                                    )
-                                if _diag_lines:
-                                    with st.expander("🔬 Diagnostic cohérence IA (consultant)"):
-                                        for _l in _diag_lines:
-                                            st.caption(_l)
+                            # RÉVISÉ (26/08/2026, 2e passe) — retiré la condition
+                            # is_consultant() : aucune trace visible ne remontait
+                            # plus du tout, sans savoir si c'était parce que rien
+                            # n'y était détecté, ou parce que le rôle actif
+                            # masquait tout diagnostic. Affiché systématiquement
+                            # tant qu'on n'a pas confirmé le vrai fix.
+                            from app.core.coherence_detector import get_eligible_fields, detect_rare_pairs
+                            _diag_lines = []
+                            for _sn_diag in pr.get("data_tables", []):
+                                _df_diag = pr.get("sheets", {}).get(_sn_diag)
+                                _meta_diag = pr.get("metadata", {}).get(_sn_diag, {})
+                                _tid_diag = _meta_diag.get("table_id", "")
+                                if _df_diag is None or _df_diag.empty or not _tid_diag:
+                                    continue
+                                try:
+                                    _elig = [f for f in get_eligible_fields(_exec_plan, int(_tid_diag)) if f in _df_diag.columns]
+                                except (ValueError, TypeError):
+                                    _elig = []
+                                _cands = detect_rare_pairs(_df_diag, _elig, max_pair_ratio=0.12) if len(_elig) >= 2 else []
+                                _diag_lines.append(
+                                    f"{_sn_diag} (table {_tid_diag}) : {len(_elig)} champ(s) éligible(s) {_elig[:6]}, "
+                                    f"{len(_cands)} candidat(s) avant IA"
+                                )
+                            if _diag_lines:
+                                with st.expander("🔬 Diagnostic cohérence IA", expanded=True):
+                                    for _l in _diag_lines:
+                                        st.caption(_l)
+                            else:
+                                st.warning("⚠️ Diagnostic cohérence IA : aucun onglet de données exploitable trouvé (pr.get('data_tables') vide ou métadonnées manquantes).")
                             with st.spinner("🧠 Détection des incohérences en cours..."):
                                 _coherence = validate_coherence_axe_c(pr, _exec_plan, api_key)
                             for _sn, _coh_anomalies in _coherence.get("by_sheet", {}).items():
@@ -1805,13 +1814,15 @@ with tab_main:
                             # si aucune suggestion n'a été trouvée du tout, pour
                             # enfin distinguer "rien de suspect dans ce fichier" de
                             # "l'appel IA a échoué silencieusement".
-                            if _coherence.get("total_flagged", 0) == 0 and is_consultant():
+                            st.caption(f"🔬 Total incohérences détectées par l'IA : {_coherence.get('total_flagged', 0)}")
+                            if _coherence.get("total_flagged", 0) == 0:
                                 from app.core.validator_axe_c import LAST_GEMINI_ERROR
                                 if LAST_GEMINI_ERROR:
                                     st.warning(f"⚠️ Détection de cohérence : dernier appel IA en échec — {LAST_GEMINI_ERROR}")
+                                else:
+                                    st.info("ℹ️ Aucune erreur IA — l'appel a réussi mais n'a rien trouvé de suspect (ou aucun candidat statistique n'a été soumis à l'IA).")
                         except Exception as _coh_exc:
-                            if is_consultant():
-                                st.warning(f"⚠️ Détection de cohérence indisponible : {_coh_exc}")
+                            st.warning(f"⚠️ Détection de cohérence indisponible : {_coh_exc}")
 
                     st.session_state.merged_result = merged
                     st.session_state.axe_c_result  = axe_c
