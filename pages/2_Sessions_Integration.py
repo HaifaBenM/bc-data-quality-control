@@ -338,6 +338,18 @@ def merge_results(axe_a: dict, axe_b: dict, axe_c: dict, parse_result: dict = No
                 # référence ont déjà leur propre classification explicite
                 # (VALEUR_CORRIGIBLE ou PREALABLE_BC_REQUIS) — setdefault ne
                 # l'écrase pas.
+                #
+                # RÉVISÉ (26/08/2026, jour J) — demande Rami : les anomalies
+                # "Trigger OnInsert" (trigger_simulator.py — ex. "Groupe
+                # compta. produit doit exister") n'ont jamais eu de
+                # classification propre et retombaient à tort sur
+                # VALEUR_CORRIGIBLE — alors que leur nature est identique
+                # aux Prérequis BC requis : le problème n'est pas une valeur
+                # à corriger DANS le fichier, c'est une donnée qui doit
+                # exister CÔTÉ BC (groupe comptable, ici). Reclassé en
+                # conséquence, avant le setdefault générique.
+                if a.get("Type d'anomalie") == "Trigger OnInsert":
+                    clean.setdefault("Classification", "PREALABLE_BC_REQUIS")
                 clean.setdefault("Classification", "VALEUR_CORRIGIBLE")
                 key   = (sn, a.get("Ligne", 0), a.get("Champ", ""))
                 if key in ai_map:
@@ -1745,6 +1757,32 @@ with tab_main:
                     # fonctionne).
                     if api_key:
                         try:
+                            # AJOUTÉ (26/08/2026, jour J) — diagnostic : montre
+                            # précisément où la chaîne s'arrête (champs éligibles
+                            # trouvés ? candidats statistiques avant l'IA ?) au
+                            # lieu de deviner encore à l'aveugle.
+                            if is_consultant():
+                                from app.core.coherence_detector import get_eligible_fields, detect_rare_pairs
+                                _diag_lines = []
+                                for _sn_diag in pr.get("data_tables", []):
+                                    _df_diag = pr.get("sheets", {}).get(_sn_diag)
+                                    _meta_diag = pr.get("metadata", {}).get(_sn_diag, {})
+                                    _tid_diag = _meta_diag.get("table_id", "")
+                                    if _df_diag is None or _df_diag.empty or not _tid_diag:
+                                        continue
+                                    try:
+                                        _elig = [f for f in get_eligible_fields(_exec_plan, int(_tid_diag)) if f in _df_diag.columns]
+                                    except (ValueError, TypeError):
+                                        _elig = []
+                                    _cands = detect_rare_pairs(_df_diag, _elig, max_pair_ratio=0.12) if len(_elig) >= 2 else []
+                                    _diag_lines.append(
+                                        f"{_sn_diag} (table {_tid_diag}) : {len(_elig)} champ(s) éligible(s) {_elig[:6]}, "
+                                        f"{len(_cands)} candidat(s) avant IA"
+                                    )
+                                if _diag_lines:
+                                    with st.expander("🔬 Diagnostic cohérence IA (consultant)"):
+                                        for _l in _diag_lines:
+                                            st.caption(_l)
                             with st.spinner("🧠 Détection des incohérences en cours..."):
                                 _coherence = validate_coherence_axe_c(pr, _exec_plan, api_key)
                             for _sn, _coh_anomalies in _coherence.get("by_sheet", {}).items():
