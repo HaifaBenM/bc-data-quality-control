@@ -606,8 +606,18 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
 
         def _row(a: dict) -> dict:
             _key = (a.get("Champ", ""), str(a.get("Valeur", "")).strip())
-            _is_corrigible = a.get("Classification") == "VALEUR_CORRIGIBLE"
+            _is_corrigible = a.get("Classification") in ("VALEUR_CORRIGIBLE", "SUGGESTION_IA")
             _suggestion = a.get("Correction suggérée", "")
+            # RÉVISÉ (26/08/2026, jour J) — demande Rami : une anomalie
+            # d'incohérence IA n'a pas de "Correction suggérée" classique
+            # (désormais dans sa propre colonne "🤖 Suggestion IA", voir
+            # coherence_detector.py) — sans repli, "Nouvelle valeur"
+            # resterait vide et impossible à appliquer directement. Repli
+            # sur suggestion_ia uniquement quand Correction suggérée est
+            # vide, pour que la ligne reste éditable/applicable de bout en
+            # bout comme les autres.
+            if not _suggestion:
+                _suggestion = a.get("suggestion_ia", "")
             _nouvelle = _propagate_overrides.get(_key, _suggestion)
             _appliquer = (
                 _select_override if _select_override is not None
@@ -624,7 +634,7 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
                 "Classification":     _cls_label.get(a.get("Classification", ""), ""),
                 "Message":            a.get("Message", ""),
                 "Valeur source":      a.get("Valeur", ""),
-                "Correction suggérée": _suggestion,
+                "Correction suggérée": a.get("Correction suggérée", ""),
                 "Nouvelle valeur":    _nouvelle,
             }
             if _has_ia_col:

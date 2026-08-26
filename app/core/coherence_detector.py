@@ -77,7 +77,16 @@ def map_candidates_to_rows(df: pd.DataFrame, flagged: list[dict],
                     f"mais avec {c['champ_b']}='{c['valeur_b']}' seulement {c['occurrences']} fois "
                     f"(habituellement '{c['valeur_b_habituelle']}'). {c.get('justification_ia', '')}"
                 ),
-                "Correction suggérée": f"🧠 {suggestion} ({c.get('confiance_ia', 0)}%)" if suggestion else "",
+                # RÉVISÉ (26/08/2026, jour J) — demande Rami : garder la
+                # suggestion IA dans sa PROPRE colonne ("🤖 Suggestion IA",
+                # déjà prévue dans le tableau fusionné — voir _has_ia_col),
+                # au lieu de la mélanger dans "Correction suggérée" (qui
+                # reste réservée à la correspondance par similarité de texte
+                # du classifieur, un mécanisme différent). Les deux colonnes
+                # cohabitent maintenant sans se marcher dessus.
+                "Correction suggérée": "",
+                "suggestion_ia": suggestion,
+                "confiance_ia":  c.get("confiance_ia", 0),
                 "Classification": "SUGGESTION_IA", "Axe": "C",
             })
     return anomalies
