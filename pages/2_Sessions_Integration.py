@@ -1903,12 +1903,9 @@ with tab_main:
                                     f"{_sn_diag} (table {_tid_diag}) : {len(_elig)} champ(s) éligible(s) {_elig[:6]}, "
                                     f"{len(_cands)} candidat(s) avant IA"
                                 )
-                            if _diag_lines:
-                                with st.expander("🔬 Diagnostic cohérence IA", expanded=True):
-                                    for _l in _diag_lines:
-                                        st.caption(_l)
-                            else:
-                                st.warning("⚠️ Diagnostic cohérence IA : aucun onglet de données exploitable trouvé (pr.get('data_tables') vide ou métadonnées manquantes).")
+                                for _c in _cands[:5]:
+                                    _diag_lines.append(f"    -> {_c}")
+
                             with st.spinner("🧠 Détection des incohérences en cours..."):
                                 _coherence = validate_coherence_axe_c(pr, _exec_plan, api_key)
                             for _sn, _coh_anomalies in _coherence.get("by_sheet", {}).items():
@@ -1916,18 +1913,18 @@ with tab_main:
                                     continue
                                 merged["all_anomalies"].extend(_coh_anomalies)
                                 merged["by_sheet"].setdefault(_sn, []).extend(_coh_anomalies)
-                            # AJOUTÉ (26/08/2026, jour J) — diagnostic : affiche la
-                            # vraie erreur Gemini (jamais visible avant aujourd'hui)
-                            # si aucune suggestion n'a été trouvée du tout, pour
-                            # enfin distinguer "rien de suspect dans ce fichier" de
-                            # "l'appel IA a échoué silencieusement".
-                            st.caption(f"🔬 Total incohérences détectées par l'IA : {_coherence.get('total_flagged', 0)}")
-                            if _coherence.get("total_flagged", 0) == 0:
-                                from app.core.validator_axe_c import LAST_GEMINI_ERROR
-                                if LAST_GEMINI_ERROR:
-                                    st.warning(f"⚠️ Détection de cohérence : dernier appel IA en échec — {LAST_GEMINI_ERROR}")
-                                else:
-                                    st.info("ℹ️ Aucune erreur IA — l'appel a réussi mais n'a rien trouvé de suspect (ou aucun candidat statistique n'a été soumis à l'IA).")
+
+                            # RÉVISÉ (27/08/2026, jour de la démo) — demande Rami :
+                            # rendre le diagnostic copiable en un clic (bouton de
+                            # copie natif de st.code), et TOUJOURS visible, y
+                            # compris la ligne d'erreur Gemini même vide — un seul
+                            # bloc à copier-coller intégralement, plus besoin de
+                            # recopier plusieurs lignes à la main.
+                            from app.core.validator_axe_c import LAST_GEMINI_ERROR
+                            _diag_lines.append(f"Total incohérences détectées par l'IA : {_coherence.get('total_flagged', 0)}")
+                            _diag_lines.append(f"Dernière erreur Gemini (vide = aucune) : {LAST_GEMINI_ERROR or '(aucune)'}")
+                            with st.expander("🔬 Diagnostic cohérence IA (clique l'icône en haut à droite du bloc pour copier)", expanded=True):
+                                st.code("\n".join(_diag_lines), language="text")
                         except Exception as _coh_exc:
                             st.warning(f"⚠️ Détection de cohérence indisponible : {_coh_exc}")
 
