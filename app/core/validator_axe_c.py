@@ -73,7 +73,13 @@ def _call_gemini(prompt: str, api_key: str) -> dict | None:
                 "contents": [{"parts": [{"text": prompt}]}],
                 "generationConfig": {
                     "temperature":      0.1,
-                    "maxOutputTokens":  2048,
+                    # RÉVISÉ (27/08/2026, jour de la démo) — bug trouvé :
+                    # 2048 tokens de sortie coupait la réponse Gemini en
+                    # plein milieu d'un JSON valide dès qu'il y a plusieurs
+                    # candidats avec justification (JSONDecodeError
+                    # "Unterminated string"). Relevé largement — le coût
+                    # marginal est négligeable, la fiabilité prime.
+                    "maxOutputTokens":  8192,
                     "responseMimeType": "application/json",
                 },
             },
@@ -98,8 +104,30 @@ def _call_gemini(prompt: str, api_key: str) -> dict | None:
         clean = content.strip()
         for tag in ["```json", "```"]:
             clean = clean.replace(tag, "")
-        LAST_GEMINI_ERROR = ""
-        return json.loads(clean.strip())
+        clean = clean.strip()
+        try:
+            result = json.loads(clean)
+            LAST_GEMINI_ERROR = ""
+            return result
+        except json.JSONDecodeError:
+            # AJOUTÉ (27/08/2026, jour de la démo) — filet de sécurité :
+            # même avec maxOutputTokens relevé, une réponse peut encore
+            # être coupée en plein milieu (variabilité du modèle). Plutôt
+            # que de tout perdre, on récupère les objets JSON déjà complets
+            # dans un tableau tronqué (cas le plus fréquent : "[{...},
+            # {...}, {..." sans fermeture) — mieux vaut quelques
+            # suggestions que zéro.
+            if clean.startswith("["):
+                _last_complete = clean.rfind("},")
+                if _last_complete != -1:
+                    _repaired = clean[:_last_complete + 1] + "]"
+                    try:
+                        result = json.loads(_repaired)
+                        LAST_GEMINI_ERROR = f"Réponse tronquée par Gemini — {len(result)} candidat(s) récupéré(s) sur une réponse incomplète."
+                        return result
+                    except json.JSONDecodeError:
+                        pass
+            raise
 
     except Exception as e:
         LAST_GEMINI_ERROR = f"{type(e).__name__} : {e}"
