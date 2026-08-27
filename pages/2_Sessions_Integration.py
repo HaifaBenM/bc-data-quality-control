@@ -648,9 +648,7 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
             # dans "Nouvelle valeur" pour toutes les lignes affichées, en
             # un clic. Le vrai copiage se fait plus bas (après la lecture
             # du tableau édité), ce sélecteur ne fait que retenir le choix.
-            _copy_src_options = ["Valeur source", "Correction suggérée"] + (
-                ["🤖 Suggestion IA"] if _has_ia_col else []
-            )
+            _copy_src_options = ["Valeur source", "🤖 Suggestion IA"]
             _cc1, _cc2 = st.columns([2, 1])
             with _cc1:
                 _copy_src_col = st.selectbox(
@@ -708,6 +706,19 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
                 _select_override if _select_override is not None
                 else (_is_corrigible and bool(str(_nouvelle).strip()))
             )
+            # RÉVISÉ (27/08/2026, jour de la démo) — demande Rami : retirer
+            # "Correction suggérée" de l'affichage, la remplacer à sa place
+            # par "🤖 Suggestion IA" — une seule colonne de suggestion
+            # visible, quelle que soit son origine (similarité de texte ou
+            # IA). Rien ne change en interne : "Correction suggérée" (a.get
+            # ci-dessus, via _suggestion) continue de servir au pré-
+            # remplissage de "Nouvelle valeur" — seule la colonne AFFICHÉE
+            # change.
+            _ia_display = ""
+            if a.get("suggestion_ia"):
+                _ia_display = f"{a['suggestion_ia']} ({a.get('confiance_ia', 0)}%)"
+            elif a.get("Correction suggérée"):
+                _ia_display = a["Correction suggérée"]
             out = {
                 "Appliquer":          _appliquer,
                 "Onglet":             a.get("Onglet", ""),
@@ -719,12 +730,9 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
                 "Classification":     _cls_label.get(a.get("Classification", ""), ""),
                 "Message":            a.get("Message", ""),
                 "Valeur source":      a.get("Valeur", ""),
-                "Correction suggérée": a.get("Correction suggérée", ""),
+                "🤖 Suggestion IA":    _ia_display,
                 "Nouvelle valeur":    _nouvelle,
             }
-            if _has_ia_col:
-                sug = a.get("suggestion_ia", "")
-                out["🤖 Suggestion IA"] = f"{sug} ({a.get('confiance_ia', 0)}%)" if sug else ""
             return out
 
         edit_rows = [_row(a) for a in filtered]
@@ -757,8 +765,8 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
             height=min(450, 50 + len(edit_rows_display) * 35),
             disabled=[
                 "Onglet", "Ligne", "Identifiant métier", "Champ", "Type d'anomalie",
-                "Sévérité", "Classification", "Message", "Valeur source", "Correction suggérée",
-            ] + (["🤖 Suggestion IA"] if _has_ia_col else []),
+                "Sévérité", "Classification", "Message", "Valeur source", "🤖 Suggestion IA",
+            ],
             column_config=_column_config,
             key=f"merged_editor_{sn}_{st.session_state[_editor_gen_key]}",
         )
@@ -766,12 +774,24 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
         with csel3:
             if st.button("🔁 Propager", key=f"btn_propagate_{sn}", use_container_width=True,
                          help="Applique chaque correction saisie à toutes les autres lignes ayant la même valeur source dans le même champ"):
+                # RÉVISÉ (27/08/2026, jour de la démo) — bug évité : la
+                # comparaison utilisait "Correction suggérée", colonne
+                # retirée de l'affichage (fusionnée dans "🤖 Suggestion IA",
+                # qui inclut un "(X%)" que "Nouvelle valeur" n'a jamais —
+                # comparer directement aurait détecté un "changement" sur
+                # CHAQUE ligne, même non modifiée). Comparaison désormais
+                # contre la valeur ORIGINALE de "Nouvelle valeur" (avant
+                # toute édition), qui reflète fidèlement ce qui était
+                # pré-rempli par défaut.
+                _original_nv_by_key = {
+                    (r["Ligne"], r["Champ"]): r["Nouvelle valeur"] for r in edit_rows_display
+                }
                 _new_overrides = dict(_propagate_overrides)
                 _propagated = 0
                 for _, row in edited.iterrows():
                     _nv = str(row["Nouvelle valeur"]).strip()
-                    _sugg = str(row["Correction suggérée"]).strip()
-                    if _nv and _nv != _sugg:
+                    _orig_nv = str(_original_nv_by_key.get((row["Ligne"], row["Champ"]), "")).strip()
+                    if _nv and _nv != _orig_nv:
                         _key = (row["Champ"], str(row["Valeur source"]).strip())
                         _new_overrides[_key] = _nv
                 # Compte les lignes qui vont effectivement changer au prochain rerun
