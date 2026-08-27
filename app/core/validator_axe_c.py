@@ -73,17 +73,22 @@ def _call_gemini(prompt: str, api_key: str) -> dict | None:
                 "contents": [{"parts": [{"text": prompt}]}],
                 "generationConfig": {
                     "temperature":      0.1,
-                    # RÉVISÉ (27/08/2026, jour de la démo) — bug trouvé :
-                    # 2048 tokens de sortie coupait la réponse Gemini en
-                    # plein milieu d'un JSON valide dès qu'il y a plusieurs
-                    # candidats avec justification (JSONDecodeError
-                    # "Unterminated string"). Relevé largement — le coût
-                    # marginal est négligeable, la fiabilité prime.
-                    "maxOutputTokens":  8192,
+                    # RÉVISÉ (27/08/2026, jour de la démo, 2e passe) — 8192
+                    # évitait la troncature mais rendait la génération trop
+                    # lente (ReadTimeout). Redescendu à 4096 maintenant que
+                    # le prompt impose des justifications courtes (15 mots
+                    # max) — largement suffisant, plus rapide.
+                    "maxOutputTokens":  4096,
                     "responseMimeType": "application/json",
                 },
             },
-            timeout=30,
+            # RÉVISÉ (27/08/2026, jour de la démo) — 30s trop court une fois
+            # maxOutputTokens relevé (Gemini met plus de temps à générer
+            # une réponse plus longue) — provoquait un ReadTimeout au lieu
+            # d'une vraie réponse. Relevé à 45s, compromis raisonnable pour
+            # une démo (on ne veut pas non plus qu'un blocage réseau bloque
+            # l'écran une minute entière).
+            timeout=45,
         )
         if resp.status_code != 200:
             LAST_GEMINI_ERROR = f"HTTP {resp.status_code} : {resp.text[:500]}"
@@ -322,6 +327,7 @@ Réponds UNIQUEMENT avec un tableau JSON valide (sans markdown) :
 [{{"id": 1, "incoherence_probable": true, "confiance": 70, "justification": "...", "valeur_suggeree": ""}}]
 
 Règles :
+- justification : UNE SEULE phrase courte, 15 mots maximum (garde la réponse rapide à générer)
 - incoherence_probable = false si le cas est plausible (ex. facturation export)
 - valeur_suggeree : uniquement si tu es raisonnablement confiant, sinon chaîne vide
 - Réponds avec exactement {len(candidates)} objets"""
