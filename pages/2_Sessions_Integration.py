@@ -1124,9 +1124,10 @@ with tab_main:
                             _def_idx = _i
                             break
                 sel_company_name = st.selectbox(
-                    "🏢 Société BC *", _names, index=_def_idx, key="ses_company_sel"
+                    "🏢 Société BC *", _names, index=None,
+                    placeholder="Choisir une société...", key="ses_company_sel"
                 )
-                sel_company_id = _company_opts[sel_company_name]
+                sel_company_id = _company_opts.get(sel_company_name) if sel_company_name else None
             else:
                 st.info("Aucune société BC disponible.")
                 sel_company_id, sel_company_name = _default_cid, _default_cname
@@ -1134,7 +1135,7 @@ with tab_main:
             sel_pkg_code = active_pkg_code
             sel_pkg_name = active_pkg_name
 
-            if not active_pkg_code:
+            if not active_pkg_code and sel_company_id:
                 st.markdown("**📦 Package BC**")
                 _pkgs_available = _load_pkgs_ses(active_client, sel_company_id, not is_consultant())
                 if _pkgs_available:
@@ -1147,9 +1148,10 @@ with tab_main:
                     _pkg_choice  = st.selectbox(
                         "Sélectionnez un package *",
                         list(_pkg_opts.keys()),
+                        index=None, placeholder="Choisir un package...",
                         key="ses_pkg_sel",
                     )
-                    sel_pkg_code, sel_pkg_name = _pkg_opts[_pkg_choice]
+                    sel_pkg_code, sel_pkg_name = _pkg_opts.get(_pkg_choice, ("", ""))
                 else:
                     st.warning("Aucun package visible. Configurez la visibilité depuis Packages.")
                     sel_pkg_code, sel_pkg_name = "", ""
@@ -2358,12 +2360,22 @@ with tab_ses:
                 _sel_company = st.selectbox(
                     "Société", options=[c[0] for c in _companies],
                     format_func=lambda cid: _company_labels.get(cid, cid),
+                    index=None, placeholder="Choisir une société...",
                     key="ses_tree_company",
                 )
-            _tree_sessions_view = get_sessions_for_company(active_client or "", _sel_company)
+            # RÉVISÉ (27/08/2026) — demande Rami : liste déroulante vide par
+            # défaut. Repli minimal (sans ré-indenter tout le bloc de rendu
+            # de l'arbre qui suit) : sans société choisie, on simule une
+            # liste de sessions vide, ce qui déclenche déjà naturellement
+            # le message "Aucune session pour cette société" existant plus
+            # bas — juste reformulé pour rester juste dans ce cas précis.
+            if not _sel_company:
+                _tree_sessions_view = []
+            else:
+                _tree_sessions_view = get_sessions_for_company(active_client or "", _sel_company)
             _tree = build_sessions_tree(_tree_sessions_view)
             if not _tree:
-                st.info("Aucune session pour cette société.")
+                st.info("Choisis une société ci-dessus pour voir son arbre de sessions." if not _sel_company else "Aucune session pour cette société.")
             else:
                 _lvl_cfg_view = st.session_state.get("level_config", {})
 
