@@ -432,6 +432,28 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
     ⚠️ Le fichier généré n'a pas été validé par un import BC réel — à tester
     avant de le présenter comme "100% intégrable" en démo.
     """
+    # AJOUTÉ (27/08/2026, jour de la démo) — demande Rami : le diagnostic IA
+    # ne s'affichait que pendant l'exécution du clic "Lancer l'analyse
+    # qualité" et disparaissait au rerun suivant, impossible à copier à
+    # temps. Persisté en session_state (voir le bloc qui le calcule), lu et
+    # réaffiché ici en permanence — présent à chaque rendu de l'Étape 4,
+    # peu importe ce qui a déclenché le rerun. Message clair et présentable
+    # en plus du détail technique brut, spécifiquement quand le quota
+    # gratuit Gemini est épuisé (429 / RESOURCE_EXHAUSTED) — utile à
+    # montrer tel quel en démo plutôt qu'un message d'erreur brut.
+    _ia_err = st.session_state.get("_ia_diag_error", "")
+    if _ia_err and ("429" in _ia_err or "RESOURCE_EXHAUSTED" in _ia_err or "quota" in _ia_err.lower()):
+        st.warning(
+            "⚠️ **Quota gratuit de l'IA momentanément épuisé** — la détection "
+            "d'incohérences fonctionne normalement, mais le service Google "
+            "Gemini limite le nombre de requêtes gratuites par période. "
+            "Ce n'est pas un défaut de l'outil, juste une limite temporaire "
+            "du service tiers utilisé."
+        )
+    if st.session_state.get("_ia_diag_text"):
+        with st.expander("🔬 Diagnostic cohérence IA (clique l'icône en haut à droite du bloc pour copier)"):
+            st.code(st.session_state["_ia_diag_text"], language="text")
+
     all_anomalies = merged.get("all_anomalies", [])
 
     # AJOUTÉ (23/08/2026) ; RÉVISÉ (26/08/2026, règle globale hide_all_prereqs)
@@ -1923,10 +1945,19 @@ with tab_main:
                             from app.core.validator_axe_c import LAST_GEMINI_ERROR
                             _diag_lines.append(f"Total incohérences détectées par l'IA : {_coherence.get('total_flagged', 0)}")
                             _diag_lines.append(f"Dernière erreur Gemini (vide = aucune) : {LAST_GEMINI_ERROR or '(aucune)'}")
-                            with st.expander("🔬 Diagnostic cohérence IA (clique l'icône en haut à droite du bloc pour copier)", expanded=True):
-                                st.code("\n".join(_diag_lines), language="text")
+                            # RÉVISÉ (27/08/2026, 2e passe) — bug trouvé : ce bloc ne
+                            # s'affichait QUE pendant l'exécution du clic "Lancer
+                            # l'analyse qualité" — au rerun suivant (n'importe quelle
+                            # interaction sur l'Étape 4), il disparaissait, rendant la
+                            # copie impossible. Persisté en session_state, réaffiché
+                            # en permanence dans display_merged_analysis (voir plus
+                            # bas) tant qu'une nouvelle analyse n'écrase pas ces
+                            # valeurs.
+                            st.session_state["_ia_diag_text"]  = "\n".join(_diag_lines)
+                            st.session_state["_ia_diag_error"] = LAST_GEMINI_ERROR
                         except Exception as _coh_exc:
-                            st.warning(f"⚠️ Détection de cohérence indisponible : {_coh_exc}")
+                            st.session_state["_ia_diag_text"]  = f"Exception : {_coh_exc}"
+                            st.session_state["_ia_diag_error"] = str(_coh_exc)
 
                     st.session_state.merged_result = merged
                     st.session_state.axe_c_result  = axe_c
