@@ -814,7 +814,14 @@ def create_configuration_package(
     pour les appels suivants file/import/apply, DIFFÉRENT du "code" lisible).
     Lève une Exception avec message lisible si le code existe déjà (409) ou
     en cas d'échec d'autorisation, même style que get_config_packages().
+
+    RÉVISÉ (27/08/2026) — bug réel rencontré : BC limite "packageName" à 50
+    caractères (Application_StringExceededLength) et "code" à 20 (champ BC
+    standard Code[20]) — tronqués défensivement ici, à la source, plutôt
+    que de compter sur chaque appelant pour respecter ces limites.
     """
+    code         = (code or "")[:20]
+    package_name = (package_name or "")[:50]
     url = f"{_automation_base_url(tenant_id, environment, company_id)}/configurationPackages"
     try:
         resp = requests.post(
@@ -936,6 +943,12 @@ def run_bc_import_check(
     technique de l'appel). "error" n'est renseigné qu'en cas d'échec
     technique (auth, réseau, package déjà existant sous un autre état...).
     """
+    # RÉVISÉ (27/08/2026) — package_code tronqué UNE FOIS ici, dès l'entrée,
+    # pour que le même code (≤20 car.) serve à la fois à create/upload et
+    # aux deux relectures de statut (avant et après) — évite tout décalage
+    # si l'appelant passe un code trop long (create_configuration_package
+    # tronque déjà en interne, mais get_configuration_package_status non).
+    package_code = (package_code or "")[:20]
     result = {"success": False, "package_id": "", "status": None, "error": ""}
     try:
         existing = get_configuration_package_status(tenant_id, environment, company_id, token, package_code)
