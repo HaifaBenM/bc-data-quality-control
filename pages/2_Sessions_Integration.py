@@ -583,30 +583,36 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
     # Champ et Classification ajoutés en plus de Sévérité/Type d'anomalie
     # déjà existants, pour couvrir toutes les colonnes utiles à la
     # recherche d'une ligne précise à corriger.
-    cf1, cf2, cf3, cf4 = st.columns(4)
-    with cf1:
-        sevs = sorted(set(a.get("Sévérité", "") for a in real_anomalies))
-        filt_sev = st.multiselect("Sévérité", sevs, default=sevs, key=f"fs_{sn}")
-    with cf2:
-        types = sorted(set(a.get("Type d'anomalie", "") for a in real_anomalies))
-        filt_type = st.multiselect("Type d'anomalie", types, default=types, key=f"ft_{sn}")
-    with cf3:
-        champs = sorted(set(a.get("Champ", "") for a in real_anomalies))
-        filt_champ = st.multiselect("Champ", champs, default=champs, key=f"fc_{sn}")
-    with cf4:
-        _cls_label = {
-            "PREALABLE_BC_REQUIS": "🟣 Prérequis BC requis",
-            "VALEUR_CORRIGIBLE":   "✏️ Corrigible",
-            # AJOUTÉ (26/08/2026, jour J) — nouvelle classification apportée
-            # par la détection de cohérence (validate_coherence_axe_c),
-            # jamais mappée jusqu'ici — s'affichait vide dans la colonne.
-            "SUGGESTION_IA":       "🧠 Suggestion IA",
-        }
-        clss = sorted(set(a.get("Classification", "") for a in real_anomalies))
-        filt_cls = st.multiselect(
-            "Classification", clss, default=clss, key=f"fcl_{sn}",
-            format_func=lambda c: _cls_label.get(c, c or "(aucune)"),
-        )
+    # RÉVISÉ (27/08/2026) — demande Rami/Bilel : écran trop chargé. Filtres
+    # repliés dans un expander (fermé par défaut) — les valeurs par défaut
+    # restent "tout sélectionné", donc le tableau affiche toujours tout tant
+    # qu'on n'a pas ouvert et changé un filtre. Ne change rien au
+    # comportement, réduit juste l'espace occupé à l'écran.
+    with st.expander("🔍 Filtres"):
+        cf1, cf2, cf3, cf4 = st.columns(4)
+        with cf1:
+            sevs = sorted(set(a.get("Sévérité", "") for a in real_anomalies))
+            filt_sev = st.multiselect("Sévérité", sevs, default=sevs, key=f"fs_{sn}")
+        with cf2:
+            types = sorted(set(a.get("Type d'anomalie", "") for a in real_anomalies))
+            filt_type = st.multiselect("Type d'anomalie", types, default=types, key=f"ft_{sn}")
+        with cf3:
+            champs = sorted(set(a.get("Champ", "") for a in real_anomalies))
+            filt_champ = st.multiselect("Champ", champs, default=champs, key=f"fc_{sn}")
+        with cf4:
+            _cls_label = {
+                "PREALABLE_BC_REQUIS": "🟣 Prérequis BC requis",
+                "VALEUR_CORRIGIBLE":   "✏️ Corrigible",
+                # AJOUTÉ (26/08/2026, jour J) — nouvelle classification apportée
+                # par la détection de cohérence (validate_coherence_axe_c),
+                # jamais mappée jusqu'ici — s'affichait vide dans la colonne.
+                "SUGGESTION_IA":       "🧠 Suggestion IA",
+            }
+            clss = sorted(set(a.get("Classification", "") for a in real_anomalies))
+            filt_cls = st.multiselect(
+                "Classification", clss, default=clss, key=f"fcl_{sn}",
+                format_func=lambda c: _cls_label.get(c, c or "(aucune)"),
+            )
 
     filtered = [
         a for a in real_anomalies
@@ -1646,19 +1652,35 @@ with tab_main:
                         # La comparaison avec le nombre BC réel reste un outil
                         # SECONDAIRE, à la demande (bouton dédié), pas la
                         # source principale affichée par défaut.
+                        # RÉVISÉ (27/08/2026, 3e passe) — demande Rami : "affichage
+                        # très moche" — st.error/st.success + st.popover
+                        # détonnaient avec le reste de l'écran (cartes CSS
+                        # maison partout ailleurs). Repris avec EXACTEMENT le
+                        # même agencement que le bloc "Prérequis BC détectés"
+                        # juste en dessous (container bordé + colonnes [5,2] +
+                        # cartes .card-major/.card-minor déjà utilisées ailleurs
+                        # dans l'app), pour une cohérence visuelle réelle.
                         _anomaly_count = st.session_state.get(f"_anomaly_count_{_roadmap_key}")
                         if _anomaly_count is not None:
-                            _ac1, _ac2 = st.columns([3, 1])
-                            with _ac1:
-                                if _anomaly_count == 0:
-                                    st.success(f"✅ **0 anomalie** détectée par l'outil sur ce fichier.")
-                                else:
-                                    st.error(f"🔴 **{_anomaly_count} anomalie(s)** détectée(s) par l'outil sur ce fichier.")
-                            with _ac2:
-                                with st.popover("🔎 Comparer avec BC", use_container_width=True):
-                                    st.caption("Lance une vraie validation BC (sans rien écrire dans les données) pour comparer ce chiffre au nombre d'erreurs réel de Business Central.")
-                                    _bc_check_key = f"bc_check_{_roadmap_key}"
-                                    if st.button("Lancer la comparaison", key="btn_bc_check"):
+                            with st.container(border=True):
+                                _ac1, _ac2 = st.columns([5, 2])
+                                with _ac1:
+                                    if _anomaly_count == 0:
+                                        st.markdown(
+                                            '<div class="card-ref">✅ <b>0 anomalie</b> détectée par l\'outil sur ce fichier.</div>',
+                                            unsafe_allow_html=True,
+                                        )
+                                    else:
+                                        st.markdown(
+                                            f'<div class="card-major">🔴 <b>{_anomaly_count} anomalie(s)</b> détectée(s) par l\'outil sur ce fichier.</div>',
+                                            unsafe_allow_html=True,
+                                        )
+                                with _ac2:
+                                    _cmp_clicked = st.button("🔎 Comparer avec BC", key="btn_bc_check", use_container_width=True)
+
+                                _bc_check_key = f"bc_check_{_roadmap_key}"
+                                if _cmp_clicked:
+                                    with st.spinner("Vérification BC en cours..."):
                                         _original_bytes_e3 = st.session_state.get("original_file_bytes")
                                         try:
                                             _p = get_profile_by_code(active_client)
@@ -1678,14 +1700,24 @@ with tab_main:
                                                 )
                                         except Exception as _bc_exc:
                                             st.session_state[_bc_check_key] = {"success": False, "error": f"{type(_bc_exc).__name__} : {_bc_exc}"}
-                                        st.rerun()
-                                    _bc_check = st.session_state.get(_bc_check_key)
-                                    if _bc_check:
-                                        if not _bc_check.get("success"):
-                                            st.warning(f"⚠️ {_bc_check.get('error', '')}")
-                                        else:
-                                            _nb_err_bc = (_bc_check.get("status") or {}).get("numberOfErrors", "?")
-                                            st.write(f"Outil : **{_anomaly_count}** — BC réel : **{_nb_err_bc}**")
+
+                                _bc_check = st.session_state.get(_bc_check_key)
+                                if _bc_check:
+                                    if not _bc_check.get("success"):
+                                        st.markdown(
+                                            f'<div class="card-info">⚠️ {_bc_check.get("error", "")}</div>',
+                                            unsafe_allow_html=True,
+                                        )
+                                    else:
+                                        _nb_err_bc = (_bc_check.get("status") or {}).get("numberOfErrors", "?")
+                                        _match = _nb_err_bc == _anomaly_count
+                                        _cls = "card-ref" if _match else "card-minor"
+                                        _icon = "✅" if _match else "⚠️"
+                                        st.markdown(
+                                            f'<div class="{_cls}">{_icon} Outil : <b>{_anomaly_count}</b> '
+                                            f'— BC réel : <b>{_nb_err_bc}</b></div>',
+                                            unsafe_allow_html=True,
+                                        )
 
                         st.markdown(f"**Progression — {_pct}%**")
                         st.progress(_pct / 100)
