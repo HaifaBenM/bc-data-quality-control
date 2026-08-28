@@ -1378,55 +1378,6 @@ with tab_main:
                 unsafe_allow_html=True
             )
 
-        # AJOUTÉ (27/08/2026) — demande Rami, point 3 des chantiers post-démo :
-        # afficher le nombre d'erreurs BC RÉEL avant la roadmap, obtenu par un
-        # appel unique (pas répété à chaque rerun — mis en cache session_state
-        # par session, voir _bc_check_key) à l'API BC réelle (import sans
-        # apply — "Valider", n'écrit rien dans les vraies tables). Sert aussi
-        # de brique pour les points 2 (intégration directe) et 6 (session
-        # sans package), qui réutilisent run_bc_import_check.
-        _original_bytes_e3 = st.session_state.get("original_file_bytes")
-        if val["is_valid"] and _original_bytes_e3:
-            _bc_check_key = f"bc_check_{cfg.get('pkg_code', '')}_{cfg.get('company_id', '')}_{cfg.get('file_name', '')}"
-            if _bc_check_key not in st.session_state:
-                st.session_state[_bc_check_key] = None
-            _bc_check = st.session_state[_bc_check_key]
-
-            _bc1, _bc2 = st.columns([3, 1])
-            with _bc1:
-                if _bc_check is None:
-                    st.info("ℹ️ Nombre d'erreurs BC réel pas encore vérifié pour cette session.")
-                elif not _bc_check.get("success"):
-                    st.warning(f"⚠️ Vérification BC impossible : {_bc_check.get('error', '')}")
-                else:
-                    _status = _bc_check.get("status") or {}
-                    _nb_err = _status.get("numberOfErrors", "?")
-                    if _nb_err == 0:
-                        st.success(f"✅ **0 erreur** détectée par Business Central lors de la validation réelle.")
-                    else:
-                        st.error(f"🔴 **{_nb_err} erreur(s)** détectée(s) par Business Central lors de la validation réelle.")
-            with _bc2:
-                if st.button("🔄 Vérifier auprès de BC", key="btn_bc_check", use_container_width=True):
-                    try:
-                        _p = get_profile_by_code(active_client)
-                        _tid = _p.get("bc_tenant_id", "").strip()
-                        _cid = _p.get("bc_client_id", "").strip()
-                        _cs  = _p.get("bc_client_secret", "").strip()
-                        _env = _p.get("bc_environment", "").strip()
-                        if not all([_tid, _cid, _cs, _env, cfg.get("company_id")]):
-                            st.session_state[_bc_check_key] = {"success": False, "error": "Credentials BC incomplets pour ce profil."}
-                        else:
-                            _tok = get_access_token(_tid, _cid, _cs)
-                            _pkg_code_check = f"QC-{cfg.get('session_name', 'temp')}"[:20]
-                            st.session_state[_bc_check_key] = run_bc_import_check(
-                                _tid, _env, cfg["company_id"], _tok,
-                                _pkg_code_check, f"Vérification QC — {cfg.get('session_name', '')}",
-                                _original_bytes_e3,
-                            )
-                    except Exception as _bc_exc:
-                        st.session_state[_bc_check_key] = {"success": False, "error": f"{type(_bc_exc).__name__} : {_bc_exc}"}
-                    st.rerun()
-
         # ── Niveaux prérequis (Besoin 2) — gate avant l'analyse ──────────────
         # Détection basée sur les VRAIES anomalies Axe B (build_prerequisites_report),
         # pas sur une traversée théorique des jointures BC : une table n'apparaît que
@@ -1515,6 +1466,15 @@ with tab_main:
                         }
                         _early_merged = merge_results(_axe_a, _axe_b, {"available": False}, parse_result=pr)
                         _real = [a for a in _early_merged.get("all_anomalies", []) if a.get("Ligne", 0) > 0]
+                        # AJOUTÉ (27/08/2026, 2e passe) — demande Rami, point 3 :
+                        # le nombre affiché avant la roadmap doit être celui
+                        # détecté par L'OUTIL LUI-MÊME (déjà calculé ici pour
+                        # construire la roadmap), pas un appel BC en direct à
+                        # chaque fois — la comparaison avec le nombre BC réel
+                        # se fait séparément, à la demande (bouton dédié plus
+                        # bas). Mis en cache pour survivre aux reruns suivants
+                        # de l'Étape 3 sans recalcul.
+                        st.session_state[f"_anomaly_count_{_roadmap_key}"] = len(_real)
                         _prereqs = build_prerequisites_report(
                             _real, profile_code=client_code, company_id=cfg.get("company_id", "")
                         )
@@ -1678,6 +1638,54 @@ with tab_main:
                         _total   = len(_roadmap)
                         _done    = sum(1 for e in _roadmap if e.status == "validated")
                         _pct     = int(100 * _done / _total) if _total else 0
+
+                        # AJOUTÉ (27/08/2026, 2e passe) — demande Rami, point 3 :
+                        # nombre d'anomalies détecté par L'OUTIL LUI-MÊME,
+                        # affiché avant la roadmap (déjà calculé lors de sa
+                        # construction, lu depuis le cache — pas de recalcul).
+                        # La comparaison avec le nombre BC réel reste un outil
+                        # SECONDAIRE, à la demande (bouton dédié), pas la
+                        # source principale affichée par défaut.
+                        _anomaly_count = st.session_state.get(f"_anomaly_count_{_roadmap_key}")
+                        if _anomaly_count is not None:
+                            _ac1, _ac2 = st.columns([3, 1])
+                            with _ac1:
+                                if _anomaly_count == 0:
+                                    st.success(f"✅ **0 anomalie** détectée par l'outil sur ce fichier.")
+                                else:
+                                    st.error(f"🔴 **{_anomaly_count} anomalie(s)** détectée(s) par l'outil sur ce fichier.")
+                            with _ac2:
+                                with st.popover("🔎 Comparer avec BC", use_container_width=True):
+                                    st.caption("Lance une vraie validation BC (sans rien écrire dans les données) pour comparer ce chiffre au nombre d'erreurs réel de Business Central.")
+                                    _bc_check_key = f"bc_check_{_roadmap_key}"
+                                    if st.button("Lancer la comparaison", key="btn_bc_check"):
+                                        _original_bytes_e3 = st.session_state.get("original_file_bytes")
+                                        try:
+                                            _p = get_profile_by_code(active_client)
+                                            _tid = _p.get("bc_tenant_id", "").strip()
+                                            _cid = _p.get("bc_client_id", "").strip()
+                                            _cs  = _p.get("bc_client_secret", "").strip()
+                                            _env = _p.get("bc_environment", "").strip()
+                                            if not all([_tid, _cid, _cs, _env, cfg.get("company_id"), _original_bytes_e3]):
+                                                st.session_state[_bc_check_key] = {"success": False, "error": "Credentials BC ou fichier original manquants."}
+                                            else:
+                                                _tok = get_access_token(_tid, _cid, _cs)
+                                                _pkg_code_check = f"QC-{cfg.get('session_name', 'temp')}"[:20]
+                                                st.session_state[_bc_check_key] = run_bc_import_check(
+                                                    _tid, _env, cfg["company_id"], _tok,
+                                                    _pkg_code_check, f"Vérification QC — {cfg.get('session_name', '')}",
+                                                    _original_bytes_e3,
+                                                )
+                                        except Exception as _bc_exc:
+                                            st.session_state[_bc_check_key] = {"success": False, "error": f"{type(_bc_exc).__name__} : {_bc_exc}"}
+                                        st.rerun()
+                                    _bc_check = st.session_state.get(_bc_check_key)
+                                    if _bc_check:
+                                        if not _bc_check.get("success"):
+                                            st.warning(f"⚠️ {_bc_check.get('error', '')}")
+                                        else:
+                                            _nb_err_bc = (_bc_check.get("status") or {}).get("numberOfErrors", "?")
+                                            st.write(f"Outil : **{_anomaly_count}** — BC réel : **{_nb_err_bc}**")
 
                         st.markdown(f"**Progression — {_pct}%**")
                         st.progress(_pct / 100)
