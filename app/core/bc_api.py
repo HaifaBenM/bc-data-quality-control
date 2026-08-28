@@ -777,3 +777,136 @@ def get_gl_account_fields_live(
             if acc in gen_posting:
                 result[acc]["Gen. Posting Type"] = gen_posting[acc]
     return result
+
+# ── Intégration directe BC — création/import/apply Configuration Package ──────
+# AJOUTÉ (27/08/2026) — demande Rami, chantiers post-démo (points 2, 3, 6).
+# Réutilise l'API Automation v2.0 déjà en place pour get_config_packages()
+# (même URL de base, même style de gestion d'erreurs). Vérifié via la
+# documentation officielle Microsoft (learn.microsoft.com) : le flux réel
+# est create -> upload file -> import (calcule les erreurs SANS écrire dans
+# les vraies tables BC) -> apply (écrit réellement). "Valider" dans
+# l'interface BC correspond à l'étape import seule, avant tout apply —
+# permet d'obtenir le nombre d'erreurs réel sans engager quoi que ce soit.
+#
+# ⚠️ NON TESTÉ contre un vrai environnement BC au moment de l'écriture —
+# à valider en priorité par Rami avant de construire les écrans dessus,
+# en particulier : est-ce qu'un package vide créé par API, une fois le
+# fichier Excel déposé, détecte automatiquement les tables/champs comme le
+# ferait BC via l'interface manuelle (comportement documenté, jamais
+# vérifié ici en conditions réelles).
+
+def _automation_base_url(tenant_id: str, environment: str, company_id: str) -> str:
+    return (
+        f"https://api.businesscentral.dynamics.com"
+        f"/v2.0/{tenant_id}/{environment}"
+        f"/api/microsoft/automation/v2.0"
+        f"/companies({company_id})"
+    )
+
+
+def create_configuration_package(
+    tenant_id: str, environment: str, company_id: str, token: str,
+    code: str, package_name: str,
+) -> dict:
+    """
+    Crée un nouveau Configuration Package vide dans BC (POST configurationPackages).
+    Retourne le package créé (dict, inclut son "id" GUID interne BC — nécessaire
+    pour les appels suivants file/import/apply, DIFFÉRENT du "code" lisible).
+    Lève une Exception avec message lisible si le code existe déjà (409) ou
+    en cas d'échec d'autorisation, même style que get_config_packages().
+    """
+    url = f"{_automation_base_url(tenant_id, environment, company_id)}/configurationPackages"
+    try:
+        resp = requests.post(
+            url, headers={**_headers(token), "Content-Type": "application/json"},
+            json={"code": code, "packageName": package_name}, timeout=30,
+        )
+        resp.raise_for_status()
+    except requests.HTTPError as e:
+        status = e.response.status_code
+        if status == 409:
+            raise Exception(f"Un package avec le code « {code} » existe déjà dans BC.") from e
+        if status == 401:
+            raise Exception("Non autorisé (401) — permission Automation.ReadWrite.All requise.") from e
+        if status == 403:
+            raise Exception("Accès refusé (403) — rôle D365 AUTOMATION requis sur l'utilisateur BC.") from e
+        raise Exception(f"Erreur BC API {status} lors de la création du package : {e.response.text[:300]}") from e
+    return resp.json()
+
+
+def upload_configuration_package_file(
+    tenant_id: str, environment: str, company_id: str, token: str,
+    package_id: str, package_code: str, file_bytes: bytes,
+) -> None:
+    """
+    Dépose le fichier Excel (contenu binaire) dans un package déjà créé
+    (PATCH .../configurationPackages({id})/file('{code}')/content).
+    package_id = le GUID interne BC (retourné par create_configuration_package
+    ou par un GET existant) ; package_code = le code lisible du package.
+    Ne lève pas d'exception métier spécifique — laisse remonter l'erreur BC
+    brute (message le plus fiable ici, cas non testé en réel).
+    """
+    url = (
+        f"{_automation_base_url(tenant_id, environment, company_id)}"
+        f"/configurationPackages({package_id})/file('{package_code}')/content"
+    )
+    resp = requests.patch(
+        url,
+        headers={**_headers(token), "Content-Type": "application/octet-stream", "If-Match": "*"},
+        data=file_bytes, timeout=60,
+    )
+    resp.raise_for_status()
+
+
+def import_configuration_package(
+    tenant_id: str, environment: str, company_id: str, token: str, package_id: str,
+) -> None:
+    """
+    Importe le fichier déposé dans le package (POST bound action Microsoft.NAV.import).
+    Calcule les erreurs de validation SANS écrire dans les vraies tables BC —
+    c'est l'équivalent de "Valider" dans l'interface BC. Réponse 204 sans corps
+    si succès (laisse remonter l'erreur brute sinon).
+    """
+    url = (
+        f"{_automation_base_url(tenant_id, environment, company_id)}"
+        f"/configurationPackages({package_id})/Microsoft.NAV.import"
+    )
+    resp = requests.post(url, headers=_headers(token), timeout=120)
+    resp.raise_for_status()
+
+
+def apply_configuration_package(
+    tenant_id: str, environment: str, company_id: str, token: str, package_id: str,
+) -> None:
+    """
+    Applique le package importé (POST bound action Microsoft.NAV.apply) —
+    ÉCRIT RÉELLEMENT dans les vraies tables BC, contrairement à import().
+    À n'appeler qu'après confirmation explicite de l'utilisateur (action
+    irréversible côté BC, comme "Appliquer" dans l'interface).
+    """
+    url = (
+        f"{_automation_base_url(tenant_id, environment, company_id)}"
+        f"/configurationPackages({package_id})/Microsoft.NAV.apply"
+    )
+    resp = requests.post(url, headers=_headers(token), timeout=180)
+    resp.raise_for_status()
+
+
+def get_configuration_package_status(
+    tenant_id: str, environment: str, company_id: str, token: str, package_code: str,
+) -> dict | None:
+    """
+    Récupère l'état actuel d'un package par son code lisible (numberOfErrors,
+    numberOfTables, numberOfRecords, importStatus, applyStatus, importError,
+    applyError) — via $filter sur la liste complète (même endpoint que
+    get_config_packages), pas de GET direct par code exposé par cette API.
+    Retourne None si aucun package ne correspond à ce code.
+    """
+    url = (
+        f"{_automation_base_url(tenant_id, environment, company_id)}"
+        f"/configurationPackages?$filter=code eq '{package_code}'"
+    )
+    resp = requests.get(url, headers=_headers(token), timeout=30)
+    resp.raise_for_status()
+    results = resp.json().get("value", [])
+    return results[0] if results else None
