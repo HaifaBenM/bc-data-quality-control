@@ -30,7 +30,7 @@ from app.db.metadata_db import (
 from app.db.profiles_db import get_profile_by_code
 from app.core.bc_api import (
     get_access_token, get_companies, get_packages_qc, get_gl_account_fields_live,
-    diagnose_standard_api_account,
+    diagnose_standard_api_account, run_bc_import_check,
 )
 from app.db.sessions_db import (
     save_session, update_session, delete_session,
@@ -1377,6 +1377,55 @@ with tab_main:
                 f'<b>{t["sheet"]}</b> — {t["label"]} · <b>{t["rows"]} lignes · {t["cols"]} champs</b></div>',
                 unsafe_allow_html=True
             )
+
+        # AJOUTÉ (27/08/2026) — demande Rami, point 3 des chantiers post-démo :
+        # afficher le nombre d'erreurs BC RÉEL avant la roadmap, obtenu par un
+        # appel unique (pas répété à chaque rerun — mis en cache session_state
+        # par session, voir _bc_check_key) à l'API BC réelle (import sans
+        # apply — "Valider", n'écrit rien dans les vraies tables). Sert aussi
+        # de brique pour les points 2 (intégration directe) et 6 (session
+        # sans package), qui réutilisent run_bc_import_check.
+        _original_bytes_e3 = st.session_state.get("original_file_bytes")
+        if val["is_valid"] and _original_bytes_e3:
+            _bc_check_key = f"bc_check_{cfg.get('pkg_code', '')}_{cfg.get('company_id', '')}_{cfg.get('file_name', '')}"
+            if _bc_check_key not in st.session_state:
+                st.session_state[_bc_check_key] = None
+            _bc_check = st.session_state[_bc_check_key]
+
+            _bc1, _bc2 = st.columns([3, 1])
+            with _bc1:
+                if _bc_check is None:
+                    st.info("ℹ️ Nombre d'erreurs BC réel pas encore vérifié pour cette session.")
+                elif not _bc_check.get("success"):
+                    st.warning(f"⚠️ Vérification BC impossible : {_bc_check.get('error', '')}")
+                else:
+                    _status = _bc_check.get("status") or {}
+                    _nb_err = _status.get("numberOfErrors", "?")
+                    if _nb_err == 0:
+                        st.success(f"✅ **0 erreur** détectée par Business Central lors de la validation réelle.")
+                    else:
+                        st.error(f"🔴 **{_nb_err} erreur(s)** détectée(s) par Business Central lors de la validation réelle.")
+            with _bc2:
+                if st.button("🔄 Vérifier auprès de BC", key="btn_bc_check", use_container_width=True):
+                    try:
+                        _p = get_profile_by_code(active_client)
+                        _tid = _p.get("bc_tenant_id", "").strip()
+                        _cid = _p.get("bc_client_id", "").strip()
+                        _cs  = _p.get("bc_client_secret", "").strip()
+                        _env = _p.get("bc_environment", "").strip()
+                        if not all([_tid, _cid, _cs, _env, cfg.get("company_id")]):
+                            st.session_state[_bc_check_key] = {"success": False, "error": "Credentials BC incomplets pour ce profil."}
+                        else:
+                            _tok = get_access_token(_tid, _cid, _cs)
+                            _pkg_code_check = f"QC-{cfg.get('session_name', 'temp')}"[:20]
+                            st.session_state[_bc_check_key] = run_bc_import_check(
+                                _tid, _env, cfg["company_id"], _tok,
+                                _pkg_code_check, f"Vérification QC — {cfg.get('session_name', '')}",
+                                _original_bytes_e3,
+                            )
+                    except Exception as _bc_exc:
+                        st.session_state[_bc_check_key] = {"success": False, "error": f"{type(_bc_exc).__name__} : {_bc_exc}"}
+                    st.rerun()
 
         # ── Niveaux prérequis (Besoin 2) — gate avant l'analyse ──────────────
         # Détection basée sur les VRAIES anomalies Axe B (build_prerequisites_report),

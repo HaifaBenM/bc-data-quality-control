@@ -910,3 +910,54 @@ def get_configuration_package_status(
     resp.raise_for_status()
     results = resp.json().get("value", [])
     return results[0] if results else None
+
+
+def run_bc_import_check(
+    tenant_id: str, environment: str, company_id: str, token: str,
+    package_code: str, package_name: str, file_bytes: bytes,
+) -> dict:
+    """
+    AJOUTÉ (27/08/2026) — orchestration complète pour les points 2/3/6 :
+    crée le package s'il n'existe pas déjà (confirmé fonctionnel par Rami
+    le 27/08 — BC détecte seul les tables/champs à partir du fichier
+    Excel, même en partant d'un package vide), dépose le fichier, importe
+    (calcule les erreurs SANS rien écrire dans les vraies tables BC —
+    équivalent de "Valider" dans l'interface).
+
+    Ne fait JAMAIS l'étape "apply" (écriture réelle) — volontairement
+    séparée, à déclencher explicitement ailleurs après confirmation de
+    l'utilisateur.
+
+    Retourne un dict :
+        {"success": bool, "package_id": str, "status": dict|None, "error": str}
+    "status" est le résultat de get_configuration_package_status (contient
+    numberOfErrors, importError, etc.) si l'import a réussi à s'exécuter
+    (même si BC y trouve des erreurs de données — ça reste un succès
+    technique de l'appel). "error" n'est renseigné qu'en cas d'échec
+    technique (auth, réseau, package déjà existant sous un autre état...).
+    """
+    result = {"success": False, "package_id": "", "status": None, "error": ""}
+    try:
+        existing = get_configuration_package_status(tenant_id, environment, company_id, token, package_code)
+        if existing:
+            package_id = existing["id"]
+        else:
+            created = create_configuration_package(
+                tenant_id, environment, company_id, token, package_code, package_name
+            )
+            package_id = created["id"]
+
+        upload_configuration_package_file(
+            tenant_id, environment, company_id, token, package_id, package_code, file_bytes
+        )
+        import_configuration_package(tenant_id, environment, company_id, token, package_id)
+
+        status = get_configuration_package_status(tenant_id, environment, company_id, token, package_code)
+        result["success"]    = True
+        result["package_id"] = package_id
+        result["status"]     = status
+    except requests.HTTPError as e:
+        result["error"] = f"Erreur BC API {e.response.status_code} : {e.response.text[:300]}"
+    except Exception as e:
+        result["error"] = f"{type(e).__name__} : {e}"
+    return result
