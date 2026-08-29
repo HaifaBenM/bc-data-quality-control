@@ -88,6 +88,14 @@ st.markdown("""
     background: white; border: 1px solid #E2E8F0; border-radius: 8px;
 }
 .stat-num { font-size: 2rem; font-weight: 700; margin: 0; }
+.anomaly-big-num {
+    font-size: 2.6rem; font-weight: 800; line-height: 1; margin: 0;
+}
+.anomaly-big-lbl { font-size: .85rem; color: #64748B; margin: .2rem 0 0; }
+.anomaly-bc-pill {
+    display: inline-block; margin-top: .5rem; padding: .25rem .7rem;
+    border-radius: 999px; font-size: .8rem; font-weight: 600;
+}
 .stat-lbl { font-size: .75rem; color: #64748B; margin: .2rem 0 0; }
 .save-box {
     background: #E1F5EE; border: 1px solid #0F6E56; border-radius: 6px;
@@ -1580,144 +1588,130 @@ with tab_main:
 
                 _roadmap = st.session_state[_roadmap_key]
 
+                def _do_revalidate_roadmap():
+                    with st.spinner("Vérification BC en cours..."):
+                        # AJOUTÉ (23/08/2026) — fusionné depuis l'ancien bouton
+                        # séparé "Recharger classification niveaux" (retiré, cf.
+                        # commentaire plus haut) : recharge level_config à chaque
+                        # clic, pour qu'une modif SQL faite directement dans
+                        # Supabase soit prise en compte sans jamais avoir besoin
+                        # d'un F5 complet. Coût négligeable (petite table de
+                        # référence, un seul SELECT).
+                        try:
+                            st.session_state.level_config = load_level_config(get_supabase_client())
+                        except Exception:
+                            pass  # repli silencieux sur la classification déjà en mémoire
+
+                        def _gl_check():
+                            _rc_company_id = cfg.get("company_id", "")
+                            # Live BC en premier, l'onglet du fichier n'est qu'un
+                            # repli (28/07/2026) — voir check_gl_account_prerequisites.
+                            _rc_live = _try_live_gl_account(cfg["client_code"], _rc_company_id)
+                            if _rc_live:
+                                persist_gl_account_posting_fields(cfg["client_code"], _rc_company_id, _rc_live)
+                                return check_gl_account_prerequisites(pr, _rc_live, prefer_fallback=True)
+                            _rc_extract = extract_gl_account_posting_fields(pr)
+                            if _rc_extract:
+                                persist_gl_account_posting_fields(cfg["client_code"], _rc_company_id, _rc_extract)
+                                _rc_fallback = None
+                            else:
+                                _rc_fallback = get_gl_account_posting_fields(cfg["client_code"], _rc_company_id)
+                            return check_gl_account_prerequisites(pr, _rc_fallback)
+
+                        try:
+                            # RÉVISÉ (26/08/2026) — bug trouvé : la session en
+                            # cours (si déjà sauvegardée une première fois —
+                            # checkpoint ou complète) n'était jamais exclue de
+                            # sa propre vérification mémoire inter-sessions.
+                            # Résultat : ses propres codes fraîchement extraits
+                            # à la sauvegarde se comptaient comme une
+                            # "confirmation externe" — la session se validait
+                            # elle-même en boucle (cas réel : Article validé en
+                            # mémoire 🟡 sans aucune autre session ni BC réel
+                            # derrière).
+                            _current_session_id = (
+                                st.session_state.get("resumed_session_id")
+                                or st.session_state.get("saved_session_id")
+                            )
+                            st.session_state[_roadmap_key] = refresh_roadmap(
+                                cfg["client_code"], cfg["company_id"], _roadmap,
+                                gl_account_check=_gl_check,
+                                exclude_session_id=_current_session_id,
+                            )
+                        except Exception as _refresh_e:
+                            st.error(f"Erreur lors de la revérification : {type(_refresh_e).__name__}: {_refresh_e}")
+                            st.stop()
+                    st.rerun()
+
                 if _roadmap:
+                    _total   = len(_roadmap)
+                    _done    = sum(1 for e in _roadmap if e.status == "validated")
+                    _pct     = int(100 * _done / _total) if _total else 0
+
+                    # RÉVISÉ (27/08/2026, 4e passe) — demande Rami : "pas beau,
+                    # 2 boutons l'un sur l'autre, le nombre est trop petit" —
+                    # fusion de l'ancien bloc "Prérequis BC détectés" (avec son
+                    # bouton Revérifier) et du bloc "nombre d'anomalies" (avec
+                    # son bouton Comparer avec BC) en UNE SEULE carte : gros
+                    # chiffre à gauche, les deux boutons côte à côte à droite
+                    # (plus jamais empilés verticalement).
+                    _anomaly_count = st.session_state.get(f"_anomaly_count_{_roadmap_key}")
                     with st.container(border=True):
-                        _hcol1, _hcol2 = st.columns([5, 2])
+                        _hcol1, _hcol2, _hcol3 = st.columns([3, 1.3, 1.7])
                         with _hcol1:
-                            st.markdown('<div class="step-header">🧱 Prérequis BC détectés</div>', unsafe_allow_html=True)
+                            if _anomaly_count is not None:
+                                _num_color = "#0F6E56" if _anomaly_count == 0 else "#993C1D"
+                                st.markdown(
+                                    f'<div class="anomaly-big-num" style="color:{_num_color}">{_anomaly_count}</div>'
+                                    f'<div class="anomaly-big-lbl">anomalie(s) détectée(s) par l\'outil sur ce fichier</div>',
+                                    unsafe_allow_html=True,
+                                )
+                            else:
+                                st.markdown('<div class="step-header">🧱 Prérequis BC détectés</div>', unsafe_allow_html=True)
                         with _hcol2:
                             if st.button("🔄 Revérifier", key="btn_refresh_levels", use_container_width=True):
-                                with st.spinner("Vérification BC en cours..."):
-                                    # AJOUTÉ (23/08/2026) — fusionné depuis l'ancien bouton
-                                    # séparé "Recharger classification niveaux" (retiré, cf.
-                                    # commentaire plus haut) : recharge level_config à chaque
-                                    # clic, pour qu'une modif SQL faite directement dans
-                                    # Supabase soit prise en compte sans jamais avoir besoin
-                                    # d'un F5 complet. Coût négligeable (petite table de
-                                    # référence, un seul SELECT).
-                                    try:
-                                        st.session_state.level_config = load_level_config(get_supabase_client())
-                                    except Exception:
-                                        pass  # repli silencieux sur la classification déjà en mémoire
+                                _do_revalidate_roadmap()
+                        with _hcol3:
+                            _cmp_clicked = st.button("🔎 Comparer avec BC", key="btn_bc_check", use_container_width=True)
 
-                                    def _gl_check():
-                                        _rc_company_id = cfg.get("company_id", "")
-                                        # Live BC en premier, l'onglet du fichier n'est qu'un
-                                        # repli (28/07/2026) — voir check_gl_account_prerequisites.
-                                        _rc_live = _try_live_gl_account(cfg["client_code"], _rc_company_id)
-                                        if _rc_live:
-                                            persist_gl_account_posting_fields(cfg["client_code"], _rc_company_id, _rc_live)
-                                            return check_gl_account_prerequisites(pr, _rc_live, prefer_fallback=True)
-                                        _rc_extract = extract_gl_account_posting_fields(pr)
-                                        if _rc_extract:
-                                            persist_gl_account_posting_fields(cfg["client_code"], _rc_company_id, _rc_extract)
-                                            _rc_fallback = None
-                                        else:
-                                            _rc_fallback = get_gl_account_posting_fields(cfg["client_code"], _rc_company_id)
-                                        return check_gl_account_prerequisites(pr, _rc_fallback)
-
-                                    try:
-                                        # RÉVISÉ (26/08/2026) — bug trouvé : la session en
-                                        # cours (si déjà sauvegardée une première fois —
-                                        # checkpoint ou complète) n'était jamais exclue de
-                                        # sa propre vérification mémoire inter-sessions.
-                                        # Résultat : ses propres codes fraîchement extraits
-                                        # à la sauvegarde se comptaient comme une
-                                        # "confirmation externe" — la session se validait
-                                        # elle-même en boucle (cas réel : Article validé en
-                                        # mémoire 🟡 sans aucune autre session ni BC réel
-                                        # derrière).
-                                        _current_session_id = (
-                                            st.session_state.get("resumed_session_id")
-                                            or st.session_state.get("saved_session_id")
-                                        )
-                                        st.session_state[_roadmap_key] = refresh_roadmap(
-                                            cfg["client_code"], cfg["company_id"], _roadmap,
-                                            gl_account_check=_gl_check,
-                                            exclude_session_id=_current_session_id,
-                                        )
-                                    except Exception as _refresh_e:
-                                        st.error(f"Erreur lors de la revérification : {type(_refresh_e).__name__}: {_refresh_e}")
-                                        st.stop()
-                                st.rerun()
-
-                        _total   = len(_roadmap)
-                        _done    = sum(1 for e in _roadmap if e.status == "validated")
-                        _pct     = int(100 * _done / _total) if _total else 0
-
-                        # AJOUTÉ (27/08/2026, 2e passe) — demande Rami, point 3 :
-                        # nombre d'anomalies détecté par L'OUTIL LUI-MÊME,
-                        # affiché avant la roadmap (déjà calculé lors de sa
-                        # construction, lu depuis le cache — pas de recalcul).
-                        # La comparaison avec le nombre BC réel reste un outil
-                        # SECONDAIRE, à la demande (bouton dédié), pas la
-                        # source principale affichée par défaut.
-                        # RÉVISÉ (27/08/2026, 3e passe) — demande Rami : "affichage
-                        # très moche" — st.error/st.success + st.popover
-                        # détonnaient avec le reste de l'écran (cartes CSS
-                        # maison partout ailleurs). Repris avec EXACTEMENT le
-                        # même agencement que le bloc "Prérequis BC détectés"
-                        # juste en dessous (container bordé + colonnes [5,2] +
-                        # cartes .card-major/.card-minor déjà utilisées ailleurs
-                        # dans l'app), pour une cohérence visuelle réelle.
-                        _anomaly_count = st.session_state.get(f"_anomaly_count_{_roadmap_key}")
-                        if _anomaly_count is not None:
-                            with st.container(border=True):
-                                _ac1, _ac2 = st.columns([5, 2])
-                                with _ac1:
-                                    if _anomaly_count == 0:
-                                        st.markdown(
-                                            '<div class="card-ref">✅ <b>0 anomalie</b> détectée par l\'outil sur ce fichier.</div>',
-                                            unsafe_allow_html=True,
-                                        )
+                        _bc_check_key = f"bc_check_{_roadmap_key}"
+                        if _cmp_clicked:
+                            with st.spinner("Vérification BC en cours..."):
+                                _original_bytes_e3 = st.session_state.get("original_file_bytes")
+                                try:
+                                    _p = get_profile_by_code(active_client)
+                                    _tid = _p.get("bc_tenant_id", "").strip()
+                                    _cid = _p.get("bc_client_id", "").strip()
+                                    _cs  = _p.get("bc_client_secret", "").strip()
+                                    _env = _p.get("bc_environment", "").strip()
+                                    if not all([_tid, _cid, _cs, _env, cfg.get("company_id"), _original_bytes_e3]):
+                                        st.session_state[_bc_check_key] = {"success": False, "error": "Credentials BC ou fichier original manquants."}
                                     else:
-                                        st.markdown(
-                                            f'<div class="card-major">🔴 <b>{_anomaly_count} anomalie(s)</b> détectée(s) par l\'outil sur ce fichier.</div>',
-                                            unsafe_allow_html=True,
+                                        _tok = get_access_token(_tid, _cid, _cs)
+                                        _pkg_code_check = f"QC-{cfg.get('session_name', 'temp')}"[:20]
+                                        st.session_state[_bc_check_key] = run_bc_import_check(
+                                            _tid, _env, cfg["company_id"], _tok,
+                                            _pkg_code_check, f"Vérification QC — {cfg.get('session_name', '')}",
+                                            _original_bytes_e3,
                                         )
-                                with _ac2:
-                                    _cmp_clicked = st.button("🔎 Comparer avec BC", key="btn_bc_check", use_container_width=True)
+                                except Exception as _bc_exc:
+                                    st.session_state[_bc_check_key] = {"success": False, "error": f"{type(_bc_exc).__name__} : {_bc_exc}"}
 
-                                _bc_check_key = f"bc_check_{_roadmap_key}"
-                                if _cmp_clicked:
-                                    with st.spinner("Vérification BC en cours..."):
-                                        _original_bytes_e3 = st.session_state.get("original_file_bytes")
-                                        try:
-                                            _p = get_profile_by_code(active_client)
-                                            _tid = _p.get("bc_tenant_id", "").strip()
-                                            _cid = _p.get("bc_client_id", "").strip()
-                                            _cs  = _p.get("bc_client_secret", "").strip()
-                                            _env = _p.get("bc_environment", "").strip()
-                                            if not all([_tid, _cid, _cs, _env, cfg.get("company_id"), _original_bytes_e3]):
-                                                st.session_state[_bc_check_key] = {"success": False, "error": "Credentials BC ou fichier original manquants."}
-                                            else:
-                                                _tok = get_access_token(_tid, _cid, _cs)
-                                                _pkg_code_check = f"QC-{cfg.get('session_name', 'temp')}"[:20]
-                                                st.session_state[_bc_check_key] = run_bc_import_check(
-                                                    _tid, _env, cfg["company_id"], _tok,
-                                                    _pkg_code_check, f"Vérification QC — {cfg.get('session_name', '')}",
-                                                    _original_bytes_e3,
-                                                )
-                                        except Exception as _bc_exc:
-                                            st.session_state[_bc_check_key] = {"success": False, "error": f"{type(_bc_exc).__name__} : {_bc_exc}"}
-
-                                _bc_check = st.session_state.get(_bc_check_key)
-                                if _bc_check:
-                                    if not _bc_check.get("success"):
-                                        st.markdown(
-                                            f'<div class="card-info">⚠️ {_bc_check.get("error", "")}</div>',
-                                            unsafe_allow_html=True,
-                                        )
-                                    else:
-                                        _nb_err_bc = (_bc_check.get("status") or {}).get("numberOfErrors", "?")
-                                        _match = _nb_err_bc == _anomaly_count
-                                        _cls = "card-ref" if _match else "card-minor"
-                                        _icon = "✅" if _match else "⚠️"
-                                        st.markdown(
-                                            f'<div class="{_cls}">{_icon} Outil : <b>{_anomaly_count}</b> '
-                                            f'— BC réel : <b>{_nb_err_bc}</b></div>',
-                                            unsafe_allow_html=True,
-                                        )
+                        _bc_check = st.session_state.get(_bc_check_key)
+                        if _bc_check and _anomaly_count is not None:
+                            if not _bc_check.get("success"):
+                                st.caption(f"⚠️ {_bc_check.get('error', '')}")
+                            else:
+                                _nb_err_bc = (_bc_check.get("status") or {}).get("numberOfErrors", "?")
+                                _match = _nb_err_bc == _anomaly_count
+                                _pill_bg  = "#E1F5EE" if _match else "#FAEEDA"
+                                _pill_fg  = "#0F6E56" if _match else "#854F0B"
+                                _icon = "✅" if _match else "⚠️"
+                                st.markdown(
+                                    f'<span class="anomaly-bc-pill" style="background:{_pill_bg};color:{_pill_fg}">'
+                                    f'{_icon} BC réel : {_nb_err_bc}</span>',
+                                    unsafe_allow_html=True,
+                                )
 
                         st.markdown(f"**Progression — {_pct}%**")
                         st.progress(_pct / 100)
