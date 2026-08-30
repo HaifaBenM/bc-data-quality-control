@@ -854,10 +854,18 @@ def upload_configuration_package_file(
     RÉVISÉ (27/08/2026) — même fix que import/apply_configuration_package :
     le corps réel de la réponse BC est maintenant inclus dans le message
     d'erreur (raise_for_status() seul ne le montrait jamais).
+
+    RÉVISÉ (27/08/2026, 2e passe) — bug réel trouvé (404 "Resource not
+    found for the segment 'file'") : package_code inséré tel quel dans
+    l'URL — un vrai code package BC contient souvent des espaces et un
+    tiret cadratin (ex. "QC-MDD-STOCK-V2 — 28", généré via la date), ce qui
+    casse la syntaxe OData du segment file('...'). Encodé avec quote()
+    avant insertion.
     """
+    _pkg_code_enc = quote(package_code, safe="")
     url = (
         f"{_automation_base_url(tenant_id, environment, company_id)}"
-        f"/configurationPackages({package_id})/file('{package_code}')/content"
+        f"/configurationPackages({package_id})/file('{_pkg_code_enc}')/content"
     )
     resp = requests.patch(
         url,
@@ -923,10 +931,16 @@ def get_configuration_package_status(
     applyError) — via $filter sur la liste complète (même endpoint que
     get_config_packages), pas de GET direct par code exposé par cette API.
     Retourne None si aucun package ne correspond à ce code.
+
+    RÉVISÉ (27/08/2026) — même fix d'encodage que upload_configuration_
+    package_file : un code contenant espaces/tiret cadratin cassait la
+    requête $filter. Guillemet simple doublé (échappement OData standard)
+    avant encodage URL de toute la valeur.
     """
+    _pkg_code_odata = package_code.replace("'", "''")
     url = (
         f"{_automation_base_url(tenant_id, environment, company_id)}"
-        f"/configurationPackages?$filter=code eq '{package_code}'"
+        f"/configurationPackages?$filter=code eq '{quote(_pkg_code_odata, safe='')}'"
     )
     resp = requests.get(url, headers=_headers(token), timeout=30)
     resp.raise_for_status()
