@@ -612,29 +612,69 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
     # tout (valeurs sélectionnées, icônes de suppression illisibles,
     # entassées). Empilé verticalement à la place : chaque filtre prend
     # toute la largeur du popover, plus de troncature.
-    with st.popover("🔍 Filtres"):
-        sevs = sorted(set(a.get("Sévérité", "") for a in real_anomalies))
-        filt_sev = st.multiselect("Sévérité", sevs, default=sevs, key=f"fs_{sn}")
+    # AJOUTÉ (27/08/2026, 6e passe) — demande Rami : Filtres, bascule
+    # Sélectionner/Désélectionner et Propager regroupés sur UNE SEULE
+    # rangée (Désélectionner + Propager à gauche, Filtres à l'autre bout),
+    # toutes les 3 à la même taille naturelle (pas de use_container_width).
+    # _editor_gen_key avancé plus tôt dans la fonction (ne dépendait pas
+    # vraiment de `filtered`, juste conventionnellement placé après avant).
+    _editor_gen_key = f"merged_editor_gen_{sn}"
+    if _editor_gen_key not in st.session_state:
+        st.session_state[_editor_gen_key] = 0
 
-        types = sorted(set(a.get("Type d'anomalie", "") for a in real_anomalies))
-        filt_type = st.multiselect("Type d'anomalie", types, default=types, key=f"ft_{sn}")
+    _all_sel_key = f"_all_selected_state_{sn}"
+    if _all_sel_key not in st.session_state:
+        st.session_state[_all_sel_key] = False
+    _toggle_label = "⬜ Tout désélectionner" if st.session_state[_all_sel_key] else "✅ Tout sélectionner"
 
-        champs = sorted(set(a.get("Champ", "") for a in real_anomalies))
-        filt_champ = st.multiselect("Champ", champs, default=champs, key=f"fc_{sn}")
+    if is_consultant():
+        _rowsel1, _rowsel2, _row_spacer, _rowsel3 = st.columns([1.4, 1.4, 4.2, 1.4])
+    else:
+        _rowsel1, _row_spacer, _rowsel3 = st.columns([1.4, 5.6, 1.4])
+        _rowsel2 = None
 
-        _cls_label = {
-            "PREALABLE_BC_REQUIS": "🟣 Prérequis BC requis",
-            "VALEUR_CORRIGIBLE":   "✏️ Corrigible",
-            # AJOUTÉ (26/08/2026, jour J) — nouvelle classification apportée
-            # par la détection de cohérence (validate_coherence_axe_c),
-            # jamais mappée jusqu'ici — s'affichait vide dans la colonne.
-            "SUGGESTION_IA":       "🧠 Suggestion IA",
-        }
-        clss = sorted(set(a.get("Classification", "") for a in real_anomalies))
-        filt_cls = st.multiselect(
-            "Classification", clss, default=clss, key=f"fcl_{sn}",
-            format_func=lambda c: _cls_label.get(c, c or "(aucune)"),
-        )
+    with _rowsel1:
+        if st.button(_toggle_label, key=f"btn_toggle_select_{sn}", use_container_width=True):
+            st.session_state[_all_sel_key] = not st.session_state[_all_sel_key]
+            st.session_state[f"_merged_select_override_{sn}"] = st.session_state[_all_sel_key]
+            st.session_state[_editor_gen_key] += 1
+            st.rerun()
+    _select_override = st.session_state.pop(f"_merged_select_override_{sn}", None)
+    _propagate_overrides: dict = st.session_state.get(f"_propagate_overrides_{sn}", {})
+
+    _propagate_clicked = False
+    if _rowsel2 is not None:
+        with _rowsel2:
+            _propagate_clicked = st.button(
+                "🔁 Propager", key=f"btn_propagate_{sn}", use_container_width=True,
+                help="Applique chaque correction saisie à toutes les autres lignes ayant la même valeur source dans le même champ",
+            )
+
+    with _rowsel3:
+        # RÉVISÉ (27/08/2026, 4e/5e/6e passes) — voir historique complet du
+        # popover Filtres dans les commentaires précédents (largeur, police,
+        # empilement vertical du contenu) — juste déplacé dans cette rangée
+        # commune, comportement interne inchangé.
+        with st.popover("🔍 Filtres", use_container_width=True):
+            sevs = sorted(set(a.get("Sévérité", "") for a in real_anomalies))
+            filt_sev = st.multiselect("Sévérité", sevs, default=sevs, key=f"fs_{sn}")
+
+            types = sorted(set(a.get("Type d'anomalie", "") for a in real_anomalies))
+            filt_type = st.multiselect("Type d'anomalie", types, default=types, key=f"ft_{sn}")
+
+            champs = sorted(set(a.get("Champ", "") for a in real_anomalies))
+            filt_champ = st.multiselect("Champ", champs, default=champs, key=f"fc_{sn}")
+
+            _cls_label = {
+                "PREALABLE_BC_REQUIS": "🟣 Prérequis BC requis",
+                "VALEUR_CORRIGIBLE":   "✏️ Corrigible",
+                "SUGGESTION_IA":       "🧠 Suggestion IA",
+            }
+            clss = sorted(set(a.get("Classification", "") for a in real_anomalies))
+            filt_cls = st.multiselect(
+                "Classification", clss, default=clss, key=f"fcl_{sn}",
+                format_func=lambda c: _cls_label.get(c, c or "(aucune)"),
+            )
 
     filtered = [
         a for a in real_anomalies
@@ -650,39 +690,6 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
         _sev_icon = {"Majeure": "🔴 Majeure", "Mineure": "🟠 Mineure"}
         _has_ia_col = any(a.get("suggestion_ia") for a in filtered)
 
-        # AJOUTÉ (26/08/2026) — demande Rami : sélection en lot, comme avant
-        # sur l'ancien tableau de correction, désormais applicable au
-        # tableau fusionné entier.
-        _editor_gen_key = f"merged_editor_gen_{sn}"
-        if _editor_gen_key not in st.session_state:
-            st.session_state[_editor_gen_key] = 0
-
-        # RÉVISÉ (27/08/2026, 5e passe) — demande Rami : l'icône seule
-        # "fait amateur" — retour à un seul bouton à bascule avec texte
-        # complet ("✅ Tout sélectionner" / "⬜ Tout désélectionner"), qui
-        # change de libellé selon l'état courant au lieu de 2 boutons
-        # séparés.
-        _all_sel_key = f"_all_selected_state_{sn}"
-        if _all_sel_key not in st.session_state:
-            st.session_state[_all_sel_key] = False
-        _toggle_label = "⬜ Tout désélectionner" if st.session_state[_all_sel_key] else "✅ Tout sélectionner"
-
-        if is_consultant():
-            csel1, csel3, _csel_spacer = st.columns([1.4, 1.4, 5.2])
-        else:
-            csel1, _csel_spacer = st.columns([1.4, 6.6])
-            csel3 = None
-        with csel1:
-            if st.button(_toggle_label, key=f"btn_toggle_select_{sn}", use_container_width=True):
-                st.session_state[_all_sel_key] = not st.session_state[_all_sel_key]
-                st.session_state[f"_merged_select_override_{sn}"] = st.session_state[_all_sel_key]
-                st.session_state[_editor_gen_key] += 1
-                st.rerun()
-        _select_override = st.session_state.pop(f"_merged_select_override_{sn}", None)
-        # AJOUTÉ (26/08/2026) — overrides posés par "🔁 Propager" ci-dessous
-        # (valeur manuelle appliquée à toutes les lignes de même Champ +
-        # Valeur source qui n'avaient pas encore de correction saisie).
-        _propagate_overrides: dict = st.session_state.get(f"_propagate_overrides_{sn}", {})
 
         # AJOUTÉ (26/08/2026, 2e passe) ; RÉVISÉ (27/08/2026, retrait Copier) —
         # affichage du message persisté posé par "🔁 Propager" lors du run
@@ -776,48 +783,45 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
             key=f"merged_editor_{sn}_{st.session_state[_editor_gen_key]}",
         )
 
-        if csel3 is not None:
-            with csel3:
-                if st.button("🔁 Propager", key=f"btn_propagate_{sn}",
-                             help="Applique chaque correction saisie à toutes les autres lignes ayant la même valeur source dans le même champ"):
-                    # RÉVISÉ (27/08/2026, jour de la démo) — bug évité : la
-                    # comparaison utilisait "Correction suggérée", colonne
-                    # retirée de l'affichage (fusionnée dans "🤖 Suggestion IA",
-                    # qui inclut un "(X%)" que "Nouvelle valeur" n'a jamais —
-                    # comparer directement aurait détecté un "changement" sur
-                    # CHAQUE ligne, même non modifiée). Comparaison désormais
-                    # contre la valeur ORIGINALE de "Nouvelle valeur" (avant
-                    # toute édition), qui reflète fidèlement ce qui était
-                    # pré-rempli par défaut.
-                    _original_nv_by_key = {
-                        (r["Ligne"], r["Champ"]): r["Nouvelle valeur"] for r in edit_rows_display
-                    }
-                    _new_overrides = dict(_propagate_overrides)
-                    _propagated = 0
-                    for _, row in edited.iterrows():
-                        _nv = str(row["Nouvelle valeur"]).strip()
-                        _orig_nv = str(_original_nv_by_key.get((row["Ligne"], row["Champ"]), "")).strip()
-                        if _nv and _nv != _orig_nv:
-                            _key = (row["Champ"], str(row["Valeur source"]).strip())
-                            _new_overrides[_key] = _nv
-                    # Compte les lignes qui vont effectivement changer au prochain rerun
-                    for r in edit_rows:
-                        _key = (r["Champ"], str(r["Valeur source"]).strip())
-                        if _key in _new_overrides and str(r["Nouvelle valeur"]).strip() != _new_overrides[_key]:
-                            _propagated += 1
-                    st.session_state[f"_propagate_overrides_{sn}"] = _new_overrides
-                    st.session_state[_editor_gen_key] += 1
-                    # RÉVISÉ (26/08/2026, 2e passe) — bug trouvé : st.success/
-                    # st.info juste avant st.rerun() ne s'affichaient jamais (le
-                    # rerun efface le rendu en cours avant qu'il atteigne
-                    # l'écran — même piège déjà rencontré cette semaine).
-                    # Message persisté en session_state, affiché au prochain
-                    # rendu à la place.
-                    if _propagated:
-                        st.session_state[f"_propagate_feedback_{sn}"] = ("success", f"✅ {_propagated} ligne(s) mise(s) à jour avec la même correction.")
-                    else:
-                        st.session_state[f"_propagate_feedback_{sn}"] = ("info", "ℹ️ Rien à propager — soit aucune autre ligne ne partage la même valeur source dans ce champ, soit toutes l'ont déjà.")
-                    st.rerun()
+        if _propagate_clicked:
+            # RÉVISÉ (27/08/2026, jour de la démo) — bug évité : la
+            # comparaison utilisait "Correction suggérée", colonne
+            # retirée de l'affichage (fusionnée dans "🤖 Suggestion IA",
+            # qui inclut un "(X%)" que "Nouvelle valeur" n'a jamais —
+            # comparer directement aurait détecté un "changement" sur
+            # CHAQUE ligne, même non modifiée). Comparaison désormais
+            # contre la valeur ORIGINALE de "Nouvelle valeur" (avant
+            # toute édition), qui reflète fidèlement ce qui était
+            # pré-rempli par défaut.
+            _original_nv_by_key = {
+                (r["Ligne"], r["Champ"]): r["Nouvelle valeur"] for r in edit_rows_display
+            }
+            _new_overrides = dict(_propagate_overrides)
+            _propagated = 0
+            for _, row in edited.iterrows():
+                _nv = str(row["Nouvelle valeur"]).strip()
+                _orig_nv = str(_original_nv_by_key.get((row["Ligne"], row["Champ"]), "")).strip()
+                if _nv and _nv != _orig_nv:
+                    _key = (row["Champ"], str(row["Valeur source"]).strip())
+                    _new_overrides[_key] = _nv
+            # Compte les lignes qui vont effectivement changer au prochain rerun
+            for r in edit_rows:
+                _key = (r["Champ"], str(r["Valeur source"]).strip())
+                if _key in _new_overrides and str(r["Nouvelle valeur"]).strip() != _new_overrides[_key]:
+                    _propagated += 1
+            st.session_state[f"_propagate_overrides_{sn}"] = _new_overrides
+            st.session_state[_editor_gen_key] += 1
+            # RÉVISÉ (26/08/2026, 2e passe) — bug trouvé : st.success/
+            # st.info juste avant st.rerun() ne s'affichaient jamais (le
+            # rerun efface le rendu en cours avant qu'il atteigne
+            # l'écran — même piège déjà rencontré cette semaine).
+            # Message persisté en session_state, affiché au prochain
+            # rendu à la place.
+            if _propagated:
+                st.session_state[f"_propagate_feedback_{sn}"] = ("success", f"✅ {_propagated} ligne(s) mise(s) à jour avec la même correction.")
+            else:
+                st.session_state[f"_propagate_feedback_{sn}"] = ("info", "ℹ️ Rien à propager — soit aucune autre ligne ne partage la même valeur source dans ce champ, soit toutes l'ont déjà.")
+            st.rerun()
 
         cgen1, cgen2, cgen3 = st.columns([1, 1, 2])
         with cgen1:
