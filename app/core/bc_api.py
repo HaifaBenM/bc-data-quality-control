@@ -893,7 +893,13 @@ def upload_configuration_package_file(
     url = f"{_base}/configurationPackages({package_id})/file('{_pkg_code_enc}')/content"
     resp = requests.patch(
         url,
-        headers={**_headers(token), "Content-Type": "application/octet-stream", "If-Match": "*"},
+        # RÉVISÉ (27/08/2026, 6e passe) — "unsupported compression method"
+        # persistant malgré un fichier vérifié 100% propre (en-têtes locaux
+        # ET répertoire central du zip, aucune anomalie à aucun niveau) —
+        # If-Match: * retiré en test : certaines implémentations OData
+        # traitent différemment (parfois de façon défectueuse) un flux
+        # binaire PATCH avec un ETag joker sur une propriété media/stream.
+        headers={**_headers(token), "Content-Type": "application/octet-stream"},
         data=file_bytes, timeout=60,
     )
     if not resp.ok:
