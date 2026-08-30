@@ -972,13 +972,20 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
                 _integ_status = _integ.get("status") or {}
                 _import_status_str = str(_integ_status.get("importStatus", "")).lower()
                 _nb_err_integ = _integ_status.get("numberOfErrors", "?")
-                # AJOUTÉ (27/08/2026) — garde-fou : si le sondage de
-                # run_bc_import_check n'a pas réussi à confirmer
-                # importStatus == "Completed" dans le temps imparti, ne
-                # jamais proposer "Appliquer" — mieux vaut redemander une
-                # vérification que de retomber sur l'erreur BC "Import
-                # Status is not completed".
-                if _import_status_str != "completed":
+                # RÉVISÉ (27/08/2026, 2e passe) — bug trouvé : "Error" tombait
+                # dans le même message que "InProgress" ("pas encore
+                # confirmé... relance dans quelques secondes"), alors que
+                # "Error" est un vrai échec BC (relancer ne sert à rien) —
+                # message trompeur. Distingue maintenant clairement les deux
+                # cas, et affiche le vrai message d'erreur BC (importError)
+                # quand il y en a un, au lieu de suggérer d'attendre.
+                if _import_status_str == "error":
+                    st.markdown(
+                        f'<div class="card-major">🔴 BC a rejeté l\'import — '
+                        f'{_integ_status.get("importError") or "aucun détail fourni par BC."}</div>',
+                        unsafe_allow_html=True,
+                    )
+                elif _import_status_str != "completed":
                     st.markdown(
                         f'<div class="card-minor">⏳ BC n\'a pas encore confirmé la fin de l\'import '
                         f'(statut actuel : {_integ_status.get("importStatus", "inconnu")}) — relance '
