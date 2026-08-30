@@ -756,7 +756,7 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
 
         if csel3 is not None:
             with csel3:
-                if st.button("🔁 Propager", key=f"btn_propagate_{sn}", use_container_width=True,
+                if st.button("🔁 Propager", key=f"btn_propagate_{sn}",
                              help="Applique chaque correction saisie à toutes les autres lignes ayant la même valeur source dans le même champ"):
                     # RÉVISÉ (27/08/2026, jour de la démo) — bug évité : la
                     # comparaison utilisait "Correction suggérée", colonne
@@ -2785,7 +2785,7 @@ with tab_ses:
                     with top_actions:
                         tr, te, td = st.columns(3)
                         with tr:
-                            if st.button("▶️", key=f"resume_{sid}", use_container_width=True,
+                            if st.button("▶️", key=f"resume_{sid}",
                                          help="Reprendre — recharge le fichier et rouvre l'analyse (roadmap, niveaux)"):
                                 # AJOUTÉ (23/08/2026) — demande Rami : aucun moyen de
                                 # rouvrir une session sauvegardée dans le flux Étape
@@ -2841,11 +2841,11 @@ with tab_ses:
                                         )
                                         st.rerun()
                         with te:
-                            if st.button("✏️", key=f"es_{sid}", use_container_width=True, help="Modifier"):
+                            if st.button("✏️", key=f"es_{sid}", help="Modifier"):
                                 st.session_state.edit_session_id    = sid
                                 st.session_state.confirm_delete_ses = None
                         with td:
-                            if st.button("🗑️", key=f"ds_{sid}", use_container_width=True, help="Supprimer"):
+                            if st.button("🗑️", key=f"ds_{sid}", help="Supprimer"):
                                 st.session_state.confirm_delete_ses = sid
                                 st.session_state.edit_session_id    = None
 
