@@ -1824,7 +1824,7 @@ with tab_main:
                         _hcol1, _hcol2, _hcol3 = st.columns([3, 1.5, 1.5])
                         with _hcol1:
                             if _anomaly_count is not None:
-                                _num_color = "#0F6E56" if _anomaly_count == 0 else "#993C1D"
+                                _num_color = "#0F6E56" if _anomaly_count == 0 else "#DC2626"
                                 st.markdown(
                                     f'<div class="anomaly-big-num" style="color:{_num_color}">{_anomaly_count}</div>'
                                     f'<div class="anomaly-big-lbl">anomalie(s) détectée(s) par l\'outil sur ce fichier</div>',
