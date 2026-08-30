@@ -2346,8 +2346,9 @@ with tab_main:
         # font cette tâche. Retiré de la restriction is_consultant()
         # (l'auto-détection silencieuse pour le client est abandonnée).
         _node_kind = st.selectbox(
-            "Type de session",
+            "Type de session *",
             ["Racine (socle complet)", "Fille (une table de la roadmap)"],
+            index=None, placeholder="Choisir un type de session...",
             key="node_kind_radio",
         )
         _sel_table_id: int | None = None
@@ -2398,7 +2399,16 @@ with tab_main:
                 reset_session()
                 st.rerun()
         with csave:
-            _save_clicked = st.button("💾 Sauvegarder la session", type="primary", use_container_width=True)
+            # AJOUTÉ (27/08/2026) — demande Rami : liste "Type de session"
+            # vide par défaut, sauvegarde bloquée tant qu'un choix explicite
+            # n'est pas fait (sinon _node_kind=None casserait silencieusement
+            # le calcul de is_root).
+            _save_clicked = st.button(
+                "💾 Sauvegarder la session", type="primary", use_container_width=True,
+                disabled=_node_kind is None,
+            )
+        if _node_kind is None and not st.session_state.saved_session_id:
+            st.caption("⚠️ Choisis un type de session ci-dessus avant de sauvegarder.")
         if _save_clicked:
                     original_bytes  = st.session_state.get("original_file_bytes")
                     generated_bytes = st.session_state.get("generated_file_bytes")
