@@ -30,7 +30,7 @@ from app.db.metadata_db import (
 from app.db.profiles_db import get_profile_by_code
 from app.core.bc_api import (
     get_access_token, get_companies, get_packages_qc, get_gl_account_fields_live,
-    diagnose_standard_api_account, run_bc_import_check,
+    diagnose_standard_api_account, run_bc_import_check, apply_configuration_package,
 )
 from app.db.sessions_db import (
     save_session, update_session, delete_session,
@@ -912,6 +912,111 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
                     key="dl_generated_file",
                     use_container_width=True,
                 )
+
+            # AJOUTÉ (27/08/2026) — demande Rami, point 2 des chantiers
+            # post-démo : intégration directe du fichier corrigé dans BC,
+            # pour que le client puisse le faire sans dépendre du
+            # consultant. Réutilise run_bc_import_check (créer le package
+            # si besoin, déposer le fichier CORRIGÉ, importer sans écrire —
+            # "Valider"). L'étape "Appliquer" (écriture réelle, irréversible
+            # côté BC) est volontairement séparée et exige une confirmation
+            # explicite avant de se déclencher.
+            st.markdown("---")
+            st.markdown('<div class="step-header">🚀 Intégrer directement dans BC</div>', unsafe_allow_html=True)
+
+            _integ_key = f"bc_integration_{sn}"
+            if _integ_key not in st.session_state:
+                st.session_state[_integ_key] = {"stage": "idle"}
+            _integ = st.session_state[_integ_key]
+
+            if _integ["stage"] in ("idle", "imported"):
+                if st.button("1️⃣ Vérifier avant intégration", key=f"btn_integ_check_{sn}"):
+                    with st.spinner("Vérification BC en cours..."):
+                        try:
+                            _p = get_profile_by_code(cfg.get("client_code", ""))
+                            _tid = _p.get("bc_tenant_id", "").strip()
+                            _cid = _p.get("bc_client_id", "").strip()
+                            _cs  = _p.get("bc_client_secret", "").strip()
+                            _env = _p.get("bc_environment", "").strip()
+                            if not all([_tid, _cid, _cs, _env, cfg.get("company_id")]):
+                                st.session_state[_integ_key] = {"stage": "idle", "error": "Credentials BC incomplets pour ce profil."}
+                            else:
+                                _tok = get_access_token(_tid, _cid, _cs)
+                                _pkg_code_integ = f"QC-{cfg.get('session_name', 'temp')}"[:20]
+                                _res = run_bc_import_check(
+                                    _tid, _env, cfg["company_id"], _tok,
+                                    _pkg_code_integ, f"Intégration QC — {cfg.get('session_name', '')}",
+                                    st.session_state["generated_file_bytes"],
+                                )
+                                if _res.get("success"):
+                                    st.session_state[_integ_key] = {
+                                        "stage": "imported",
+                                        "package_id": _res["package_id"],
+                                        "package_code": _pkg_code_integ,
+                                        "status": _res.get("status"),
+                                        "creds": (_tid, _env, cfg["company_id"], _tok),
+                                    }
+                                else:
+                                    st.session_state[_integ_key] = {"stage": "idle", "error": _res.get("error", "")}
+                        except Exception as _integ_exc:
+                            st.session_state[_integ_key] = {"stage": "idle", "error": f"{type(_integ_exc).__name__} : {_integ_exc}"}
+
+            _integ = st.session_state[_integ_key]
+            if _integ.get("error"):
+                st.markdown(f'<div class="card-major">🔴 {_integ["error"]}</div>', unsafe_allow_html=True)
+
+            if _integ["stage"] == "imported":
+                _nb_err_integ = (_integ.get("status") or {}).get("numberOfErrors", "?")
+                if _nb_err_integ == 0:
+                    st.markdown('<div class="card-ref">✅ 0 erreur — le fichier peut être appliqué dans BC.</div>', unsafe_allow_html=True)
+                    st.warning("⚠️ L'étape suivante écrit réellement les données dans Business Central — action irréversible.")
+                    _confirm = st.checkbox("Je confirme vouloir intégrer ces données dans Business Central", key=f"confirm_apply_{sn}")
+                    if _confirm and st.button("2️⃣ Appliquer dans BC", type="primary", key=f"btn_integ_apply_{sn}"):
+                        with st.spinner("Intégration dans BC en cours..."):
+                            try:
+                                _tid, _env, _company_id, _tok = _integ["creds"]
+                                apply_configuration_package(_tid, _env, _company_id, _tok, _integ["package_id"])
+
+                                # AJOUTÉ (27/08/2026) — après une intégration réussie :
+                                # marque automatiquement la session comme "Terminée"
+                                # (confirmé par Rami) et met à jour la mémoire
+                                # inter-sessions pour la table concernée si c'est
+                                # une session fille (même règle que la sauvegarde
+                                # complète — voir plus bas dans ce fichier).
+                                _sid = st.session_state.get("resumed_session_id") or st.session_state.get("saved_session_id")
+                                if _sid:
+                                    try:
+                                        update_session(_sid, {"status": "Terminée"})
+                                    except Exception:
+                                        pass
+                                _tid_mem = cfg.get("table_id")
+                                if _tid_mem:
+                                    try:
+                                        from app.core.bc_excel_processor import extract_key_values_by_table
+                                        from app.db.metadata_db import save_pending_codes
+                                        _codes_all = extract_key_values_by_table(st.session_state["generated_file_bytes"])
+                                        _codes_scoped = {k: v for k, v in _codes_all.items() if k == _tid_mem}
+                                        if _codes_scoped and _sid:
+                                            save_pending_codes(
+                                                session_id=_sid, profile_code=cfg.get("client_code", ""),
+                                                company_id=cfg.get("company_id", ""), codes_by_table=_codes_scoped,
+                                            )
+                                    except Exception:
+                                        pass
+
+                                st.session_state[_integ_key] = {"stage": "applied"}
+                                st.success("✅ Données intégrées dans Business Central avec succès. Session marquée « Terminée ».")
+                            except Exception as _apply_exc:
+                                st.error(f"❌ Échec de l'intégration : {_apply_exc}")
+                else:
+                    st.markdown(
+                        f'<div class="card-major">🔴 {_nb_err_integ} erreur(s) détectée(s) par BC sur le fichier corrigé — '
+                        f'corrige-les avant de pouvoir intégrer.</div>',
+                        unsafe_allow_html=True,
+                    )
+
+            if _integ["stage"] == "applied":
+                st.markdown('<div class="card-ref">✅ Intégration terminée.</div>', unsafe_allow_html=True)
 
     if info_anomalies:
         st.markdown("---")
