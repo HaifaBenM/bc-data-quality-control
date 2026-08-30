@@ -588,31 +588,38 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
     # restent "tout sélectionné", donc le tableau affiche toujours tout tant
     # qu'on n'a pas ouvert et changé un filtre. Ne change rien au
     # comportement, réduit juste l'espace occupé à l'écran.
-    with st.expander("🔍 Filtres"):
-        cf1, cf2, cf3, cf4 = st.columns(4)
-        with cf1:
-            sevs = sorted(set(a.get("Sévérité", "") for a in real_anomalies))
-            filt_sev = st.multiselect("Sévérité", sevs, default=sevs, key=f"fs_{sn}")
-        with cf2:
-            types = sorted(set(a.get("Type d'anomalie", "") for a in real_anomalies))
-            filt_type = st.multiselect("Type d'anomalie", types, default=types, key=f"ft_{sn}")
-        with cf3:
-            champs = sorted(set(a.get("Champ", "") for a in real_anomalies))
-            filt_champ = st.multiselect("Champ", champs, default=champs, key=f"fc_{sn}")
-        with cf4:
-            _cls_label = {
-                "PREALABLE_BC_REQUIS": "🟣 Prérequis BC requis",
-                "VALEUR_CORRIGIBLE":   "✏️ Corrigible",
-                # AJOUTÉ (26/08/2026, jour J) — nouvelle classification apportée
-                # par la détection de cohérence (validate_coherence_axe_c),
-                # jamais mappée jusqu'ici — s'affichait vide dans la colonne.
-                "SUGGESTION_IA":       "🧠 Suggestion IA",
-            }
-            clss = sorted(set(a.get("Classification", "") for a in real_anomalies))
-            filt_cls = st.multiselect(
-                "Classification", clss, default=clss, key=f"fcl_{sn}",
-                format_func=lambda c: _cls_label.get(c, c or "(aucune)"),
-            )
+    # RÉVISÉ (27/08/2026, 2e passe) — demande Rami : la barre "🔍 Filtres"
+    # s'étirait sur toute la largeur de l'écran, disproportionnée par
+    # rapport à ce qu'elle contient — mise dans une colonne étroite, comme
+    # une vraie barre de filtre discrète plutôt qu'un bandeau pleine page.
+    _filt_col, _ = st.columns([1, 1.3])
+    with _filt_col:
+        with st.expander("🔍 Filtres"):
+            cf1, cf2 = st.columns(2)
+            with cf1:
+                sevs = sorted(set(a.get("Sévérité", "") for a in real_anomalies))
+                filt_sev = st.multiselect("Sévérité", sevs, default=sevs, key=f"fs_{sn}")
+            with cf2:
+                types = sorted(set(a.get("Type d'anomalie", "") for a in real_anomalies))
+                filt_type = st.multiselect("Type d'anomalie", types, default=types, key=f"ft_{sn}")
+            cf3, cf4 = st.columns(2)
+            with cf3:
+                champs = sorted(set(a.get("Champ", "") for a in real_anomalies))
+                filt_champ = st.multiselect("Champ", champs, default=champs, key=f"fc_{sn}")
+            with cf4:
+                _cls_label = {
+                    "PREALABLE_BC_REQUIS": "🟣 Prérequis BC requis",
+                    "VALEUR_CORRIGIBLE":   "✏️ Corrigible",
+                    # AJOUTÉ (26/08/2026, jour J) — nouvelle classification apportée
+                    # par la détection de cohérence (validate_coherence_axe_c),
+                    # jamais mappée jusqu'ici — s'affichait vide dans la colonne.
+                    "SUGGESTION_IA":       "🧠 Suggestion IA",
+                }
+                clss = sorted(set(a.get("Classification", "") for a in real_anomalies))
+                filt_cls = st.multiselect(
+                    "Classification", clss, default=clss, key=f"fcl_{sn}",
+                    format_func=lambda c: _cls_label.get(c, c or "(aucune)"),
+                )
 
     filtered = [
         a for a in real_anomalies
@@ -635,16 +642,18 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
         if _editor_gen_key not in st.session_state:
             st.session_state[_editor_gen_key] = 0
 
-        # RÉVISÉ (27/08/2026, 2e passe) — demande Rami : Copier retiré
-        # complètement (redondant — "Nouvelle valeur" se pré-remplit déjà
-        # automatiquement avec la suggestion). Propager reste, c'est le vrai
-        # outil de travail quotidien, gardé visible pour tous. Sélectionner/
-        # Désélectionner simplifiés en icône seule (même principe que les
-        # boutons Éditer/Supprimer de Profils Clients).
+        # RÉVISÉ (27/08/2026, 3e passe) — reprise cohérente demandée par
+        # Rami : les colonnes précédentes ([0.7, 0.7, 2.1]) restaient
+        # disproportionnées par rapport au contenu (icône seule/texte court)
+        # — un bouton compact avec use_container_width=True dans une colonne
+        # trop large s'étire quand même et paraît "flottant dans du vide".
+        # Ajout d'une colonne "spacer" finale qui absorbe tout l'espace
+        # restant, pour que les boutons réels restent groupés et compacts à
+        # gauche, jamais étirés.
         if is_consultant():
-            csel1, csel2, csel3 = st.columns([0.7, 0.7, 2.1])
+            csel1, csel2, csel3, _csel_spacer = st.columns([1, 1, 2, 6])
         else:
-            csel1, csel2 = st.columns([0.7, 0.7])
+            csel1, csel2, _csel_spacer = st.columns([1, 1, 8])
             csel3 = None
         with csel1:
             if st.button("✅", key=f"btn_select_all_{sn}", use_container_width=True, help="Tout sélectionner"):
