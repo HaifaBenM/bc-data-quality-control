@@ -226,6 +226,16 @@ def apply_corrections(original_bytes: bytes, corrections: list[dict]) -> bytes:
     with zipfile.ZipFile(out_buf, "w", zipfile.ZIP_DEFLATED) as dst:
         for item in src.infolist():
             data = modified_bytes.get(item.filename, src.read(item.filename))
+            # RÉVISÉ (27/08/2026) — bug réel rencontré : passer l'objet
+            # ZipInfo original tel quel à writestr() lui fait ignorer le
+            # mode ZIP_DEFLATED du zip de destination et réutiliser la
+            # méthode de compression D'ORIGINE de chaque entrée — si le
+            # fichier BC source en a une non standard sur ne serait-ce
+            # qu'une entrée, ça produit une archive que BC rejette
+            # ("compressed using an unsupported compression method") même
+            # si Excel/openpyxl l'ouvrent sans se plaindre. Forcé en
+            # DEFLATE standard sur CHAQUE entrée, sans exception.
+            item.compress_type = zipfile.ZIP_DEFLATED
             dst.writestr(item, data)
 
     src.close()
@@ -323,6 +333,16 @@ def clear_id_reference_columns(
     with zipfile.ZipFile(out_buf, "w", zipfile.ZIP_DEFLATED) as dst:
         for item in src.infolist():
             data = modified_bytes.get(item.filename, src.read(item.filename))
+            # RÉVISÉ (27/08/2026) — bug réel rencontré : passer l'objet
+            # ZipInfo original tel quel à writestr() lui fait ignorer le
+            # mode ZIP_DEFLATED du zip de destination et réutiliser la
+            # méthode de compression D'ORIGINE de chaque entrée — si le
+            # fichier BC source en a une non standard sur ne serait-ce
+            # qu'une entrée, ça produit une archive que BC rejette
+            # ("compressed using an unsupported compression method") même
+            # si Excel/openpyxl l'ouvrent sans se plaindre. Forcé en
+            # DEFLATE standard sur CHAQUE entrée, sans exception.
+            item.compress_type = zipfile.ZIP_DEFLATED
             dst.writestr(item, data)
 
     src.close()
