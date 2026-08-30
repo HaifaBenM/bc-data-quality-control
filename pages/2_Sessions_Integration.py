@@ -1468,7 +1468,7 @@ with tab_main:
                 # seulement à la toute fin.
                 # RÉVISÉ (27/08/2026, 5e passe) — bouton compact au lieu de
                 # pleine largeur pour un texte court.
-                _qs2_col, _ = st.columns([1.8, 3])
+                _qs2_col, _ = st.columns([3.2, 1.8])
                 with _qs2_col:
                     if st.button("💾 Enregistrer maintenant (checkpoint)", key="quicksave_step2", use_container_width=True):
                         _quick_save_session(st.session_state.config, status="Nouvelle")
@@ -2215,7 +2215,7 @@ with tab_main:
         # cette étape aussi (checkpoint), pas seulement à la toute fin.
         # RÉVISÉ (27/08/2026, 5e passe) — même correction : bouton compact
         # au lieu de pleine largeur pour un texte court.
-        _qs3_col, _ = st.columns([1.8, 3])
+        _qs3_col, _ = st.columns([3.2, 1.8])
         with _qs3_col:
             if st.button("💾 Enregistrer maintenant (checkpoint)", key="quicksave_step3", use_container_width=True):
                 _quick_save_session(cfg, status="Nouvelle")
@@ -2378,7 +2378,7 @@ with tab_main:
                             _sel_table_id  = _auto_tid
                             _sel_parent_id = _auto_candidates[0]["id"]
 
-                _save_col, _ = st.columns([1.5, 3])
+                _save_col, _ = st.columns([2.2, 2.3])
                 with _save_col:
                     _save_clicked = st.button("💾 Sauvegarder la session", type="primary", use_container_width=True)
                 if _save_clicked:
