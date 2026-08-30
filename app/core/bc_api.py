@@ -889,17 +889,27 @@ def upload_configuration_package_file(
             f"Erreur BC API {_create_resp.status_code} (création entrée file) : {_create_resp.text[:500]}"
         )
 
+    # AJOUTÉ (27/08/2026, 7e passe) — bug réel trouvé : BC exige un vrai
+    # jeton de concurrence (ETag) sur le PATCH suivant, refuse le joker
+    # "*" ("Could not validate the client concurrency token"). Récupère
+    # l'ETag réel de l'entrée fichier — depuis la réponse de création si
+    # elle vient de réussir, ou via un GET dédié si l'entrée existait déjà
+    # (la réponse 400/409 de conflit ne contient pas l'entité elle-même).
+    if _create_resp.ok:
+        _file_etag = _create_resp.json().get("@odata.etag", "")
+    else:
+        _get_file_url = f"{_base}/configurationPackages({package_id})/file('{_pkg_code_enc}')"
+        _get_file_resp = requests.get(_get_file_url, headers=_headers(token), timeout=15)
+        _file_etag = _get_file_resp.json().get("@odata.etag", "") if _get_file_resp.ok else ""
+
     # Étape 2/2 — dépose le contenu binaire sur l'entrée maintenant créée.
     url = f"{_base}/configurationPackages({package_id})/file('{_pkg_code_enc}')/content"
+    _upload_headers = {**_headers(token), "Content-Type": "application/octet-stream"}
+    if _file_etag:
+        _upload_headers["If-Match"] = _file_etag
     resp = requests.patch(
         url,
-        # RÉVISÉ (27/08/2026, 6e passe) — "unsupported compression method"
-        # persistant malgré un fichier vérifié 100% propre (en-têtes locaux
-        # ET répertoire central du zip, aucune anomalie à aucun niveau) —
-        # If-Match: * retiré en test : certaines implémentations OData
-        # traitent différemment (parfois de façon défectueuse) un flux
-        # binaire PATCH avec un ETag joker sur une propriété media/stream.
-        headers={**_headers(token), "Content-Type": "application/octet-stream"},
+        headers=_upload_headers,
         data=file_bytes, timeout=60,
     )
     if not resp.ok:
