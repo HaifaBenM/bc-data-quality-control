@@ -859,13 +859,31 @@ def upload_configuration_package_file(
     'file'" persistant même avec un code propre (sans espaces/caractères
     spéciaux) et un package_id valide, alors que l'URL est identique
     caractère pour caractère à la documentation officielle Microsoft.
-    Filet de sécurité ajouté : si l'URL documentée échoue en 404, tente une
-    URL alternative sans la clé de code dans le segment file (variante
-    rencontrée sur certaines versions/configurations BC), avant d'abandonner.
+
+    RÉVISÉ (27/08/2026, 4e passe) — le repli sans clé ("/file/content")
+    confirme via son propre message d'erreur que "file" EST une vraie
+    collection OData (donc la syntaxe file('code') est structurellement
+    correcte) — le vrai problème est que la clé 'MDD-PAYS' (le code du
+    package) ne correspond à AUCUNE entité existante dans cette collection
+    pour CE package. Un GET préalable sur la collection permet de voir la
+    clé réellement attendue (peut-être différente du code) avant de tenter
+    le PATCH, plutôt que de continuer à deviner.
     """
     _pkg_code_enc = quote(package_code, safe="")
     _base = _automation_base_url(tenant_id, environment, company_id)
     _headers_upload = {**_headers(token), "Content-Type": "application/octet-stream", "If-Match": "*"}
+
+    # AJOUTÉ (27/08/2026, 4e passe) — diagnostic direct : que contient
+    # réellement la collection "file" de ce package avant même d'essayer
+    # d'y écrire ? Erreur volontairement non bloquante (dégradé sur
+    # l'ancien comportement) si ce GET lui-même échoue.
+    _file_collection_probe = ""
+    try:
+        _probe_url = f"{_base}/configurationPackages({package_id})/file"
+        _probe_resp = requests.get(_probe_url, headers=_headers(token), timeout=15)
+        _file_collection_probe = f"GET {_probe_url} -> {_probe_resp.status_code} : {_probe_resp.text[:500]}"
+    except Exception as _probe_exc:
+        _file_collection_probe = f"GET collection file impossible : {_probe_exc}"
 
     url = f"{_base}/configurationPackages({package_id})/file('{_pkg_code_enc}')/content"
     resp = requests.patch(url, headers=_headers_upload, data=file_bytes, timeout=60)
@@ -875,7 +893,10 @@ def upload_configuration_package_file(
         resp = requests.patch(_fallback_url, headers=_headers_upload, data=file_bytes, timeout=60)
 
     if not resp.ok:
-        raise Exception(f"Erreur BC API {resp.status_code} (dépôt fichier) : {resp.text[:500]}")
+        raise Exception(
+            f"Erreur BC API {resp.status_code} (dépôt fichier) : {resp.text[:500]} "
+            f"[sonde collection file: {_file_collection_probe}]"
+        )
     resp.raise_for_status()
 
 
