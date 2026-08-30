@@ -134,6 +134,12 @@ def save_session(data: dict) -> tuple[bool, str]:
             "parent_session_id":     data.get("parent_session_id"),
             "is_root":               data.get("is_root", False),
             "pkg_code":              data.get("pkg_code", ""),
+            # AJOUTÉ (27/08/2026) — demande Rami : traçabilité — qui a créé
+            # cette session, pour visibilité si quelqu'un d'autre la
+            # reprend plus tard avec un compte différent. Ne change jamais
+            # après création (voir update_session, volontairement absent
+            # de la liste `editable`).
+            "created_by":            data.get("created_by", ""),
             "created_at":            now,
             "updated_at":            now,
         }

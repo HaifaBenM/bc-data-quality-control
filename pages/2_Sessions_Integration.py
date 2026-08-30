@@ -7,7 +7,7 @@ from app.core.structure_validator import validate_file_structure
 from app.core.validator_axe_a import validate_file_axe_a
 from app.core.validator_axe_b import validate_file_axe_b
 from app.core.validator_axe_c import validate_file_axe_c, get_gemini_api_key, is_gemini_available, validate_coherence_axe_c
-from app.core.auth import require_role, is_consultant
+from app.core.auth import require_role, is_consultant, get_display_name
 from app.core.execution_planner import get_execution_plan, build_plan_from_bc
 from app.core.integration_levels import (
     load_level_config, traverse_dependencies, build_roadmap, build_roadmap_from_prereqs,
@@ -1171,6 +1171,11 @@ def _quick_save_session(cfg: dict, status: str = "Nouvelle") -> None:
         "parent_session_id":   cfg.get("parent_session_id"),
         "is_root":             cfg.get("is_root", True),
         "pkg_code":            cfg.get("pkg_code", ""),
+        # AJOUTÉ (27/08/2026) — demande Rami : traçabilité, qui a créé la
+        # session. Ignoré silencieusement par update_session (pas dans sa
+        # liste `editable`) — ne change donc jamais après création, même
+        # via un checkpoint ultérieur ou une reprise.
+        "created_by":          get_display_name(),
     }
     if _resumed_id:
         ok, res = update_session(_resumed_id, {**_payload, "name": _payload["session_name"]})
@@ -2439,6 +2444,10 @@ with tab_main:
                         "parent_session_id":   _sel_parent_id,
                         "is_root":             _node_kind == "Racine (socle complet)",
                         "pkg_code":            cfg.get("pkg_code", ""),
+                        # AJOUTÉ (27/08/2026) — traçabilité, ignoré par
+                        # update_session sur une reprise (pas dans
+                        # `editable`) — ne change jamais après création.
+                        "created_by":          get_display_name(),
                     }
                     # RÉVISÉ (23/08/2026) — demande Rami : reprendre une
                     # session (▶️ Reprendre) puis sauvegarder créait une
@@ -2834,6 +2843,7 @@ with tab_ses:
                         else:
                             st.session_state.bulk_select_ids.discard(sid)
                     with top_info:
+                        _created_by = s.get("created_by", "")
                         st.markdown(
                             f'<p class="session-name" style="margin-bottom:.2rem">{s.get("name", "")}</p>'
                             f'<p class="session-meta">Client : <b>{s.get("profile_code", "")}</b> · '
@@ -2842,7 +2852,13 @@ with tab_ses:
                             f'<p class="session-meta">{"📄 " + fn + " · " if fn else ""}🕐 {crd}'
                             f'{"  ·  ✏️ " + upd if upd != crd else ""}'
                             f'{"  ·  📦 corrigé" if gen_fn else ""}'
-                            f'{"  ·  🟣 " + str(len(prereq_list)) + " prérequis" if prereq_list else ""}</p>',
+                            f'{"  ·  🟣 " + str(len(prereq_list)) + " prérequis" if prereq_list else ""}'
+                            # AJOUTÉ (27/08/2026) — demande Rami : traçabilité,
+                            # qui a créé cette session, visible directement
+                            # dans la liste (utile si quelqu'un d'autre la
+                            # reprend). Absent pour les sessions créées avant
+                            # ce champ — n'affiche rien plutôt qu'un "N/A".
+                            f'{"  ·  👤 " + _created_by if _created_by else ""}</p>',
                             unsafe_allow_html=True
                         )
                     with top_actions:
