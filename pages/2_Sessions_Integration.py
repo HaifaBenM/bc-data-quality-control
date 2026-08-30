@@ -628,9 +628,9 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
     _toggle_label = "⬜ Tout désélectionner" if st.session_state[_all_sel_key] else "✅ Tout sélectionner"
 
     if is_consultant():
-        _rowsel1, _rowsel2, _row_spacer, _rowsel3 = st.columns([1.4, 1.4, 4.2, 1.4])
+        _rowsel1, _rowsel2, _row_spacer, _rowsel3 = st.columns([0.8, 0.8, 4.4, 2])
     else:
-        _rowsel1, _row_spacer, _rowsel3 = st.columns([1.4, 5.6, 1.4])
+        _rowsel1, _row_spacer, _rowsel3 = st.columns([0.8, 5.2, 2])
         _rowsel2 = None
 
     with _rowsel1:
