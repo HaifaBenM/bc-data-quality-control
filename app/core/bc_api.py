@@ -855,48 +855,42 @@ def upload_configuration_package_file(
     le corps réel de la réponse BC est maintenant inclus dans le message
     d'erreur (raise_for_status() seul ne le montrait jamais).
 
-    RÉVISÉ (27/08/2026, 3e passe) — 404 "Resource not found for the segment
-    'file'" persistant même avec un code propre (sans espaces/caractères
-    spéciaux) et un package_id valide, alors que l'URL est identique
-    caractère pour caractère à la documentation officielle Microsoft.
-
-    RÉVISÉ (27/08/2026, 4e passe) — le repli sans clé ("/file/content")
-    confirme via son propre message d'erreur que "file" EST une vraie
-    collection OData (donc la syntaxe file('code') est structurellement
-    correcte) — le vrai problème est que la clé 'MDD-PAYS' (le code du
-    package) ne correspond à AUCUNE entité existante dans cette collection
-    pour CE package. Un GET préalable sur la collection permet de voir la
-    clé réellement attendue (peut-être différente du code) avant de tenter
-    le PATCH, plutôt que de continuer à deviner.
+    RÉVISÉ (27/08/2026, 5e passe) — RÉSOLU : la sonde GET a montré que la
+    collection "file" du package est VIDE ("value": []) avant tout dépôt —
+    PATCH sur une clé qui n'existe pas encore échoue forcément en 404,
+    quelle que soit la syntaxe. Schéma OData classique en deux temps pour
+    une collection de ressources média : POST d'abord pour CRÉER l'entrée
+    (avec son code comme clé), PATCH ensuite pour y déposer le contenu
+    binaire — la documentation Microsoft ne montrait que la 2e étape,
+    laissant croire à tort qu'un simple PATCH suffisait.
     """
     _pkg_code_enc = quote(package_code, safe="")
     _base = _automation_base_url(tenant_id, environment, company_id)
-    _headers_upload = {**_headers(token), "Content-Type": "application/octet-stream", "If-Match": "*"}
 
-    # AJOUTÉ (27/08/2026, 4e passe) — diagnostic direct : que contient
-    # réellement la collection "file" de ce package avant même d'essayer
-    # d'y écrire ? Erreur volontairement non bloquante (dégradé sur
-    # l'ancien comportement) si ce GET lui-même échoue.
-    _file_collection_probe = ""
-    try:
-        _probe_url = f"{_base}/configurationPackages({package_id})/file"
-        _probe_resp = requests.get(_probe_url, headers=_headers(token), timeout=15)
-        _file_collection_probe = f"GET {_probe_url} -> {_probe_resp.status_code} : {_probe_resp.text[:500]}"
-    except Exception as _probe_exc:
-        _file_collection_probe = f"GET collection file impossible : {_probe_exc}"
-
-    url = f"{_base}/configurationPackages({package_id})/file('{_pkg_code_enc}')/content"
-    resp = requests.patch(url, headers=_headers_upload, data=file_bytes, timeout=60)
-
-    if resp.status_code == 404:
-        _fallback_url = f"{_base}/configurationPackages({package_id})/file/content"
-        resp = requests.patch(_fallback_url, headers=_headers_upload, data=file_bytes, timeout=60)
-
-    if not resp.ok:
+    # Étape 1/2 — crée l'entrée dans la collection "file" si elle n'existe
+    # pas déjà (ignore un éventuel 409/conflit si un essai précédent l'a
+    # déjà créée).
+    _create_file_url = f"{_base}/configurationPackages({package_id})/file"
+    _create_resp = requests.post(
+        _create_file_url,
+        headers={**_headers(token), "Content-Type": "application/json"},
+        json={"code": package_code},
+        timeout=30,
+    )
+    if not _create_resp.ok and _create_resp.status_code != 409:
         raise Exception(
-            f"Erreur BC API {resp.status_code} (dépôt fichier) : {resp.text[:500]} "
-            f"[sonde collection file: {_file_collection_probe}]"
+            f"Erreur BC API {_create_resp.status_code} (création entrée file) : {_create_resp.text[:500]}"
         )
+
+    # Étape 2/2 — dépose le contenu binaire sur l'entrée maintenant créée.
+    url = f"{_base}/configurationPackages({package_id})/file('{_pkg_code_enc}')/content"
+    resp = requests.patch(
+        url,
+        headers={**_headers(token), "Content-Type": "application/octet-stream", "If-Match": "*"},
+        data=file_bytes, timeout=60,
+    )
+    if not resp.ok:
+        raise Exception(f"Erreur BC API {resp.status_code} (dépôt fichier) : {resp.text[:500]}")
     resp.raise_for_status()
 
 
