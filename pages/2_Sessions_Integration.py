@@ -165,6 +165,13 @@ div[data-testid="stExpander"] summary {
     background: #EEF4FD; color: #1B3A6B;
 }
 .session-row-actions { margin: .2rem 0 .6rem; }
+/* AJOUTÉ (27/08/2026) — demande Rami : liste et police du popover
+   "🔍 Filtres" un peu petites, moins lisibles. Élargit le popover et
+   agrandit légèrement la police des multiselect qu'il contient. */
+div[data-testid="stPopoverBody"] { min-width: 320px; }
+div[data-testid="stPopoverBody"] label, div[data-testid="stPopoverBody"] div[data-baseweb="select"] {
+    font-size: 1rem;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -640,23 +647,25 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
         if _editor_gen_key not in st.session_state:
             st.session_state[_editor_gen_key] = 0
 
-        # RÉVISÉ (27/08/2026, 4e passe) — demande Rami : boutons à la taille
-        # naturelle de l'icône, pas étirés même dans une colonne étroite —
-        # retrait de use_container_width, laisse Streamlit dimensionner au
-        # contenu (icône seule = bouton compact, aligné à gauche).
+        # RÉVISÉ (27/08/2026, 5e passe) — demande Rami : l'icône seule
+        # "fait amateur" — retour à un seul bouton à bascule avec texte
+        # complet ("✅ Tout sélectionner" / "⬜ Tout désélectionner"), qui
+        # change de libellé selon l'état courant au lieu de 2 boutons
+        # séparés.
+        _all_sel_key = f"_all_selected_state_{sn}"
+        if _all_sel_key not in st.session_state:
+            st.session_state[_all_sel_key] = False
+        _toggle_label = "⬜ Tout désélectionner" if st.session_state[_all_sel_key] else "✅ Tout sélectionner"
+
         if is_consultant():
-            csel1, csel2, csel3, _csel_spacer = st.columns([1, 1, 2, 6])
+            csel1, csel3, _csel_spacer = st.columns([1.6, 1.4, 5])
         else:
-            csel1, csel2, _csel_spacer = st.columns([1, 1, 8])
+            csel1, _csel_spacer = st.columns([1.6, 6.4])
             csel3 = None
         with csel1:
-            if st.button("✅", key=f"btn_select_all_{sn}", help="Tout sélectionner"):
-                st.session_state[f"_merged_select_override_{sn}"] = True
-                st.session_state[_editor_gen_key] += 1
-                st.rerun()
-        with csel2:
-            if st.button("⬜", key=f"btn_deselect_all_{sn}", help="Tout désélectionner"):
-                st.session_state[f"_merged_select_override_{sn}"] = False
+            if st.button(_toggle_label, key=f"btn_toggle_select_{sn}", use_container_width=True):
+                st.session_state[_all_sel_key] = not st.session_state[_all_sel_key]
+                st.session_state[f"_merged_select_override_{sn}"] = st.session_state[_all_sel_key]
                 st.session_state[_editor_gen_key] += 1
                 st.rerun()
         _select_override = st.session_state.pop(f"_merged_select_override_{sn}", None)
@@ -885,7 +894,7 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
             _integ = st.session_state[_integ_key]
 
             if _integ["stage"] in ("idle", "imported"):
-                _integ_btn_col1, _ = st.columns([1, 2.2])
+                _integ_btn_col1, _ = st.columns([1, 3])
                 with _integ_btn_col1:
                     _btn1_clicked = st.button("1️⃣ Vérifier avant intégration", key=f"btn_integ_check_{sn}", use_container_width=True)
                 if _btn1_clicked:
@@ -961,7 +970,7 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
                     _confirm = st.checkbox("Je confirme vouloir intégrer ces données dans Business Central", key=f"confirm_apply_{sn}")
                     _btn2_clicked = False
                     if _confirm:
-                        _integ_btn_col2, _ = st.columns([1, 2.2])
+                        _integ_btn_col2, _ = st.columns([1, 3])
                         with _integ_btn_col2:
                             _btn2_clicked = st.button("2️⃣ Appliquer dans BC", type="primary", key=f"btn_integ_apply_{sn}", use_container_width=True)
                     if _btn2_clicked:
