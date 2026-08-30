@@ -1477,7 +1477,13 @@ with tab_main:
                             unsafe_allow_html=True
                         )
                 st.markdown("---")
-                cb, cv, crc = st.columns([2, 3, 2])
+                # RÉVISÉ (27/08/2026, 6e passe) — demande Rami : même
+                # principe que Filtres/Propager/Sélectionner — l'action
+                # principale prend 2 unités (25%), les 3 secondaires
+                # (Étape précédente, Recommencer, Enregistrer) 1 unité
+                # chacune (12,5%), reste en spacer. Cohérence visuelle sur
+                # tout l'écran au lieu de ratios différents à chaque rangée.
+                cb, cv, crc, cqs, _cstep2_spacer = st.columns([1, 2, 1, 1, 3])
                 with cb:
                     if st.button("← Étape précédente", use_container_width=True):
                         st.session_state.step = 1
@@ -1503,14 +1509,11 @@ with tab_main:
                             st.session_state.validation = val
                         st.session_state.step = 3
                         st.rerun()
-                # AJOUTÉ (23/08/2026) — demande Rami : possibilité de
-                # sauvegarder à cette étape aussi (checkpoint), pas
-                # seulement à la toute fin.
-                # RÉVISÉ (27/08/2026, 5e passe) — bouton compact au lieu de
-                # pleine largeur pour un texte court.
-                _qs2_col, _ = st.columns([3.2, 1.8])
-                with _qs2_col:
-                    if st.button("💾 Enregistrer maintenant (checkpoint)", key="quicksave_step2", use_container_width=True):
+                with cqs:
+                    # AJOUTÉ (23/08/2026) — demande Rami : possibilité de
+                    # sauvegarder à cette étape aussi (checkpoint), pas
+                    # seulement à la toute fin.
+                    if st.button("💾 Enregistrer maintenant", key="quicksave_step2", use_container_width=True):
                         _quick_save_session(st.session_state.config, status="Nouvelle")
         else:
             cb, _, crc = st.columns([2, 6, 2])
@@ -2087,12 +2090,12 @@ with tab_main:
         st.markdown("---")
         # RÉVISÉ (27/08/2026, 5e passe) — demande Rami : le bouton central
         # "Lancer l'analyse qualité" dominait visuellement toute la largeur
-        # de l'écran (ratio [2,5,2] laissait la colonne du milieu bien trop
-        # grande) — la couleur "primary" (bleu) suffit déjà à le distinguer
-        # comme action principale, pas besoin qu'il soit aussi
-        # disproportionné en taille. Colonnes resserrées + spacer final pour
-        # que les 3 boutons restent groupés à gauche, compacts.
-        cb, cv, crc, _cstep3_spacer = st.columns([1.4, 2.4, 1.2, 3])
+        # RÉVISÉ (27/08/2026, 6e passe) — même principe que Filtres/
+        # Propager/Sélectionner : action principale à 2 unités (25%),
+        # secondaires à 1 unité chacune (12,5%), reste en spacer. Ajout du
+        # bouton checkpoint dans cette même rangée pour cohérence totale
+        # (au lieu d'une rangée séparée juste en dessous, jusqu'ici).
+        cb, cv, crc, cqs, _cstep3_spacer = st.columns([1, 2, 1, 1, 3])
         with cb:
             if st.button("← Étape précédente", use_container_width=True):
                 st.session_state.step         = 2
@@ -2103,6 +2106,12 @@ with tab_main:
             if st.button("🔄 Recommencer", use_container_width=True, key="rc_step3"):
                 reset_session()
                 st.rerun()
+        with cqs:
+            # AJOUTÉ (23/08/2026) — demande Rami : possibilité de
+            # sauvegarder à cette étape aussi (checkpoint), pas seulement
+            # à la toute fin.
+            if st.button("💾 Enregistrer maintenant", key="quicksave_step3", use_container_width=True):
+                _quick_save_session(cfg, status="Nouvelle")
         with cv:
             if val["is_valid"]:
                 if st.button(
@@ -2255,15 +2264,6 @@ with tab_main:
                     st.rerun()
             else:
                 st.error("❌ Corrigez les erreurs structurelles.")
-
-        # AJOUTÉ (23/08/2026) — demande Rami : possibilité de sauvegarder à
-        # cette étape aussi (checkpoint), pas seulement à la toute fin.
-        # RÉVISÉ (27/08/2026, 5e passe) — même correction : bouton compact
-        # au lieu de pleine largeur pour un texte court.
-        _qs3_col, _ = st.columns([3.2, 1.8])
-        with _qs3_col:
-            if st.button("💾 Enregistrer maintenant (checkpoint)", key="quicksave_step3", use_container_width=True):
-                _quick_save_session(cfg, status="Nouvelle")
 
     # ── Étape 4 ──────────────────────────────────────────────────────────────
     elif st.session_state.step == 4:
