@@ -979,15 +979,27 @@ def run_bc_import_check(
     # tronque déjà en interne, mais get_configuration_package_status non).
     package_code = (package_code or "")[:20]
     result = {"success": False, "package_id": "", "status": None, "error": ""}
+    package_id = ""
     try:
         existing = get_configuration_package_status(tenant_id, environment, company_id, token, package_code)
         if existing:
-            package_id = existing["id"]
+            package_id = existing.get("id", "")
         else:
             created = create_configuration_package(
                 tenant_id, environment, company_id, token, package_code, package_name
             )
-            package_id = created["id"]
+            package_id = created.get("id", "")
+
+        # AJOUTÉ (27/08/2026, diagnostic) — bug 404 "Resource not found for
+        # the segment 'file'" persistant malgré le fix d'encodage — capture
+        # explicite du cas où package_id serait vide (existing/created sans
+        # champ "id" valide), cause la plus probable d'un tel 404 (l'URL
+        # devient .../configurationPackages()/file(...) — parenthèses
+        # vides, aucune entité à laquelle rattacher le fichier).
+        if not package_id:
+            raise Exception(
+                f"package_id vide après création/lecture — existing={existing!r}"
+            )
 
         upload_configuration_package_file(
             tenant_id, environment, company_id, token, package_id, package_code, file_bytes
@@ -1014,7 +1026,7 @@ def run_bc_import_check(
         result["package_id"] = package_id
         result["status"]     = status
     except requests.HTTPError as e:
-        result["error"] = f"Erreur BC API {e.response.status_code} : {e.response.text[:300]}"
+        result["error"] = f"Erreur BC API {e.response.status_code} : {e.response.text[:300]} [code={package_code!r} id={package_id!r}]"
     except Exception as e:
-        result["error"] = f"{type(e).__name__} : {e}"
+        result["error"] = f"{type(e).__name__} : {e} [code={package_code!r} id={package_id!r}]"
     return result
