@@ -850,8 +850,10 @@ def upload_configuration_package_file(
     (PATCH .../configurationPackages({id})/file('{code}')/content).
     package_id = le GUID interne BC (retourné par create_configuration_package
     ou par un GET existant) ; package_code = le code lisible du package.
-    Ne lève pas d'exception métier spécifique — laisse remonter l'erreur BC
-    brute (message le plus fiable ici, cas non testé en réel).
+
+    RÉVISÉ (27/08/2026) — même fix que import/apply_configuration_package :
+    le corps réel de la réponse BC est maintenant inclus dans le message
+    d'erreur (raise_for_status() seul ne le montrait jamais).
     """
     url = (
         f"{_automation_base_url(tenant_id, environment, company_id)}"
@@ -862,6 +864,8 @@ def upload_configuration_package_file(
         headers={**_headers(token), "Content-Type": "application/octet-stream", "If-Match": "*"},
         data=file_bytes, timeout=60,
     )
+    if not resp.ok:
+        raise Exception(f"Erreur BC API {resp.status_code} (dépôt fichier) : {resp.text[:500]}")
     resp.raise_for_status()
 
 
@@ -872,14 +876,20 @@ def import_configuration_package(
     Importe le fichier déposé dans le package (POST bound action Microsoft.NAV.import).
     Calcule les erreurs de validation SANS écrire dans les vraies tables BC —
     c'est l'équivalent de "Valider" dans l'interface BC. Réponse 204 sans corps
-    si succès (laisse remonter l'erreur brute sinon).
+    si succès.
+
+    RÉVISÉ (27/08/2026) — bug trouvé : raise_for_status() seul ne montre
+    jamais le corps de la réponse BC (souvent le détail précis de l'échec en
+    JSON), seulement "400 Bad Request for url: ..." — inutile pour
+    diagnostiquer. Le corps réel est maintenant inclus dans le message.
     """
     url = (
         f"{_automation_base_url(tenant_id, environment, company_id)}"
         f"/configurationPackages({package_id})/Microsoft.NAV.import"
     )
     resp = requests.post(url, headers=_headers(token), timeout=120)
-    resp.raise_for_status()
+    if not resp.ok:
+        raise Exception(f"Erreur BC API {resp.status_code} (import) : {resp.text[:500]}")
 
 
 def apply_configuration_package(
@@ -890,13 +900,18 @@ def apply_configuration_package(
     ÉCRIT RÉELLEMENT dans les vraies tables BC, contrairement à import().
     À n'appeler qu'après confirmation explicite de l'utilisateur (action
     irréversible côté BC, comme "Appliquer" dans l'interface).
+
+    RÉVISÉ (27/08/2026) — même fix que import_configuration_package : le
+    corps réel de la réponse BC est maintenant inclus dans le message
+    d'erreur (raise_for_status() seul ne le montrait jamais).
     """
     url = (
         f"{_automation_base_url(tenant_id, environment, company_id)}"
         f"/configurationPackages({package_id})/Microsoft.NAV.apply"
     )
     resp = requests.post(url, headers=_headers(token), timeout=180)
-    resp.raise_for_status()
+    if not resp.ok:
+        raise Exception(f"Erreur BC API {resp.status_code} (apply) : {resp.text[:500]}")
 
 
 def get_configuration_package_status(
