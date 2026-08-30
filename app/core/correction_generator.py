@@ -373,3 +373,35 @@ def clear_id_reference_columns(
 
     src.close()
     return out_buf.getvalue()
+
+def sanitize_zip_for_bc(excel_bytes: bytes) -> bytes:
+    """
+    AJOUTÉ (27/08/2026) — demande Rami : "🔴 BC a rejeté l'import — unsupported
+    compression method" pouvait encore se produire sur le fichier ORIGINAL
+    (jamais passé par apply_corrections/clear_id_reference_columns, qui
+    contiennent déjà ce nettoyage — ex. "Comparer avec BC" à l'Étape 3,
+    envoie original_bytes directement). Extrait le même nettoyage en
+    fonction autonome, à appeler sur N'IMPORTE QUEL fichier juste avant un
+    envoi à BC, peu importe s'il a déjà été retouché ou non :
+    - retire les entrées "dossier" explicites (_rels/, xl/... taille 0,
+      nom finissant par "/") — atypiques pour un xlsx, tolérées par
+      Excel/Python mais pas par le lecteur strict de BC.
+    - force ZIP_DEFLATED sur chaque entrée (passer l'objet ZipInfo original
+      tel quel à writestr() lui fait réutiliser sa méthode de compression
+      d'origine, potentiellement non standard, au lieu du mode du zip de
+      destination).
+    Ne modifie aucun contenu de fichier (contrairement à apply_corrections/
+    clear_id_reference_columns) — recopie tout tel quel, juste nettoyé au
+    niveau de l'archive zip elle-même.
+    """
+    src = zipfile.ZipFile(io.BytesIO(excel_bytes), "r")
+    out_buf = io.BytesIO()
+    with zipfile.ZipFile(out_buf, "w", zipfile.ZIP_DEFLATED) as dst:
+        for item in src.infolist():
+            if item.filename.endswith("/") and item.file_size == 0:
+                continue
+            data = src.read(item.filename)
+            item.compress_type = zipfile.ZIP_DEFLATED
+            dst.writestr(item, data)
+    src.close()
+    return out_buf.getvalue()

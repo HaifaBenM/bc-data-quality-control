@@ -995,6 +995,17 @@ def run_bc_import_check(
     # si l'appelant passe un code trop long (create_configuration_package
     # tronque déjà en interne, mais get_configuration_package_status non).
     package_code = (package_code or "")[:20]
+    # AJOUTÉ (27/08/2026, 5e passe) — demande Rami : "unsupported
+    # compression method" pouvait encore se produire sur un fichier qui
+    # n'était jamais passé par apply_corrections/clear_id_reference_columns
+    # (ex. "Comparer avec BC" à l'Étape 3, qui envoie le fichier ORIGINAL
+    # brut). Nettoyage systématique ici, au point d'entrée commun à tous
+    # les appelants — plus jamais dépendant de la provenance du fichier.
+    from app.core.correction_generator import sanitize_zip_for_bc
+    try:
+        file_bytes = sanitize_zip_for_bc(file_bytes)
+    except Exception:
+        pass  # fichier déjà propre ou non-zip valide — laisse passer tel quel, l'erreur remontera normalement plus loin si besoin
     result = {"success": False, "package_id": "", "status": None, "error": ""}
     package_id = ""
     _pkg_raw_json = None
