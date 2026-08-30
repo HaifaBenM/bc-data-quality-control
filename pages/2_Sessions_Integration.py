@@ -1396,7 +1396,9 @@ with tab_main:
                         st.rerun()
 
         st.markdown("---")
-        col_rc, _, col_btn = st.columns([2, 6, 2])
+        # RÉVISÉ (27/08/2026, 8e passe) — demande Rami : même principe
+        # partout — boutons de fin de page égaux, alignés, pleine largeur.
+        col_rc, col_btn = st.columns(2)
         with col_rc:
             if st.button("🔄 Recommencer", use_container_width=True, key="rc_step1"):
                 reset_session()
@@ -1443,7 +1445,7 @@ with tab_main:
                 for e in pr["errors"]:
                     st.error(f"❌ {e}")
                 st.markdown("---")
-                cb, _, crc = st.columns([2, 6, 2])
+                cb, crc = st.columns(2)
                 with cb:
                     if st.button("← Étape précédente", use_container_width=True, key="back_step2_fail"):
                         st.session_state.step = 1
@@ -1477,13 +1479,9 @@ with tab_main:
                             unsafe_allow_html=True
                         )
                 st.markdown("---")
-                # RÉVISÉ (27/08/2026, 6e passe) — demande Rami : même
-                # principe que Filtres/Propager/Sélectionner — l'action
-                # principale prend 2 unités (25%), les 3 secondaires
-                # (Étape précédente, Recommencer, Enregistrer) 1 unité
-                # chacune (12,5%), reste en spacer. Cohérence visuelle sur
-                # tout l'écran au lieu de ratios différents à chaque rangée.
-                cb, cv, crc, cqs, _cstep2_spacer = st.columns([1, 2, 1, 1, 3])
+                # RÉVISÉ (27/08/2026, 7e passe) — même principe qu'à
+                # l'Étape 3 : 4 boutons égaux, pleine largeur, sans spacer.
+                cb, cv, crc, cqs = st.columns(4)
                 with cb:
                     if st.button("← Étape précédente", use_container_width=True):
                         st.session_state.step = 1
@@ -1516,7 +1514,7 @@ with tab_main:
                     if st.button("💾 Enregistrer maintenant", key="quicksave_step2", use_container_width=True):
                         _quick_save_session(st.session_state.config, status="Nouvelle")
         else:
-            cb, _, crc = st.columns([2, 6, 2])
+            cb, crc = st.columns(2)
             with cb:
                 if st.button("← Étape précédente", use_container_width=True):
                     st.session_state.step = 1
@@ -2090,12 +2088,12 @@ with tab_main:
         st.markdown("---")
         # RÉVISÉ (27/08/2026, 5e passe) — demande Rami : le bouton central
         # "Lancer l'analyse qualité" dominait visuellement toute la largeur
-        # RÉVISÉ (27/08/2026, 6e passe) — même principe que Filtres/
-        # Propager/Sélectionner : action principale à 2 unités (25%),
-        # secondaires à 1 unité chacune (12,5%), reste en spacer. Ajout du
-        # bouton checkpoint dans cette même rangée pour cohérence totale
-        # (au lieu d'une rangée séparée juste en dessous, jusqu'ici).
-        cb, cv, crc, cqs, _cstep3_spacer = st.columns([1, 2, 1, 1, 3])
+        # RÉVISÉ (27/08/2026, 7e passe) — demande Rami : tous les boutons
+        # de navigation, quelle que soit l'étape, doivent être alignés sur
+        # UNE SEULE ligne, à la MÊME taille, occupant la totalité de la
+        # largeur (plus de spacer ni de bouton "primaire" agrandi — la
+        # couleur bleue suffit à le distinguer).
+        cb, cv, crc, cqs = st.columns(4)
         with cb:
             if st.button("← Étape précédente", use_container_width=True):
                 st.session_state.step         = 2
@@ -2318,7 +2316,97 @@ with tab_main:
         display_merged_analysis(merged, axe_c, cfg, pr, resolved_by_table=_resolved_by_table, roadmap=_roadmap_e4)
 
         st.markdown("---")
-        cb, cr, cs, cst = st.columns([2, 2, 3, 3])
+
+        # RÉVISÉ (27/08/2026, 7e passe) — demande Rami : "Type de session"
+        # déplacé sur sa propre ligne, en menu déroulant compact (au lieu
+        # d'un radio horizontal qui prenait de la place dans la rangée de
+        # boutons) — calculé AVANT la rangée de boutons pour être prêt au
+        # moment du clic sur "Sauvegarder".
+        _tree_sessions = get_sessions_for_company(
+            cfg.get("client_code", ""), cfg.get("company_id", "")
+        )
+        _lvl_cfg = st.session_state.get("level_config", {})
+        _orig_b = st.session_state.get("original_file_bytes")
+        _table_options: list[tuple[int, str]] = []
+        if _orig_b:
+            try:
+                from app.core.bc_excel_processor import extract_sheets_info
+                for _si in extract_sheets_info(_orig_b):
+                    _tid = int(_si["table_id"]) if str(_si["table_id"]).isdigit() else 0
+                    if _tid:
+                        _tname = (
+                            _lvl_cfg[_tid].table_name if _tid in _lvl_cfg
+                            else _si.get("table_name", str(_tid))
+                        )
+                        _table_options.append((_tid, f"{_tid} — {_tname}"))
+            except Exception:
+                _table_options = []
+
+        if is_consultant():
+            _node_kind = st.selectbox(
+                "Type de session",
+                ["Racine (socle complet)", "Fille (une table de la roadmap)"],
+                key="node_kind_radio",
+            )
+            _sel_table_id: int | None = None
+            _sel_parent_id: str | None = None
+            if _node_kind == "Fille (une table de la roadmap)" and _table_options:
+                _sel_table_id = st.selectbox(
+                    "Table traitée par cette session",
+                    options=[t[0] for t in _table_options],
+                    format_func=lambda tid: dict(_table_options).get(tid, str(tid)),
+                    key="node_table_select",
+                )
+                _candidates = resolve_parent_candidates(_tree_sessions, _sel_table_id, _lvl_cfg)
+                if len(_candidates) == 1:
+                    _sel_parent_id = _candidates[0]["id"]
+                    st.caption(f"↳ Rattachée automatiquement à : **{_candidates[0].get('name', '')}**")
+                elif len(_candidates) > 1:
+                    _parent_names = {c["id"]: c.get("name", c["id"]) for c in _candidates}
+                    _sel_parent_id = st.selectbox(
+                        "Plusieurs sessions candidates au même niveau — choisis la session parente",
+                        options=list(_parent_names.keys()),
+                        format_func=lambda pid: _parent_names.get(pid, pid),
+                        key="node_parent_select",
+                    )
+                else:
+                    st.caption("↳ Aucune session de niveau inférieur trouvée — rattachée à la racine du socle.")
+            elif _node_kind == "Fille (une table de la roadmap)":
+                st.warning("Aucune table détectée dans le fichier chargé — impossible de créer une session fille.")
+        else:
+            # AJOUTÉ (23/08/2026) — auto-détection silencieuse pour le
+            # client : même logique que le consultant
+            # (resolve_parent_candidates), sans lui montrer le choix
+            # technique. Un seul cas s'auto-rattache en Fille : le
+            # fichier contient exactement UNE table identifiable ET
+            # UN SEUL parent candidat existe dans l'arbre de sessions
+            # de cette société. Tout autre cas (0 ou plusieurs tables,
+            # 0 ou plusieurs parents candidats) retombe sur Racine —
+            # même repli que le comportement par défaut déjà en place,
+            # jamais une régression silencieuse plus risquée que
+            # l'ancien état "toujours Racine".
+            _node_kind     = "Racine (socle complet)"
+            _sel_table_id  = None
+            _sel_parent_id = None
+            if len(_table_options) == 1:
+                _auto_tid = _table_options[0][0]
+                _auto_candidates = resolve_parent_candidates(_tree_sessions, _auto_tid, _lvl_cfg)
+                if len(_auto_candidates) == 1:
+                    _node_kind     = "Fille (une table de la roadmap)"
+                    _sel_table_id  = _auto_tid
+                    _sel_parent_id = _auto_candidates[0]["id"]
+
+        if st.session_state.saved_session_id:
+            st.markdown(
+                f'<div class="save-box">✅ <b>Session sauvegardée</b><br>'
+                f'<span style="font-size:11px;color:#64748B">{st.session_state.saved_session_id}</span></div>',
+                unsafe_allow_html=True
+            )
+
+        # RÉVISÉ (27/08/2026, 8e passe) — demande Rami : retrait du bouton
+        # "Annuler" (pas de besoin distinct de "Recommencer" identifié) —
+        # 3 boutons égaux, pleine largeur, sur cette rangée.
+        cb, cr, csave = st.columns(3)
         with cb:
             if st.button("← Étape précédente", use_container_width=True):
                 st.session_state.step = 3
@@ -2329,104 +2417,9 @@ with tab_main:
             if st.button("🔄 Recommencer", use_container_width=True):
                 reset_session()
                 st.rerun()
-        with cs:
-            if st.session_state.saved_session_id:
-                st.markdown(
-                    f'<div class="save-box">✅ <b>Session sauvegardée</b><br>'
-                    f'<span style="font-size:11px;color:#64748B">{st.session_state.saved_session_id}</span></div>',
-                    unsafe_allow_html=True
-                )
-            else:
-                # AJOUTÉ (19/08/2026) — architecture mère/fille : rattache
-                # cette session soit comme racine d'un socle, soit comme
-                # session fille pour une table précise de la roadmap, avec
-                # résolution automatique du parent quand un seul candidat
-                # existe (voir resolve_parent_candidates, sessions_db.py).
-                _tree_sessions = get_sessions_for_company(
-                    cfg.get("client_code", ""), cfg.get("company_id", "")
-                )
-                _lvl_cfg = st.session_state.get("level_config", {})
-                _orig_b = st.session_state.get("original_file_bytes")
-                _table_options: list[tuple[int, str]] = []
-                if _orig_b:
-                    try:
-                        from app.core.bc_excel_processor import extract_sheets_info
-                        for _si in extract_sheets_info(_orig_b):
-                            _tid = int(_si["table_id"]) if str(_si["table_id"]).isdigit() else 0
-                            if _tid:
-                                _tname = (
-                                    _lvl_cfg[_tid].table_name if _tid in _lvl_cfg
-                                    else _si.get("table_name", str(_tid))
-                                )
-                                _table_options.append((_tid, f"{_tid} — {_tname}"))
-                    except Exception:
-                        _table_options = []
-
-                # RÉVISÉ (23/08/2026) — simplification écran client (demande
-                # Bilel) : le choix d'architecture racine/fille est une
-                # décision consultant (rattachement à la roadmap technique),
-                # pas quelque chose que le client doit comprendre pour
-                # sauvegarder sa session. Le client sauvegarde simplement en
-                # racine ; le consultant garde le contrôle complet.
-                if is_consultant():
-                    _node_kind = st.radio(
-                        "Type de session",
-                        ["Racine (socle complet)", "Fille (une table de la roadmap)"],
-                        key="node_kind_radio",
-                        horizontal=True,
-                    )
-                    _sel_table_id: int | None = None
-                    _sel_parent_id: str | None = None
-                    if _node_kind == "Fille (une table de la roadmap)" and _table_options:
-                        _sel_table_id = st.selectbox(
-                            "Table traitée par cette session",
-                            options=[t[0] for t in _table_options],
-                            format_func=lambda tid: dict(_table_options).get(tid, str(tid)),
-                            key="node_table_select",
-                        )
-                        _candidates = resolve_parent_candidates(_tree_sessions, _sel_table_id, _lvl_cfg)
-                        if len(_candidates) == 1:
-                            _sel_parent_id = _candidates[0]["id"]
-                            st.caption(f"↳ Rattachée automatiquement à : **{_candidates[0].get('name', '')}**")
-                        elif len(_candidates) > 1:
-                            _parent_names = {c["id"]: c.get("name", c["id"]) for c in _candidates}
-                            _sel_parent_id = st.selectbox(
-                                "Plusieurs sessions candidates au même niveau — choisis la session parente",
-                                options=list(_parent_names.keys()),
-                                format_func=lambda pid: _parent_names.get(pid, pid),
-                                key="node_parent_select",
-                            )
-                        else:
-                            st.caption("↳ Aucune session de niveau inférieur trouvée — rattachée à la racine du socle.")
-                    elif _node_kind == "Fille (une table de la roadmap)":
-                        st.warning("Aucune table détectée dans le fichier chargé — impossible de créer une session fille.")
-                else:
-                    # AJOUTÉ (23/08/2026) — auto-détection silencieuse pour le
-                    # client : même logique que le consultant
-                    # (resolve_parent_candidates), sans lui montrer le choix
-                    # technique. Un seul cas s'auto-rattache en Fille : le
-                    # fichier contient exactement UNE table identifiable ET
-                    # UN SEUL parent candidat existe dans l'arbre de sessions
-                    # de cette société. Tout autre cas (0 ou plusieurs tables,
-                    # 0 ou plusieurs parents candidats) retombe sur Racine —
-                    # même repli que le comportement par défaut déjà en place,
-                    # jamais une régression silencieuse plus risquée que
-                    # l'ancien état "toujours Racine".
-                    _node_kind     = "Racine (socle complet)"
-                    _sel_table_id  = None
-                    _sel_parent_id = None
-                    if len(_table_options) == 1:
-                        _auto_tid = _table_options[0][0]
-                        _auto_candidates = resolve_parent_candidates(_tree_sessions, _auto_tid, _lvl_cfg)
-                        if len(_auto_candidates) == 1:
-                            _node_kind     = "Fille (une table de la roadmap)"
-                            _sel_table_id  = _auto_tid
-                            _sel_parent_id = _auto_candidates[0]["id"]
-
-                _save_col, _ = st.columns([2.2, 2.3])
-                with _save_col:
-                    _save_clicked = st.button("💾 Sauvegarder la session", type="primary", use_container_width=True)
-                if _save_clicked:
+        with csave:
+            _save_clicked = st.button("💾 Sauvegarder la session", type="primary", use_container_width=True)
+        if _save_clicked:
                     original_bytes  = st.session_state.get("original_file_bytes")
                     generated_bytes = st.session_state.get("generated_file_bytes")
                     _save_payload = {
@@ -2557,11 +2550,6 @@ with tab_main:
                         st.rerun()
                     else:
                         st.error(f"❌ {res}")
-        with cst:
-            if major == 0:
-                st.success("✅ Aucune anomalie majeure")
-            else:
-                st.warning(f"⚠️ {major} anomalie(s) majeure(s)")
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -2765,7 +2753,7 @@ with tab_ses:
             if "_bulk_gen" not in st.session_state:
                 st.session_state._bulk_gen = 0
 
-            _bcol1, _bcol2, _bcol3, _bcol4 = st.columns([2, 2, 2, 4])
+            _bcol1, _bcol2, _bcol3 = st.columns(3)
             with _bcol1:
                 if st.button("✅ Tout sélectionner", key="btn_bulk_select_all", use_container_width=True):
                     st.session_state.bulk_select_ids = {s["id"] for s in sessions if s.get("id")}
@@ -2989,7 +2977,7 @@ with tab_ses:
                             )
                         with e2:
                             no = st.text_area("Notes", value=s.get("notes", ""), height=100, key=f"eno_{sid}")
-                        sv1, sv2, _ = st.columns([2, 2, 6])
+                        sv1, sv2 = st.columns(2)
                         with sv1:
                             if st.button("💾 Enregistrer", key=f"esv_{sid}", type="primary", use_container_width=True):
                                 ok, err = update_session(sid, {"name": nn.strip(), "status": ns, "notes": no.strip()})
@@ -3006,7 +2994,7 @@ with tab_ses:
 
                     if st.session_state.confirm_delete_ses == sid:
                         st.warning(f"⚠️ Supprimer **{s.get('name', '')}** ? Action irréversible.")
-                        dy, dn, _ = st.columns([2, 2, 6])
+                        dy, dn = st.columns(2)
                         with dy:
                             if st.button("✅ Confirmer", key=f"dcy_{sid}", type="primary", use_container_width=True):
                                 ok, err = delete_session(sid)
