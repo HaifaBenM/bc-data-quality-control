@@ -868,8 +868,11 @@ def upload_configuration_package_file(
     _base = _automation_base_url(tenant_id, environment, company_id)
 
     # Étape 1/2 — crée l'entrée dans la collection "file" si elle n'existe
-    # pas déjà (ignore un éventuel 409/conflit si un essai précédent l'a
-    # déjà créée).
+    # pas déjà. RÉVISÉ (27/08/2026) — bug réel trouvé : BC renvoie un 400
+    # (pas 409) avec le code "Internal_EntityWithSameKeyExists" quand
+    # l'entrée existe déjà (cas courant : un essai précédent sur le même
+    # package) — mon check ne couvrait que le 409 standard, ignorait donc
+    # à tort ce vrai cas "pas grave, continue".
     _create_file_url = f"{_base}/configurationPackages({package_id})/file"
     _create_resp = requests.post(
         _create_file_url,
@@ -877,7 +880,11 @@ def upload_configuration_package_file(
         json={"code": package_code},
         timeout=30,
     )
-    if not _create_resp.ok and _create_resp.status_code != 409:
+    _already_exists = (
+        _create_resp.status_code == 409
+        or "EntityWithSameKeyExists" in _create_resp.text
+    )
+    if not _create_resp.ok and not _already_exists:
         raise Exception(
             f"Erreur BC API {_create_resp.status_code} (création entrée file) : {_create_resp.text[:500]}"
         )
