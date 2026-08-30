@@ -590,31 +590,34 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
     # colonne qui le contient, même étroite). st.popover s'affiche en
     # panneau flottant : déclencheur compact ET contenu pleine largeur au
     # clic, sans dépendre l'un de l'autre.
+    # RÉVISÉ (27/08/2026, 4e passe) — demande Rami : "pas beau, pas lisible"
+    # — 4 colonnes côte à côte dans un popover (nativement étroit) tronquait
+    # tout (valeurs sélectionnées, icônes de suppression illisibles,
+    # entassées). Empilé verticalement à la place : chaque filtre prend
+    # toute la largeur du popover, plus de troncature.
     with st.popover("🔍 Filtres"):
-        cf1, cf2, cf3, cf4 = st.columns(4)
-        with cf1:
-            sevs = sorted(set(a.get("Sévérité", "") for a in real_anomalies))
-            filt_sev = st.multiselect("Sévérité", sevs, default=sevs, key=f"fs_{sn}")
-        with cf2:
-            types = sorted(set(a.get("Type d'anomalie", "") for a in real_anomalies))
-            filt_type = st.multiselect("Type d'anomalie", types, default=types, key=f"ft_{sn}")
-        with cf3:
-            champs = sorted(set(a.get("Champ", "") for a in real_anomalies))
-            filt_champ = st.multiselect("Champ", champs, default=champs, key=f"fc_{sn}")
-        with cf4:
-            _cls_label = {
-                "PREALABLE_BC_REQUIS": "🟣 Prérequis BC requis",
-                "VALEUR_CORRIGIBLE":   "✏️ Corrigible",
-                # AJOUTÉ (26/08/2026, jour J) — nouvelle classification apportée
-                # par la détection de cohérence (validate_coherence_axe_c),
-                # jamais mappée jusqu'ici — s'affichait vide dans la colonne.
-                "SUGGESTION_IA":       "🧠 Suggestion IA",
-            }
-            clss = sorted(set(a.get("Classification", "") for a in real_anomalies))
-            filt_cls = st.multiselect(
-                "Classification", clss, default=clss, key=f"fcl_{sn}",
-                format_func=lambda c: _cls_label.get(c, c or "(aucune)"),
-            )
+        sevs = sorted(set(a.get("Sévérité", "") for a in real_anomalies))
+        filt_sev = st.multiselect("Sévérité", sevs, default=sevs, key=f"fs_{sn}")
+
+        types = sorted(set(a.get("Type d'anomalie", "") for a in real_anomalies))
+        filt_type = st.multiselect("Type d'anomalie", types, default=types, key=f"ft_{sn}")
+
+        champs = sorted(set(a.get("Champ", "") for a in real_anomalies))
+        filt_champ = st.multiselect("Champ", champs, default=champs, key=f"fc_{sn}")
+
+        _cls_label = {
+            "PREALABLE_BC_REQUIS": "🟣 Prérequis BC requis",
+            "VALEUR_CORRIGIBLE":   "✏️ Corrigible",
+            # AJOUTÉ (26/08/2026, jour J) — nouvelle classification apportée
+            # par la détection de cohérence (validate_coherence_axe_c),
+            # jamais mappée jusqu'ici — s'affichait vide dans la colonne.
+            "SUGGESTION_IA":       "🧠 Suggestion IA",
+        }
+        clss = sorted(set(a.get("Classification", "") for a in real_anomalies))
+        filt_cls = st.multiselect(
+            "Classification", clss, default=clss, key=f"fcl_{sn}",
+            format_func=lambda c: _cls_label.get(c, c or "(aucune)"),
+        )
 
     filtered = [
         a for a in real_anomalies
