@@ -855,23 +855,25 @@ def upload_configuration_package_file(
     le corps réel de la réponse BC est maintenant inclus dans le message
     d'erreur (raise_for_status() seul ne le montrait jamais).
 
-    RÉVISÉ (27/08/2026, 2e passe) — bug réel trouvé (404 "Resource not
-    found for the segment 'file'") : package_code inséré tel quel dans
-    l'URL — un vrai code package BC contient souvent des espaces et un
-    tiret cadratin (ex. "QC-MDD-STOCK-V2 — 28", généré via la date), ce qui
-    casse la syntaxe OData du segment file('...'). Encodé avec quote()
-    avant insertion.
+    RÉVISÉ (27/08/2026, 3e passe) — 404 "Resource not found for the segment
+    'file'" persistant même avec un code propre (sans espaces/caractères
+    spéciaux) et un package_id valide, alors que l'URL est identique
+    caractère pour caractère à la documentation officielle Microsoft.
+    Filet de sécurité ajouté : si l'URL documentée échoue en 404, tente une
+    URL alternative sans la clé de code dans le segment file (variante
+    rencontrée sur certaines versions/configurations BC), avant d'abandonner.
     """
     _pkg_code_enc = quote(package_code, safe="")
-    url = (
-        f"{_automation_base_url(tenant_id, environment, company_id)}"
-        f"/configurationPackages({package_id})/file('{_pkg_code_enc}')/content"
-    )
-    resp = requests.patch(
-        url,
-        headers={**_headers(token), "Content-Type": "application/octet-stream", "If-Match": "*"},
-        data=file_bytes, timeout=60,
-    )
+    _base = _automation_base_url(tenant_id, environment, company_id)
+    _headers_upload = {**_headers(token), "Content-Type": "application/octet-stream", "If-Match": "*"}
+
+    url = f"{_base}/configurationPackages({package_id})/file('{_pkg_code_enc}')/content"
+    resp = requests.patch(url, headers=_headers_upload, data=file_bytes, timeout=60)
+
+    if resp.status_code == 404:
+        _fallback_url = f"{_base}/configurationPackages({package_id})/file/content"
+        resp = requests.patch(_fallback_url, headers=_headers_upload, data=file_bytes, timeout=60)
+
     if not resp.ok:
         raise Exception(f"Erreur BC API {resp.status_code} (dépôt fichier) : {resp.text[:500]}")
     resp.raise_for_status()
@@ -980,6 +982,7 @@ def run_bc_import_check(
     package_code = (package_code or "")[:20]
     result = {"success": False, "package_id": "", "status": None, "error": ""}
     package_id = ""
+    _pkg_raw_json = None
     try:
         existing = get_configuration_package_status(tenant_id, environment, company_id, token, package_code)
         if existing:
@@ -996,10 +999,18 @@ def run_bc_import_check(
         # champ "id" valide), cause la plus probable d'un tel 404 (l'URL
         # devient .../configurationPackages()/file(...) — parenthèses
         # vides, aucune entité à laquelle rattacher le fichier).
+        # AJOUTÉ (27/08/2026, diagnostic 2e passe) — bug 404 "Resource not
+        # found for the segment 'file'" persistant malgré une URL conforme
+        # à la documentation officielle (vérifié caractère pour caractère).
+        # Capture le JSON BRUT du package (existing ou created) dans le
+        # message d'erreur si le dépôt échoue — un lien direct type
+        # @odata.mediaEditLink y est parfois exposé et serait plus fiable
+        # que reconstruire l'URL nous-mêmes.
         if not package_id:
             raise Exception(
                 f"package_id vide après création/lecture — existing={existing!r}"
             )
+        _pkg_raw_json = existing if existing else created
 
         upload_configuration_package_file(
             tenant_id, environment, company_id, token, package_id, package_code, file_bytes
@@ -1026,7 +1037,7 @@ def run_bc_import_check(
         result["package_id"] = package_id
         result["status"]     = status
     except requests.HTTPError as e:
-        result["error"] = f"Erreur BC API {e.response.status_code} : {e.response.text[:300]} [code={package_code!r} id={package_id!r}]"
+        result["error"] = f"Erreur BC API {e.response.status_code} : {e.response.text[:300]} [code={package_code!r} id={package_id!r}] [json_package={_pkg_raw_json!r}]"
     except Exception as e:
-        result["error"] = f"{type(e).__name__} : {e} [code={package_code!r} id={package_id!r}]"
+        result["error"] = f"{type(e).__name__} : {e} [code={package_code!r} id={package_id!r}] [json_package={_pkg_raw_json!r}]"
     return result
