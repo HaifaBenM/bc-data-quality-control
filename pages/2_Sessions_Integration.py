@@ -583,43 +583,38 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
     # Champ et Classification ajoutés en plus de Sévérité/Type d'anomalie
     # déjà existants, pour couvrir toutes les colonnes utiles à la
     # recherche d'une ligne précise à corriger.
-    # RÉVISÉ (27/08/2026) — demande Rami/Bilel : écran trop chargé. Filtres
-    # repliés dans un expander (fermé par défaut) — les valeurs par défaut
-    # restent "tout sélectionné", donc le tableau affiche toujours tout tant
-    # qu'on n'a pas ouvert et changé un filtre. Ne change rien au
-    # comportement, réduit juste l'espace occupé à l'écran.
-    # RÉVISÉ (27/08/2026, 2e passe) — demande Rami : la barre "🔍 Filtres"
-    # s'étirait sur toute la largeur de l'écran, disproportionnée par
-    # rapport à ce qu'elle contient — mise dans une colonne étroite, comme
-    # une vraie barre de filtre discrète plutôt qu'un bandeau pleine page.
-    _filt_col, _ = st.columns([1, 1.3])
-    with _filt_col:
-        with st.expander("🔍 Filtres"):
-            cf1, cf2 = st.columns(2)
-            with cf1:
-                sevs = sorted(set(a.get("Sévérité", "") for a in real_anomalies))
-                filt_sev = st.multiselect("Sévérité", sevs, default=sevs, key=f"fs_{sn}")
-            with cf2:
-                types = sorted(set(a.get("Type d'anomalie", "") for a in real_anomalies))
-                filt_type = st.multiselect("Type d'anomalie", types, default=types, key=f"ft_{sn}")
-            cf3, cf4 = st.columns(2)
-            with cf3:
-                champs = sorted(set(a.get("Champ", "") for a in real_anomalies))
-                filt_champ = st.multiselect("Champ", champs, default=champs, key=f"fc_{sn}")
-            with cf4:
-                _cls_label = {
-                    "PREALABLE_BC_REQUIS": "🟣 Prérequis BC requis",
-                    "VALEUR_CORRIGIBLE":   "✏️ Corrigible",
-                    # AJOUTÉ (26/08/2026, jour J) — nouvelle classification apportée
-                    # par la détection de cohérence (validate_coherence_axe_c),
-                    # jamais mappée jusqu'ici — s'affichait vide dans la colonne.
-                    "SUGGESTION_IA":       "🧠 Suggestion IA",
-                }
-                clss = sorted(set(a.get("Classification", "") for a in real_anomalies))
-                filt_cls = st.multiselect(
-                    "Classification", clss, default=clss, key=f"fcl_{sn}",
-                    format_func=lambda c: _cls_label.get(c, c or "(aucune)"),
-                )
+    # RÉVISÉ (27/08/2026, 3e passe) — demande Rami : déclencheur encore plus
+    # compact (taille bouton normal, pas de colonne dédiée) tout en gardant
+    # les 4 filtres sur UNE SEULE ligne une fois ouverts — impossible avec
+    # un st.expander (son contenu reste contraint à la largeur de la
+    # colonne qui le contient, même étroite). st.popover s'affiche en
+    # panneau flottant : déclencheur compact ET contenu pleine largeur au
+    # clic, sans dépendre l'un de l'autre.
+    with st.popover("🔍 Filtres"):
+        cf1, cf2, cf3, cf4 = st.columns(4)
+        with cf1:
+            sevs = sorted(set(a.get("Sévérité", "") for a in real_anomalies))
+            filt_sev = st.multiselect("Sévérité", sevs, default=sevs, key=f"fs_{sn}")
+        with cf2:
+            types = sorted(set(a.get("Type d'anomalie", "") for a in real_anomalies))
+            filt_type = st.multiselect("Type d'anomalie", types, default=types, key=f"ft_{sn}")
+        with cf3:
+            champs = sorted(set(a.get("Champ", "") for a in real_anomalies))
+            filt_champ = st.multiselect("Champ", champs, default=champs, key=f"fc_{sn}")
+        with cf4:
+            _cls_label = {
+                "PREALABLE_BC_REQUIS": "🟣 Prérequis BC requis",
+                "VALEUR_CORRIGIBLE":   "✏️ Corrigible",
+                # AJOUTÉ (26/08/2026, jour J) — nouvelle classification apportée
+                # par la détection de cohérence (validate_coherence_axe_c),
+                # jamais mappée jusqu'ici — s'affichait vide dans la colonne.
+                "SUGGESTION_IA":       "🧠 Suggestion IA",
+            }
+            clss = sorted(set(a.get("Classification", "") for a in real_anomalies))
+            filt_cls = st.multiselect(
+                "Classification", clss, default=clss, key=f"fcl_{sn}",
+                format_func=lambda c: _cls_label.get(c, c or "(aucune)"),
+            )
 
     filtered = [
         a for a in real_anomalies
@@ -642,26 +637,22 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
         if _editor_gen_key not in st.session_state:
             st.session_state[_editor_gen_key] = 0
 
-        # RÉVISÉ (27/08/2026, 3e passe) — reprise cohérente demandée par
-        # Rami : les colonnes précédentes ([0.7, 0.7, 2.1]) restaient
-        # disproportionnées par rapport au contenu (icône seule/texte court)
-        # — un bouton compact avec use_container_width=True dans une colonne
-        # trop large s'étire quand même et paraît "flottant dans du vide".
-        # Ajout d'une colonne "spacer" finale qui absorbe tout l'espace
-        # restant, pour que les boutons réels restent groupés et compacts à
-        # gauche, jamais étirés.
+        # RÉVISÉ (27/08/2026, 4e passe) — demande Rami : boutons à la taille
+        # naturelle de l'icône, pas étirés même dans une colonne étroite —
+        # retrait de use_container_width, laisse Streamlit dimensionner au
+        # contenu (icône seule = bouton compact, aligné à gauche).
         if is_consultant():
             csel1, csel2, csel3, _csel_spacer = st.columns([1, 1, 2, 6])
         else:
             csel1, csel2, _csel_spacer = st.columns([1, 1, 8])
             csel3 = None
         with csel1:
-            if st.button("✅", key=f"btn_select_all_{sn}", use_container_width=True, help="Tout sélectionner"):
+            if st.button("✅", key=f"btn_select_all_{sn}", help="Tout sélectionner"):
                 st.session_state[f"_merged_select_override_{sn}"] = True
                 st.session_state[_editor_gen_key] += 1
                 st.rerun()
         with csel2:
-            if st.button("⬜", key=f"btn_deselect_all_{sn}", use_container_width=True, help="Tout désélectionner"):
+            if st.button("⬜", key=f"btn_deselect_all_{sn}", help="Tout désélectionner"):
                 st.session_state[f"_merged_select_override_{sn}"] = False
                 st.session_state[_editor_gen_key] += 1
                 st.rerun()
@@ -806,7 +797,7 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
                         st.session_state[f"_propagate_feedback_{sn}"] = ("info", "ℹ️ Rien à propager — soit aucune autre ligne ne partage la même valeur source dans ce champ, soit toutes l'ont déjà.")
                     st.rerun()
 
-        cgen1, cgen2, cgen3 = st.columns([2, 2, 4])
+        cgen1, cgen2, cgen3 = st.columns([1, 1, 2])
         with cgen1:
             gen_clicked = st.button("0️⃣ Générer le fichier corrigé", type="primary", use_container_width=True, key=f"gen_{sn}")
 
@@ -851,6 +842,14 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
                     generated_bytes = clear_id_reference_columns(generated_bytes, guid_column_names=_guid_cols_by_sheet)
                     st.session_state["generated_file_bytes"] = generated_bytes
                     st.session_state["generated_file_name"] = f"CORRIGE_{cfg.get('file_name', 'fichier.xlsx')}"
+                    # AJOUTÉ (27/08/2026) — demande Rami : une nouvelle
+                    # génération de fichier doit repartir sur un état
+                    # d'intégration BC neuf — sinon un ancien message
+                    # d'erreur ("BC a rejeté l'import...") d'un test
+                    # précédent restait affiché malgré un fichier régénéré
+                    # entre-temps, laissant croire que le nouveau fichier
+                    # posait le même problème.
+                    st.session_state[f"bc_integration_{sn}"] = {"stage": "idle"}
                     st.success(f"✅ Fichier généré — {len(corrections)} correction(s) appliquée(s).")
                 except Exception as e:
                     st.error(f"❌ Erreur lors de la génération : {e}")
@@ -912,10 +911,18 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
                                         "status": _res.get("status"),
                                         "creds": (_tid, _env, cfg["company_id"], _tok),
                                     }
+                                    # AJOUTÉ (27/08/2026) — demande Rami : un
+                                    # indicateur clair de fin de vérification —
+                                    # le sondage BC peut prendre jusqu'à 20s,
+                                    # un simple retour de spinner ne suffisait
+                                    # pas à signaler "c'est fini".
+                                    st.toast("✅ Vérification BC terminée.")
                                 else:
                                     st.session_state[_integ_key] = {"stage": "idle", "error": _res.get("error", "")}
+                                    st.toast("⚠️ Vérification BC terminée — erreur détectée.")
                         except Exception as _integ_exc:
                             st.session_state[_integ_key] = {"stage": "idle", "error": f"{type(_integ_exc).__name__} : {_integ_exc}"}
+                            st.toast("⚠️ Vérification BC terminée — erreur technique.")
 
             _integ = st.session_state[_integ_key]
             if _integ.get("error"):
