@@ -627,11 +627,10 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
         st.session_state[_all_sel_key] = False
     _toggle_label = "⬜ Désélectionner" if st.session_state[_all_sel_key] else "✅ Sélectionner"
 
-    if is_consultant():
-        _rowsel1, _rowsel2, _row_spacer, _rowsel3 = st.columns([1, 1, 4, 2])
-    else:
-        _rowsel1, _row_spacer, _rowsel3 = st.columns([1, 5, 2])
-        _rowsel2 = None
+    # RÉVISÉ (27/08/2026, 9e passe) — demande Rami : Propager n'est PAS
+    # réservé au consultant — corrigible par le client aussi, retiré de la
+    # restriction is_consultant().
+    _rowsel1, _rowsel2, _row_spacer, _rowsel3 = st.columns([1, 1, 4, 2])
 
     with _rowsel1:
         if st.button(_toggle_label, key=f"btn_toggle_select_{sn}", use_container_width=True):
@@ -2342,59 +2341,40 @@ with tab_main:
             except Exception:
                 _table_options = []
 
-        if is_consultant():
-            _node_kind = st.selectbox(
-                "Type de session",
-                ["Racine (socle complet)", "Fille (une table de la roadmap)"],
-                key="node_kind_radio",
+        # RÉVISÉ (27/08/2026, 9e passe) — demande Rami : le choix
+        # Racine/Fille n'est PAS réservé au consultant — les deux rôles
+        # font cette tâche. Retiré de la restriction is_consultant()
+        # (l'auto-détection silencieuse pour le client est abandonnée).
+        _node_kind = st.selectbox(
+            "Type de session",
+            ["Racine (socle complet)", "Fille (une table de la roadmap)"],
+            key="node_kind_radio",
+        )
+        _sel_table_id: int | None = None
+        _sel_parent_id: str | None = None
+        if _node_kind == "Fille (une table de la roadmap)" and _table_options:
+            _sel_table_id = st.selectbox(
+                "Table traitée par cette session",
+                options=[t[0] for t in _table_options],
+                format_func=lambda tid: dict(_table_options).get(tid, str(tid)),
+                key="node_table_select",
             )
-            _sel_table_id: int | None = None
-            _sel_parent_id: str | None = None
-            if _node_kind == "Fille (une table de la roadmap)" and _table_options:
-                _sel_table_id = st.selectbox(
-                    "Table traitée par cette session",
-                    options=[t[0] for t in _table_options],
-                    format_func=lambda tid: dict(_table_options).get(tid, str(tid)),
-                    key="node_table_select",
+            _candidates = resolve_parent_candidates(_tree_sessions, _sel_table_id, _lvl_cfg)
+            if len(_candidates) == 1:
+                _sel_parent_id = _candidates[0]["id"]
+                st.caption(f"↳ Rattachée automatiquement à : **{_candidates[0].get('name', '')}**")
+            elif len(_candidates) > 1:
+                _parent_names = {c["id"]: c.get("name", c["id"]) for c in _candidates}
+                _sel_parent_id = st.selectbox(
+                    "Plusieurs sessions candidates au même niveau — choisis la session parente",
+                    options=list(_parent_names.keys()),
+                    format_func=lambda pid: _parent_names.get(pid, pid),
+                    key="node_parent_select",
                 )
-                _candidates = resolve_parent_candidates(_tree_sessions, _sel_table_id, _lvl_cfg)
-                if len(_candidates) == 1:
-                    _sel_parent_id = _candidates[0]["id"]
-                    st.caption(f"↳ Rattachée automatiquement à : **{_candidates[0].get('name', '')}**")
-                elif len(_candidates) > 1:
-                    _parent_names = {c["id"]: c.get("name", c["id"]) for c in _candidates}
-                    _sel_parent_id = st.selectbox(
-                        "Plusieurs sessions candidates au même niveau — choisis la session parente",
-                        options=list(_parent_names.keys()),
-                        format_func=lambda pid: _parent_names.get(pid, pid),
-                        key="node_parent_select",
-                    )
-                else:
-                    st.caption("↳ Aucune session de niveau inférieur trouvée — rattachée à la racine du socle.")
-            elif _node_kind == "Fille (une table de la roadmap)":
-                st.warning("Aucune table détectée dans le fichier chargé — impossible de créer une session fille.")
-        else:
-            # AJOUTÉ (23/08/2026) — auto-détection silencieuse pour le
-            # client : même logique que le consultant
-            # (resolve_parent_candidates), sans lui montrer le choix
-            # technique. Un seul cas s'auto-rattache en Fille : le
-            # fichier contient exactement UNE table identifiable ET
-            # UN SEUL parent candidat existe dans l'arbre de sessions
-            # de cette société. Tout autre cas (0 ou plusieurs tables,
-            # 0 ou plusieurs parents candidats) retombe sur Racine —
-            # même repli que le comportement par défaut déjà en place,
-            # jamais une régression silencieuse plus risquée que
-            # l'ancien état "toujours Racine".
-            _node_kind     = "Racine (socle complet)"
-            _sel_table_id  = None
-            _sel_parent_id = None
-            if len(_table_options) == 1:
-                _auto_tid = _table_options[0][0]
-                _auto_candidates = resolve_parent_candidates(_tree_sessions, _auto_tid, _lvl_cfg)
-                if len(_auto_candidates) == 1:
-                    _node_kind     = "Fille (une table de la roadmap)"
-                    _sel_table_id  = _auto_tid
-                    _sel_parent_id = _auto_candidates[0]["id"]
+            else:
+                st.caption("↳ Aucune session de niveau inférieur trouvée — rattachée à la racine du socle.")
+        elif _node_kind == "Fille (une table de la roadmap)":
+            st.warning("Aucune table détectée dans le fichier chargé — impossible de créer une session fille.")
 
         if st.session_state.saved_session_id:
             st.markdown(
