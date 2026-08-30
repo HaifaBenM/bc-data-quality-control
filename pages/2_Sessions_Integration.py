@@ -1657,7 +1657,7 @@ with tab_main:
                     # (plus jamais empilés verticalement).
                     _anomaly_count = st.session_state.get(f"_anomaly_count_{_roadmap_key}")
                     with st.container(border=True):
-                        _hcol1, _hcol2, _hcol3 = st.columns([3, 1.3, 1.7])
+                        _hcol1, _hcol2, _hcol3 = st.columns([3, 1.5, 1.5])
                         with _hcol1:
                             if _anomaly_count is not None:
                                 _num_color = "#0F6E56" if _anomaly_count == 0 else "#993C1D"
