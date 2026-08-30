@@ -165,12 +165,22 @@ div[data-testid="stExpander"] summary {
     background: #EEF4FD; color: #1B3A6B;
 }
 .session-row-actions { margin: .2rem 0 .6rem; }
-/* AJOUTÉ (27/08/2026) — demande Rami : liste et police du popover
-   "🔍 Filtres" un peu petites, moins lisibles. Élargit le popover et
-   agrandit légèrement la police des multiselect qu'il contient. */
-div[data-testid="stPopoverBody"] { min-width: 320px; }
-div[data-testid="stPopoverBody"] label, div[data-testid="stPopoverBody"] div[data-baseweb="select"] {
-    font-size: 1rem;
+/* RÉVISÉ (27/08/2026, 2e passe) — demande Rami : encore plus grand —
+   popover élargi davantage, police des filtres et du mot "Filtres"
+   (déclencheur) agrandis. Plusieurs sélecteurs de repli car le nom exact
+   des attributs data-testid varie selon la version de Streamlit — ceux
+   qui ne correspondent à rien sont simplement ignorés, sans risque. */
+div[data-testid="stPopoverBody"], div[data-testid="stPopover"] > div {
+    min-width: 380px;
+}
+div[data-testid="stPopoverBody"] label,
+div[data-testid="stPopoverBody"] div[data-baseweb="select"],
+div[data-testid="stPopoverBody"] div[data-baseweb="select"] * {
+    font-size: 1.05rem !important;
+}
+div[data-testid="stPopover"] button p,
+div[data-testid="stPopover"] button span {
+    font-size: 1.05rem !important;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -658,9 +668,9 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
         _toggle_label = "⬜ Tout désélectionner" if st.session_state[_all_sel_key] else "✅ Tout sélectionner"
 
         if is_consultant():
-            csel1, csel3, _csel_spacer = st.columns([1.6, 1.4, 5])
+            csel1, csel3, _csel_spacer = st.columns([1.4, 1.4, 5.2])
         else:
-            csel1, _csel_spacer = st.columns([1.6, 6.4])
+            csel1, _csel_spacer = st.columns([1.4, 6.6])
             csel3 = None
         with csel1:
             if st.button(_toggle_label, key=f"btn_toggle_select_{sn}", use_container_width=True):
