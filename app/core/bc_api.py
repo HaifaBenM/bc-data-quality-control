@@ -980,7 +980,22 @@ def run_bc_import_check(
         )
         import_configuration_package(tenant_id, environment, company_id, token, package_id)
 
-        status = get_configuration_package_status(tenant_id, environment, company_id, token, package_code)
+        # RÉVISÉ (27/08/2026) — bug réel rencontré : "Import Status is not
+        # completed. You must import the package before you apply it."
+        # L'import BC est asynchrone — le POST répond immédiatement (204),
+        # mais le traitement réel se termine un peu après. Lire le statut
+        # tout de suite après pouvait donc remonter un importStatus encore
+        # "InProgress", faisant croire l'import terminé alors qu'il ne
+        # l'était pas encore côté BC. Sonde le statut jusqu'à confirmation
+        # réelle (importStatus == "Completed"), jusqu'à 20s, avant de
+        # considérer l'import comme fini.
+        status = None
+        for _ in range(10):
+            status = get_configuration_package_status(tenant_id, environment, company_id, token, package_code)
+            if status and str(status.get("importStatus", "")).lower() == "completed":
+                break
+            time.sleep(2)
+
         result["success"]    = True
         result["package_id"] = package_id
         result["status"]     = status

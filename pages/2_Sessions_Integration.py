@@ -930,7 +930,10 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
             _integ = st.session_state[_integ_key]
 
             if _integ["stage"] in ("idle", "imported"):
-                if st.button("1️⃣ Vérifier avant intégration", key=f"btn_integ_check_{sn}", use_container_width=True):
+                _integ_btn_col1, _ = st.columns([1, 2.2])
+                with _integ_btn_col1:
+                    _btn1_clicked = st.button("1️⃣ Vérifier avant intégration", key=f"btn_integ_check_{sn}", use_container_width=True)
+                if _btn1_clicked:
                     with st.spinner("Vérification BC en cours..."):
                         try:
                             _p = get_profile_by_code(cfg.get("client_code", ""))
@@ -966,12 +969,32 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
                 st.markdown(f'<div class="card-major">🔴 {_integ["error"]}</div>', unsafe_allow_html=True)
 
             if _integ["stage"] == "imported":
-                _nb_err_integ = (_integ.get("status") or {}).get("numberOfErrors", "?")
-                if _nb_err_integ == 0:
+                _integ_status = _integ.get("status") or {}
+                _import_status_str = str(_integ_status.get("importStatus", "")).lower()
+                _nb_err_integ = _integ_status.get("numberOfErrors", "?")
+                # AJOUTÉ (27/08/2026) — garde-fou : si le sondage de
+                # run_bc_import_check n'a pas réussi à confirmer
+                # importStatus == "Completed" dans le temps imparti, ne
+                # jamais proposer "Appliquer" — mieux vaut redemander une
+                # vérification que de retomber sur l'erreur BC "Import
+                # Status is not completed".
+                if _import_status_str != "completed":
+                    st.markdown(
+                        f'<div class="card-minor">⏳ BC n\'a pas encore confirmé la fin de l\'import '
+                        f'(statut actuel : {_integ_status.get("importStatus", "inconnu")}) — relance '
+                        f'"Vérifier avant intégration" dans quelques secondes.</div>',
+                        unsafe_allow_html=True,
+                    )
+                elif _nb_err_integ == 0:
                     st.markdown('<div class="card-ref">✅ 0 erreur — le fichier peut être appliqué dans BC.</div>', unsafe_allow_html=True)
                     st.warning("⚠️ L'étape suivante écrit réellement les données dans Business Central — action irréversible.")
                     _confirm = st.checkbox("Je confirme vouloir intégrer ces données dans Business Central", key=f"confirm_apply_{sn}")
-                    if _confirm and st.button("2️⃣ Appliquer dans BC", type="primary", key=f"btn_integ_apply_{sn}", use_container_width=True):
+                    _btn2_clicked = False
+                    if _confirm:
+                        _integ_btn_col2, _ = st.columns([1, 2.2])
+                        with _integ_btn_col2:
+                            _btn2_clicked = st.button("2️⃣ Appliquer dans BC", type="primary", key=f"btn_integ_apply_{sn}", use_container_width=True)
+                    if _btn2_clicked:
                         with st.spinner("Intégration dans BC en cours..."):
                             try:
                                 _tid, _env, _company_id, _tok = _integ["creds"]
