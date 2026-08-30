@@ -458,7 +458,7 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
             "Ce n'est pas un défaut de l'outil, juste une limite temporaire "
             "du service tiers utilisé."
         )
-    if st.session_state.get("_ia_diag_text"):
+    if st.session_state.get("_ia_diag_text") and is_consultant():
         with st.expander("🔬 Diagnostic cohérence IA (clique l'icône en haut à droite du bloc pour copier)"):
             st.code(st.session_state["_ia_diag_text"], language="text")
 
@@ -537,14 +537,6 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
     anomalies = by_sheet.get(sn, [])
     real_anomalies = [a for a in anomalies if a.get("Ligne", 0) > 0]
     info_anomalies = [a for a in anomalies if a.get("Ligne", 0) == 0]
-
-    if pr:
-        df_sn = pr.get("sheets", {}).get(sn)
-        if df_sn is not None and not df_sn.empty:
-            with st.expander(f"👀 Données source — {sn}"):
-                meta_sn = pr.get("metadata", {}).get(sn, {})
-                st.markdown(f"**{sn}** — {meta_sn.get('label', '')} · {len(df_sn)} lignes")
-                st.dataframe(df_sn.head(10), use_container_width=True, hide_index=True)
 
     if not real_anomalies and not info_anomalies:
         st.success("✅ Aucune anomalie.")
@@ -643,62 +635,43 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
         if _editor_gen_key not in st.session_state:
             st.session_state[_editor_gen_key] = 0
 
-        csel1, csel2, csel3, csel4 = st.columns([1.5, 1.7, 1.3, 3.5])
+        # RÉVISÉ (27/08/2026, 2e passe) — demande Rami : Copier retiré
+        # complètement (redondant — "Nouvelle valeur" se pré-remplit déjà
+        # automatiquement avec la suggestion). Propager reste, c'est le vrai
+        # outil de travail quotidien, gardé visible pour tous. Sélectionner/
+        # Désélectionner simplifiés en icône seule (même principe que les
+        # boutons Éditer/Supprimer de Profils Clients).
+        if is_consultant():
+            csel1, csel2, csel3 = st.columns([0.7, 0.7, 2.1])
+        else:
+            csel1, csel2 = st.columns([0.7, 0.7])
+            csel3 = None
         with csel1:
-            if st.button("✅ Sélectionner", key=f"btn_select_all_{sn}", use_container_width=True):
+            if st.button("✅", key=f"btn_select_all_{sn}", use_container_width=True, help="Tout sélectionner"):
                 st.session_state[f"_merged_select_override_{sn}"] = True
                 st.session_state[_editor_gen_key] += 1
                 st.rerun()
         with csel2:
-            if st.button("⬜ Désélectionner", key=f"btn_deselect_all_{sn}", use_container_width=True):
+            if st.button("⬜", key=f"btn_deselect_all_{sn}", use_container_width=True, help="Tout désélectionner"):
                 st.session_state[f"_merged_select_override_{sn}"] = False
                 st.session_state[_editor_gen_key] += 1
                 st.rerun()
-        with csel4:
-            # AJOUTÉ (26/08/2026, 2e passe) — demande Rami : "copie d'une
-            # colonne à une autre comme dans Excel" — le glisser-déposer
-            # littéral n'existe pas dans ce composant ; équivalent
-            # fonctionnel : choisir une colonne source et copier sa valeur
-            # dans "Nouvelle valeur" pour toutes les lignes affichées, en
-            # un clic. Le vrai copiage se fait plus bas (après la lecture
-            # du tableau édité), ce sélecteur ne fait que retenir le choix.
-            _copy_src_options = ["Valeur source", "🤖 Suggestion IA"]
-            _cc1, _cc2 = st.columns([2, 1])
-            with _cc1:
-                _copy_src_col = st.selectbox(
-                    "Copier vers Nouvelle valeur", _copy_src_options,
-                    key=f"copy_src_{sn}", label_visibility="collapsed",
-                )
-            with _cc2:
-                _copy_col_clicked = st.button("📋 Copier", key=f"btn_copy_col_{sn}", use_container_width=True)
         _select_override = st.session_state.pop(f"_merged_select_override_{sn}", None)
         # AJOUTÉ (26/08/2026) — overrides posés par "🔁 Propager" ci-dessous
         # (valeur manuelle appliquée à toutes les lignes de même Champ +
         # Valeur source qui n'avaient pas encore de correction saisie).
         _propagate_overrides: dict = st.session_state.get(f"_propagate_overrides_{sn}", {})
-        # AJOUTÉ (26/08/2026, 2e passe) — demande Rami : "copie d'une colonne
-        # à une autre comme dans Excel". Le glisser-déposer littéral n'est
-        # pas possible dans ce composant — équivalent utile : copier en un
-        # clic toute une colonne source (Correction suggérée ou Suggestion
-        # IA) vers "Nouvelle valeur", pour toutes les lignes affichées.
-        # Overrides PAR LIGNE (Ligne, Champ) — priment sur le repli par
-        # défaut ET sur "Propager" (par valeur), car plus spécifiques.
-        _copy_col_overrides: dict = st.session_state.get(f"_copy_col_overrides_{sn}", {})
 
-        # AJOUTÉ (26/08/2026, 2e passe) — affichage des messages persistés
-        # (Propager / Copier) posés lors du run précédent, juste avant leur
-        # propre st.rerun() — voir commentaire sur le piège "message avant
-        # rerun jamais visible" plus bas.
+        # AJOUTÉ (26/08/2026, 2e passe) ; RÉVISÉ (27/08/2026, retrait Copier) —
+        # affichage du message persisté posé par "🔁 Propager" lors du run
+        # précédent, juste avant son propre st.rerun() — voir commentaire sur
+        # le piège "message avant rerun jamais visible" plus bas.
         _propagate_fb = st.session_state.pop(f"_propagate_feedback_{sn}", None)
         if _propagate_fb:
             (st.success if _propagate_fb[0] == "success" else st.info)(_propagate_fb[1])
-        _copy_fb = st.session_state.pop(f"_copy_col_feedback_{sn}", None)
-        if _copy_fb:
-            (st.success if _copy_fb[0] == "success" else st.info)(_copy_fb[1])
 
         def _row(a: dict) -> dict:
             _key = (a.get("Champ", ""), str(a.get("Valeur", "")).strip())
-            _row_key = (a.get("Ligne", ""), a.get("Champ", ""))
             _is_corrigible = a.get("Classification") in ("VALEUR_CORRIGIBLE", "SUGGESTION_IA")
             _suggestion = a.get("Correction suggérée", "")
             # RÉVISÉ (26/08/2026, jour J) — demande Rami : une anomalie
@@ -711,11 +684,7 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
             # bout comme les autres.
             if not _suggestion:
                 _suggestion = a.get("suggestion_ia", "")
-            # Priorité : copie ligne par ligne > propagation par valeur > repli par défaut.
-            if _row_key in _copy_col_overrides:
-                _nouvelle = _copy_col_overrides[_row_key]
-            else:
-                _nouvelle = _propagate_overrides.get(_key, _suggestion)
+            _nouvelle = _propagate_overrides.get(_key, _suggestion)
             _appliquer = (
                 _select_override if _select_override is not None
                 else (_is_corrigible and bool(str(_nouvelle).strip()))
@@ -785,77 +754,52 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
             key=f"merged_editor_{sn}_{st.session_state[_editor_gen_key]}",
         )
 
-        with csel3:
-            if st.button("🔁 Propager", key=f"btn_propagate_{sn}", use_container_width=True,
-                         help="Applique chaque correction saisie à toutes les autres lignes ayant la même valeur source dans le même champ"):
-                # RÉVISÉ (27/08/2026, jour de la démo) — bug évité : la
-                # comparaison utilisait "Correction suggérée", colonne
-                # retirée de l'affichage (fusionnée dans "🤖 Suggestion IA",
-                # qui inclut un "(X%)" que "Nouvelle valeur" n'a jamais —
-                # comparer directement aurait détecté un "changement" sur
-                # CHAQUE ligne, même non modifiée). Comparaison désormais
-                # contre la valeur ORIGINALE de "Nouvelle valeur" (avant
-                # toute édition), qui reflète fidèlement ce qui était
-                # pré-rempli par défaut.
-                _original_nv_by_key = {
-                    (r["Ligne"], r["Champ"]): r["Nouvelle valeur"] for r in edit_rows_display
-                }
-                _new_overrides = dict(_propagate_overrides)
-                _propagated = 0
-                for _, row in edited.iterrows():
-                    _nv = str(row["Nouvelle valeur"]).strip()
-                    _orig_nv = str(_original_nv_by_key.get((row["Ligne"], row["Champ"]), "")).strip()
-                    if _nv and _nv != _orig_nv:
-                        _key = (row["Champ"], str(row["Valeur source"]).strip())
-                        _new_overrides[_key] = _nv
-                # Compte les lignes qui vont effectivement changer au prochain rerun
-                for r in edit_rows:
-                    _key = (r["Champ"], str(r["Valeur source"]).strip())
-                    if _key in _new_overrides and str(r["Nouvelle valeur"]).strip() != _new_overrides[_key]:
-                        _propagated += 1
-                st.session_state[f"_propagate_overrides_{sn}"] = _new_overrides
-                st.session_state[_editor_gen_key] += 1
-                # RÉVISÉ (26/08/2026, 2e passe) — bug trouvé : st.success/
-                # st.info juste avant st.rerun() ne s'affichaient jamais (le
-                # rerun efface le rendu en cours avant qu'il atteigne
-                # l'écran — même piège déjà rencontré cette semaine).
-                # Message persisté en session_state, affiché au prochain
-                # rendu à la place.
-                if _propagated:
-                    st.session_state[f"_propagate_feedback_{sn}"] = ("success", f"✅ {_propagated} ligne(s) mise(s) à jour avec la même correction.")
-                else:
-                    st.session_state[f"_propagate_feedback_{sn}"] = ("info", "ℹ️ Rien à propager — soit aucune autre ligne ne partage la même valeur source dans ce champ, soit toutes l'ont déjà.")
-                st.rerun()
-
-        # AJOUTÉ (26/08/2026, 2e passe) — exécution réelle de la copie
-        # colonne à colonne (choix fait plus haut, dans csel4). Copie la
-        # colonne source choisie vers "Nouvelle valeur", ligne par ligne,
-        # pour toutes les lignes actuellement affichées (respecte les
-        # filtres) — équivalent au glisser-déposer Excel entre colonnes.
-        if _copy_col_clicked:
-            _new_row_overrides = dict(_copy_col_overrides)
-            _copied = 0
-            for _, row in edited.iterrows():
-                _src_val = str(row.get(_copy_src_col, "")).strip()
-                if not _src_val:
-                    continue
-                _rk = (row["Ligne"], row["Champ"])
-                if str(row.get("Nouvelle valeur", "")).strip() != _src_val:
-                    _copied += 1
-                _new_row_overrides[_rk] = _src_val
-            st.session_state[f"_copy_col_overrides_{sn}"] = _new_row_overrides
-            st.session_state[_editor_gen_key] += 1
-            # RÉVISÉ (26/08/2026, 2e passe) — même fix que Propager :
-            # message persisté, jamais affiché juste avant un st.rerun().
-            if _copied:
-                st.session_state[f"_copy_col_feedback_{sn}"] = ("success", f"✅ « {_copy_src_col} » copiée vers « Nouvelle valeur » sur {_copied} ligne(s).")
-            else:
-                st.session_state[f"_copy_col_feedback_{sn}"] = ("info", "ℹ️ Rien à copier — toutes les lignes affichées ont déjà cette valeur, ou la colonne source est vide partout.")
-            st.rerun()
+        if csel3 is not None:
+            with csel3:
+                if st.button("🔁 Propager", key=f"btn_propagate_{sn}", use_container_width=True,
+                             help="Applique chaque correction saisie à toutes les autres lignes ayant la même valeur source dans le même champ"):
+                    # RÉVISÉ (27/08/2026, jour de la démo) — bug évité : la
+                    # comparaison utilisait "Correction suggérée", colonne
+                    # retirée de l'affichage (fusionnée dans "🤖 Suggestion IA",
+                    # qui inclut un "(X%)" que "Nouvelle valeur" n'a jamais —
+                    # comparer directement aurait détecté un "changement" sur
+                    # CHAQUE ligne, même non modifiée). Comparaison désormais
+                    # contre la valeur ORIGINALE de "Nouvelle valeur" (avant
+                    # toute édition), qui reflète fidèlement ce qui était
+                    # pré-rempli par défaut.
+                    _original_nv_by_key = {
+                        (r["Ligne"], r["Champ"]): r["Nouvelle valeur"] for r in edit_rows_display
+                    }
+                    _new_overrides = dict(_propagate_overrides)
+                    _propagated = 0
+                    for _, row in edited.iterrows():
+                        _nv = str(row["Nouvelle valeur"]).strip()
+                        _orig_nv = str(_original_nv_by_key.get((row["Ligne"], row["Champ"]), "")).strip()
+                        if _nv and _nv != _orig_nv:
+                            _key = (row["Champ"], str(row["Valeur source"]).strip())
+                            _new_overrides[_key] = _nv
+                    # Compte les lignes qui vont effectivement changer au prochain rerun
+                    for r in edit_rows:
+                        _key = (r["Champ"], str(r["Valeur source"]).strip())
+                        if _key in _new_overrides and str(r["Nouvelle valeur"]).strip() != _new_overrides[_key]:
+                            _propagated += 1
+                    st.session_state[f"_propagate_overrides_{sn}"] = _new_overrides
+                    st.session_state[_editor_gen_key] += 1
+                    # RÉVISÉ (26/08/2026, 2e passe) — bug trouvé : st.success/
+                    # st.info juste avant st.rerun() ne s'affichaient jamais (le
+                    # rerun efface le rendu en cours avant qu'il atteigne
+                    # l'écran — même piège déjà rencontré cette semaine).
+                    # Message persisté en session_state, affiché au prochain
+                    # rendu à la place.
+                    if _propagated:
+                        st.session_state[f"_propagate_feedback_{sn}"] = ("success", f"✅ {_propagated} ligne(s) mise(s) à jour avec la même correction.")
+                    else:
+                        st.session_state[f"_propagate_feedback_{sn}"] = ("info", "ℹ️ Rien à propager — soit aucune autre ligne ne partage la même valeur source dans ce champ, soit toutes l'ont déjà.")
+                    st.rerun()
 
         cgen1, cgen2, cgen3 = st.columns([2, 2, 4])
         with cgen1:
-            gen_clicked = st.button("🔧 Générer le fichier corrigé", type="primary", use_container_width=True, key=f"gen_{sn}")
+            gen_clicked = st.button("0️⃣ Générer le fichier corrigé", type="primary", use_container_width=True, key=f"gen_{sn}")
 
         if gen_clicked:
             original_bytes = st.session_state.get("original_file_bytes")
@@ -2268,29 +2212,11 @@ with tab_main:
             major = sum(1 for a in _real_e4 if a.get("Sévérité") == "Majeure")
             minor = sum(1 for a in _real_e4 if a.get("Sévérité") == "Mineure")
 
-        c1, c2, c3, c4, c5 = st.columns(5)
-        for cw, v, l, col in [
-            (c1, lines, "Lignes analysées",  "#1B3A6B"),
-            (c2, total, "Total anomalies",    "#993C1D" if total > 0 else "#0F6E56"),
-            (c3, major, "🔴 Majeures",        "#993C1D" if major > 0 else "#0F6E56"),
-            (c4, minor, "🟠 Mineures",        "#854F0B" if minor > 0 else "#0F6E56"),
-            (c5, auto,  "🤖 Corrigées auto",  "#7C3AED" if auto > 0 else "#64748B"),
-        ]:
-            with cw:
-                st.markdown(
-                    f'<div class="stat-box"><p class="stat-num" style="color:{col}">{v}</p>'
-                    f'<p class="stat-lbl">{l}</p></div>',
-                    unsafe_allow_html=True
-                )
-
-        st.markdown("---")
-        col_leg1, col_leg2, _ = st.columns([2, 2, 6])
-        with col_leg1:
-            st.markdown('<span class="tag tag-bc">🔴 BC</span> Détecté aussi par BC Config Package', unsafe_allow_html=True)
-        with col_leg2:
-            st.markdown('<span class="tag tag-plus">⭐ Plus</span> Valeur ajoutée de notre outil', unsafe_allow_html=True)
-        st.markdown("---")
-
+        # RÉVISÉ (27/08/2026, 2e passe) — demande Rami : retiré complètement
+        # (pas juste réservé au consultant) — la classification de chaque
+        # ligne (🟣/✏️/🧠) est déjà visible directement dans sa propre colonne
+        # du tableau fusionné, cette légende séparée était redondante depuis
+        # que cette colonne existe.
         display_merged_analysis(merged, axe_c, cfg, pr, resolved_by_table=_resolved_by_table, roadmap=_roadmap_e4)
 
         st.markdown("---")
