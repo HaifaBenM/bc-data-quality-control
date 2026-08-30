@@ -628,9 +628,9 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
     _toggle_label = "⬜ Tout désélectionner" if st.session_state[_all_sel_key] else "✅ Tout sélectionner"
 
     if is_consultant():
-        _rowsel1, _rowsel2, _row_spacer, _rowsel3 = st.columns([0.8, 0.8, 4.4, 2])
+        _rowsel1, _rowsel2, _row_spacer, _rowsel3 = st.columns([1.1, 0.8, 4.1, 2])
     else:
-        _rowsel1, _row_spacer, _rowsel3 = st.columns([0.8, 5.2, 2])
+        _rowsel1, _row_spacer, _rowsel3 = st.columns([1.1, 4.9, 2])
         _rowsel2 = None
 
     with _rowsel1:
@@ -912,6 +912,32 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
                 with _integ_btn_col1:
                     _btn1_clicked = st.button("1️⃣ Vérifier avant intégration", key=f"btn_integ_check_{sn}", use_container_width=True)
                 if _btn1_clicked:
+                    # AJOUTÉ (27/08/2026) — diagnostic réel : inspecte le
+                    # contenu binaire du fichier RÉELLEMENT envoyé à BC,
+                    # entrée par entrée, pour savoir avec certitude si le
+                    # fix ZIP_DEFLATED est bien effectif sur CE fichier
+                    # précis — au lieu de deviner encore si c'est un fichier
+                    # périmé en mémoire ou un vrai bug résiduel.
+                    if is_consultant():
+                        try:
+                            import zipfile as _zf_diag, io as _io_diag
+                            _diag_zip = _zf_diag.ZipFile(_io_diag.BytesIO(st.session_state["generated_file_bytes"]))
+                            _non_standard = [
+                                f"{info.filename} (méthode {info.compress_type})"
+                                for info in _diag_zip.infolist()
+                                if info.compress_type != _zf_diag.ZIP_DEFLATED and info.compress_type != _zf_diag.ZIP_STORED
+                            ]
+                            with st.expander("🔬 Diagnostic compression fichier (consultant)", expanded=bool(_non_standard)):
+                                st.caption(f"{len(_diag_zip.infolist())} entrée(s) au total dans le fichier envoyé.")
+                                if _non_standard:
+                                    st.error("Entrée(s) avec une méthode de compression NON standard :")
+                                    for _ns in _non_standard:
+                                        st.code(_ns)
+                                else:
+                                    st.success("Toutes les entrées sont en DEFLATE (8) ou STORED (0) — standard, aucune anomalie de compression détectée sur ce fichier.")
+                        except Exception as _diag_zip_e:
+                            st.warning(f"Diagnostic compression impossible : {_diag_zip_e}")
+
                     with st.spinner("Vérification BC en cours..."):
                         try:
                             _p = get_profile_by_code(cfg.get("client_code", ""))
