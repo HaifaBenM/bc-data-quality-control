@@ -930,7 +930,7 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
             _integ = st.session_state[_integ_key]
 
             if _integ["stage"] in ("idle", "imported"):
-                if st.button("1️⃣ Vérifier avant intégration", key=f"btn_integ_check_{sn}"):
+                if st.button("1️⃣ Vérifier avant intégration", key=f"btn_integ_check_{sn}", use_container_width=True):
                     with st.spinner("Vérification BC en cours..."):
                         try:
                             _p = get_profile_by_code(cfg.get("client_code", ""))
@@ -971,7 +971,7 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
                     st.markdown('<div class="card-ref">✅ 0 erreur — le fichier peut être appliqué dans BC.</div>', unsafe_allow_html=True)
                     st.warning("⚠️ L'étape suivante écrit réellement les données dans Business Central — action irréversible.")
                     _confirm = st.checkbox("Je confirme vouloir intégrer ces données dans Business Central", key=f"confirm_apply_{sn}")
-                    if _confirm and st.button("2️⃣ Appliquer dans BC", type="primary", key=f"btn_integ_apply_{sn}"):
+                    if _confirm and st.button("2️⃣ Appliquer dans BC", type="primary", key=f"btn_integ_apply_{sn}", use_container_width=True):
                         with st.spinner("Intégration dans BC en cours..."):
                             try:
                                 _tid, _env, _company_id, _tok = _integ["creds"]
