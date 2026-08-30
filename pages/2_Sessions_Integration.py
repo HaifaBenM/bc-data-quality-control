@@ -1444,8 +1444,12 @@ with tab_main:
                 # AJOUTÉ (23/08/2026) — demande Rami : possibilité de
                 # sauvegarder à cette étape aussi (checkpoint), pas
                 # seulement à la toute fin.
-                if st.button("💾 Enregistrer maintenant (checkpoint)", key="quicksave_step2", use_container_width=True):
-                    _quick_save_session(st.session_state.config, status="Nouvelle")
+                # RÉVISÉ (27/08/2026, 5e passe) — bouton compact au lieu de
+                # pleine largeur pour un texte court.
+                _qs2_col, _ = st.columns([1.8, 3])
+                with _qs2_col:
+                    if st.button("💾 Enregistrer maintenant (checkpoint)", key="quicksave_step2", use_container_width=True):
+                        _quick_save_session(st.session_state.config, status="Nouvelle")
         else:
             cb, _, crc = st.columns([2, 6, 2])
             with cb:
@@ -2014,7 +2018,14 @@ with tab_main:
             # doit être rendue obligatoire (dépend de si tu veux imposer le seed avant tout usage).
 
         st.markdown("---")
-        cb, cv, crc = st.columns([2, 5, 2])
+        # RÉVISÉ (27/08/2026, 5e passe) — demande Rami : le bouton central
+        # "Lancer l'analyse qualité" dominait visuellement toute la largeur
+        # de l'écran (ratio [2,5,2] laissait la colonne du milieu bien trop
+        # grande) — la couleur "primary" (bleu) suffit déjà à le distinguer
+        # comme action principale, pas besoin qu'il soit aussi
+        # disproportionné en taille. Colonnes resserrées + spacer final pour
+        # que les 3 boutons restent groupés à gauche, compacts.
+        cb, cv, crc, _cstep3_spacer = st.columns([1.4, 2.4, 1.2, 3])
         with cb:
             if st.button("← Étape précédente", use_container_width=True):
                 st.session_state.step         = 2
@@ -2180,8 +2191,12 @@ with tab_main:
 
         # AJOUTÉ (23/08/2026) — demande Rami : possibilité de sauvegarder à
         # cette étape aussi (checkpoint), pas seulement à la toute fin.
-        if st.button("💾 Enregistrer maintenant (checkpoint)", key="quicksave_step3", use_container_width=True):
-            _quick_save_session(cfg, status="Nouvelle")
+        # RÉVISÉ (27/08/2026, 5e passe) — même correction : bouton compact
+        # au lieu de pleine largeur pour un texte court.
+        _qs3_col, _ = st.columns([1.8, 3])
+        with _qs3_col:
+            if st.button("💾 Enregistrer maintenant (checkpoint)", key="quicksave_step3", use_container_width=True):
+                _quick_save_session(cfg, status="Nouvelle")
 
     # ── Étape 4 ──────────────────────────────────────────────────────────────
     elif st.session_state.step == 4:
@@ -2341,7 +2356,10 @@ with tab_main:
                             _sel_table_id  = _auto_tid
                             _sel_parent_id = _auto_candidates[0]["id"]
 
-                if st.button("💾 Sauvegarder la session", type="primary", use_container_width=True):
+                _save_col, _ = st.columns([1.5, 3])
+                with _save_col:
+                    _save_clicked = st.button("💾 Sauvegarder la session", type="primary", use_container_width=True)
+                if _save_clicked:
                     original_bytes  = st.session_state.get("original_file_bytes")
                     generated_bytes = st.session_state.get("generated_file_bytes")
                     _save_payload = {
