@@ -625,12 +625,12 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
     _all_sel_key = f"_all_selected_state_{sn}"
     if _all_sel_key not in st.session_state:
         st.session_state[_all_sel_key] = False
-    _toggle_label = "⬜ Tout désélectionner" if st.session_state[_all_sel_key] else "✅ Tout sélectionner"
+    _toggle_label = "⬜ Désélectionner" if st.session_state[_all_sel_key] else "✅ Sélectionner"
 
     if is_consultant():
-        _rowsel1, _rowsel2, _row_spacer, _rowsel3 = st.columns([1.1, 0.8, 4.1, 2])
+        _rowsel1, _rowsel2, _row_spacer, _rowsel3 = st.columns([1, 1, 4, 2])
     else:
-        _rowsel1, _row_spacer, _rowsel3 = st.columns([1.1, 4.9, 2])
+        _rowsel1, _row_spacer, _rowsel3 = st.columns([1, 5, 2])
         _rowsel2 = None
 
     with _rowsel1:
@@ -949,7 +949,17 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
                                 st.session_state[_integ_key] = {"stage": "idle", "error": "Credentials BC incomplets pour ce profil."}
                             else:
                                 _tok = get_access_token(_tid, _cid, _cs)
-                                _pkg_code_integ = f"QC-{cfg.get('session_name', 'temp')}"[:20]
+                                # RÉVISÉ (27/08/2026) — bug réel signalé par Rami :
+                                # créait TOUJOURS un nouveau package vide dans BC,
+                                # même quand la session partait déjà d'un package
+                                # BC EXISTANT (choisi à l'Étape 1) — logiquement
+                                # incohérent, et le package vide généré n'avait
+                                # aucune table configurée. Réutilise maintenant le
+                                # code package de la session si disponible ; ne
+                                # génère un nouveau code que si la session n'a
+                                # vraiment aucun package associé (futur mode
+                                # "session sans package" — pas encore construit).
+                                _pkg_code_integ = cfg.get("pkg_code") or f"QC-{cfg.get('session_name', 'temp')}"[:20]
                                 _res = run_bc_import_check(
                                     _tid, _env, cfg["company_id"], _tok,
                                     _pkg_code_integ, f"Intégration QC — {cfg.get('session_name', '')}",
@@ -1839,7 +1849,12 @@ with tab_main:
                                         st.session_state[_bc_check_key] = {"success": False, "error": "Credentials BC ou fichier original manquants."}
                                     else:
                                         _tok = get_access_token(_tid, _cid, _cs)
-                                        _pkg_code_check = f"QC-{cfg.get('session_name', 'temp')}"[:20]
+                                        # RÉVISÉ (27/08/2026) — même fix que
+                                        # l'intégration BC de l'Étape 4 : réutilise
+                                        # le package existant de la session si
+                                        # disponible, au lieu d'en créer un nouveau
+                                        # systématiquement.
+                                        _pkg_code_check = cfg.get("pkg_code") or f"QC-{cfg.get('session_name', 'temp')}"[:20]
                                         st.session_state[_bc_check_key] = run_bc_import_check(
                                             _tid, _env, cfg["company_id"], _tok,
                                             _pkg_code_check, f"Vérification QC — {cfg.get('session_name', '')}",

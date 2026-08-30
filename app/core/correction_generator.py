@@ -225,6 +225,19 @@ def apply_corrections(original_bytes: bytes, corrections: list[dict]) -> bytes:
     out_buf = io.BytesIO()
     with zipfile.ZipFile(out_buf, "w", zipfile.ZIP_DEFLATED) as dst:
         for item in src.infolist():
+            # AJOUTÉ (27/08/2026, 2e passe) — nouvelle piste testée après
+            # que le diagnostic ait confirmé qu'aucune entrée n'avait de
+            # méthode de compression non standard (le fix précédent était
+            # donc déjà correct, mais insuffisant) : ce fichier BC contient
+            # des entrées "dossier" explicites (_rels/, xl/, taille 0,
+            # nom se terminant par "/") — atypique pour un xlsx (Excel/
+            # openpyxl n'en génèrent jamais), tolérées par Python/Excel
+            # mais peut-être pas par le lecteur strict de BC. Ignorées à
+            # la reconstruction — un lecteur OOXML retrouve la structure
+            # de dossiers via les chemins des fichiers eux-mêmes, ces
+            # entrées ne sont jamais indispensables.
+            if item.filename.endswith("/") and item.file_size == 0:
+                continue
             data = modified_bytes.get(item.filename, src.read(item.filename))
             # RÉVISÉ (27/08/2026) — bug réel rencontré : passer l'objet
             # ZipInfo original tel quel à writestr() lui fait ignorer le
@@ -332,6 +345,19 @@ def clear_id_reference_columns(
     out_buf = io.BytesIO()
     with zipfile.ZipFile(out_buf, "w", zipfile.ZIP_DEFLATED) as dst:
         for item in src.infolist():
+            # AJOUTÉ (27/08/2026, 2e passe) — nouvelle piste testée après
+            # que le diagnostic ait confirmé qu'aucune entrée n'avait de
+            # méthode de compression non standard (le fix précédent était
+            # donc déjà correct, mais insuffisant) : ce fichier BC contient
+            # des entrées "dossier" explicites (_rels/, xl/, taille 0,
+            # nom se terminant par "/") — atypique pour un xlsx (Excel/
+            # openpyxl n'en génèrent jamais), tolérées par Python/Excel
+            # mais peut-être pas par le lecteur strict de BC. Ignorées à
+            # la reconstruction — un lecteur OOXML retrouve la structure
+            # de dossiers via les chemins des fichiers eux-mêmes, ces
+            # entrées ne sont jamais indispensables.
+            if item.filename.endswith("/") and item.file_size == 0:
+                continue
             data = modified_bytes.get(item.filename, src.read(item.filename))
             # RÉVISÉ (27/08/2026) — bug réel rencontré : passer l'objet
             # ZipInfo original tel quel à writestr() lui fait ignorer le
