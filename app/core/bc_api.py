@@ -904,7 +904,16 @@ def upload_configuration_package_file(
 
     # Étape 2/2 — dépose le contenu binaire sur l'entrée maintenant créée.
     url = f"{_base}/configurationPackages({package_id})/file('{_pkg_code_enc}')/content"
-    _upload_headers = {**_headers(token), "Content-Type": "application/octet-stream"}
+    _upload_headers = {
+        **_headers(token), "Content-Type": "application/octet-stream",
+        # AJOUTÉ (27/08/2026, 8e passe) — Content-Length explicite, pour
+        # écarter tout envoi en "chunked" côté requests/proxy qui pourrait
+        # corrompre le flux binaire reçu par BC sans que rien ne le
+        # signale de notre côté (le fichier envoyé est pourtant vérifié
+        # propre à tous les niveaux — répertoire central ET en-têtes
+        # locaux du zip).
+        "Content-Length": str(len(file_bytes)),
+    }
     if _file_etag:
         _upload_headers["If-Match"] = _file_etag
     resp = requests.patch(
