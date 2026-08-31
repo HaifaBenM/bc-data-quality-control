@@ -904,19 +904,23 @@ def upload_configuration_package_file(
 
     # Étape 2/2 — dépose le contenu binaire sur l'entrée maintenant créée.
     url = f"{_base}/configurationPackages({package_id})/file('{_pkg_code_enc}')/content"
-    # RÉVISÉ (27/08/2026, 9e passe) — preuve décisive obtenue : l'import
-    # MANUEL du même fichier (téléchargé depuis l'outil) réussit dans BC,
-    # confirmant que le fichier est sain et que le bug est dans la requête
-    # API elle-même, pas dans le contenu envoyé. Deux changements testés
-    # ensemble : (1) retrait de Content-Length manuel (spéculatif, retirée
-    # — requests le calcule déjà correctement pour un objet bytes, risque
-    # de conflit/duplication sans bénéfice prouvé) ; (2) Content-Type
-    # remplacé par le vrai type MIME Excel au lieu du générique
-    # octet-stream — BC traite peut-être différemment le flux selon le
-    # type annoncé pour l'interpréter correctement comme un classeur OOXML.
+    # RÉVISÉ (27/08/2026, 10e passe) — DÉCOUVERTE DÉCISIVE : "The archive
+    # entry was compressed using an unsupported compression method" est le
+    # message d'erreur STANDARD .NET quand le serveur essaie de décompresser
+    # le CORPS DE LA REQUÊTE HTTP elle-même (via l'en-tête Content-Encoding),
+    # PAS une erreur sur le format zip du fichier xlsx (confirmé par
+    # recherche : c'est l'erreur générique de System.IO.Compression côté
+    # ASP.NET Core request-decompression middleware). BC pense recevoir un
+    # corps compressé en transport (gzip/deflate) et tente de le
+    # décompresser — alors qu'on envoie juste les octets bruts du xlsx
+    # (qui est lui-même un zip, mais pas gzippé en plus par-dessus).
+    # Content-Encoding: identity forcé explicitement pour empêcher toute
+    # tentative de décompression côté BC, quelle qu'en soit l'origine
+    # (proxy, connexion réutilisée, ou inférence automatique du serveur).
     _upload_headers = {
         **_headers(token),
         "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "Content-Encoding": "identity",
     }
     if _file_etag:
         _upload_headers["If-Match"] = _file_etag
