@@ -971,6 +971,11 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
                                         "package_code": _pkg_code_integ,
                                         "status": _res.get("status"),
                                         "creds": (_tid, _env, cfg["company_id"], _tok),
+                                        # AJOUTÉ (27/08/2026) — nouveau diagnostic :
+                                        # ce que BC a réellement stocké après le
+                                        # dépôt, comparé octet pour octet à ce
+                                        # qu'on lui a envoyé.
+                                        "upload_readback": _res.get("upload_readback", ""),
                                     }
                                     # AJOUTÉ (27/08/2026) — demande Rami : un
                                     # indicateur clair de fin de vérification —
@@ -1006,6 +1011,12 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
                         f'{_integ_status.get("importError") or "aucun détail fourni par BC."}</div>',
                         unsafe_allow_html=True,
                     )
+                    # AJOUTÉ (27/08/2026) — nouveau diagnostic : compare ce
+                    # que BC a réellement stocké après le dépôt à ce qu'on
+                    # lui a envoyé, pour savoir si la corruption vient du
+                    # stockage côté BC plutôt que de notre requête.
+                    if is_consultant() and _integ.get("upload_readback"):
+                        st.caption(f"🔬 Relecture après dépôt : {_integ['upload_readback']}")
                 elif _import_status_str != "completed":
                     st.markdown(
                         f'<div class="card-minor">⏳ BC n\'a pas encore confirmé la fin de l\'import '
