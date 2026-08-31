@@ -904,15 +904,19 @@ def upload_configuration_package_file(
 
     # Étape 2/2 — dépose le contenu binaire sur l'entrée maintenant créée.
     url = f"{_base}/configurationPackages({package_id})/file('{_pkg_code_enc}')/content"
+    # RÉVISÉ (27/08/2026, 9e passe) — preuve décisive obtenue : l'import
+    # MANUEL du même fichier (téléchargé depuis l'outil) réussit dans BC,
+    # confirmant que le fichier est sain et que le bug est dans la requête
+    # API elle-même, pas dans le contenu envoyé. Deux changements testés
+    # ensemble : (1) retrait de Content-Length manuel (spéculatif, retirée
+    # — requests le calcule déjà correctement pour un objet bytes, risque
+    # de conflit/duplication sans bénéfice prouvé) ; (2) Content-Type
+    # remplacé par le vrai type MIME Excel au lieu du générique
+    # octet-stream — BC traite peut-être différemment le flux selon le
+    # type annoncé pour l'interpréter correctement comme un classeur OOXML.
     _upload_headers = {
-        **_headers(token), "Content-Type": "application/octet-stream",
-        # AJOUTÉ (27/08/2026, 8e passe) — Content-Length explicite, pour
-        # écarter tout envoi en "chunked" côté requests/proxy qui pourrait
-        # corrompre le flux binaire reçu par BC sans que rien ne le
-        # signale de notre côté (le fichier envoyé est pourtant vérifié
-        # propre à tous les niveaux — répertoire central ET en-têtes
-        # locaux du zip).
-        "Content-Length": str(len(file_bytes)),
+        **_headers(token),
+        "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     }
     if _file_etag:
         _upload_headers["If-Match"] = _file_etag
