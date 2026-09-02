@@ -1172,33 +1172,48 @@ def import_excel_via_al_endpoint(
     voir bc-QC-Tool : Tab50109/PageAPI.ExcelImportRequest/Cod50109) qui
     reproduit ce que fait le bouton "Importer d'Excel" de BC, mais par API.
 
-    ⚠️ Nécessite que l'extension AL correspondante soit publiée sur
-    l'environnement BC avant tout appel — voir bc-QC-Tool pour le code AL,
-    et son README/commentaires pour le point de vérification obligatoire
-    (signature exacte de Codeunit 8618 "Config. Excel Exchange", non
-    confirmée sans accès direct au Base App).
+    RÉVISÉ (31/08/2026) — bug réel rencontré : "Read called with an open
+    stream or textreader" quand création (POST) et dépôt du Blob se font
+    dans LA MÊME requête — erreur de plateforme connue. Découpé en 2
+    appels distincts : POST minimal (juste packageCode, Blob vide), puis
+    PATCH séparé qui dépose fileContent sur l'enregistrement déjà créé —
+    c'est ce PATCH qui déclenche le traitement réel côté AL
+    (OnModifyRecord, voir PageAPI.ExcelImportRequest.al).
 
     Retourne {"success": bool, "error": str} — volontairement simple, ce
     endpoint ne fait QUE l'import Excel → package (pas la création du
     package lui-même, qui doit déjà exister — voir ProcessImport côté AL).
     """
-    url = (
+    _base_url = (
         f"https://api.businesscentral.dynamics.com/v2.0/{tenant_id}/{environment}"
         f"/api/talan/qctools/v1.0/companies({company_id})/excelImportRequests"
     )
     try:
-        resp = requests.post(
-            url,
+        # Étape 1/2 — crée l'enregistrement, Blob volontairement vide.
+        _create_resp = requests.post(
+            _base_url,
             headers={**_headers(token), "Content-Type": "application/json"},
-            json={
-                "packageCode": package_code,
-                "fileContent": base64.b64encode(file_bytes).decode("ascii"),
-            },
+            json={"packageCode": package_code},
+            timeout=30,
+        )
+        if not _create_resp.ok:
+            return {"success": False, "error": f"Erreur BC API {_create_resp.status_code} (création requête) : {_create_resp.text[:500]}"}
+        _created = _create_resp.json()
+        _entity_id = _created.get("id", "")
+        if not _entity_id:
+            return {"success": False, "error": f"id manquant dans la réponse de création : {_created!r}"}
+
+        # Étape 2/2 — dépose le contenu séparément (déclenche ProcessImport
+        # côté AL via OnModifyRecord).
+        _patch_resp = requests.patch(
+            f"{_base_url}({_entity_id})",
+            headers={**_headers(token), "Content-Type": "application/json", "If-Match": "*"},
+            json={"fileContent": base64.b64encode(file_bytes).decode("ascii")},
             timeout=90,
         )
-        if not resp.ok:
-            return {"success": False, "error": f"Erreur BC API {resp.status_code} : {resp.text[:500]}"}
-        data = resp.json()
+        if not _patch_resp.ok:
+            return {"success": False, "error": f"Erreur BC API {_patch_resp.status_code} (dépôt contenu) : {_patch_resp.text[:500]}"}
+        data = _patch_resp.json()
         if not data.get("success"):
             return {"success": False, "error": data.get("errorMessage") or "Échec sans message d'erreur fourni par AL."}
         return {"success": True, "error": ""}
