@@ -1112,10 +1112,20 @@ def run_bc_import_check(
             )
         _pkg_raw_json = existing if existing else created
 
-        upload_configuration_package_file(
-            tenant_id, environment, company_id, token, package_id, package_code, file_bytes
+        # RÉVISÉ (31/08/2026) — remplace l'ancien couple
+        # upload_configuration_package_file + import_configuration_package
+        # (endpoint standard configurationPackages/file/content), qui
+        # échouait systématiquement — cause confirmée : cet endpoint
+        # attend un fichier .rapidstart (format interne compressé), pas un
+        # xlsx brut. Utilise désormais le nouvel endpoint AL custom
+        # (talan/qctools, voir bc-QC-Tool : Tab50109/PageAPI.
+        # ExcelImportRequest/Cod50109) qui reproduit le bouton "Importer
+        # d'Excel" de BC et accepte directement le xlsx en base64.
+        _al_import = import_excel_via_al_endpoint(
+            tenant_id, environment, company_id, token, package_code, file_bytes
         )
-        import_configuration_package(tenant_id, environment, company_id, token, package_id)
+        if not _al_import.get("success"):
+            raise Exception(f"Import Excel (endpoint AL) : {_al_import.get('error', '')}")
 
         # RÉVISÉ (27/08/2026) — bug réel rencontré : "Import Status is not
         # completed. You must import the package before you apply it."
@@ -1142,3 +1152,55 @@ def run_bc_import_check(
     except Exception as e:
         result["error"] = f"{type(e).__name__} : {e} [code={package_code!r} id={package_id!r}] [json_package={_pkg_raw_json!r}] [readback={LAST_UPLOAD_READBACK}]"
     return result
+
+
+# ── Import Excel direct via endpoint AL custom (contourne la limite ────────
+# .rapidstart de l'API Automation standard) ────────────────────────────────
+import base64  # noqa: E402  (ajouté ici volontairement, utilisé seulement par la fonction suivante)
+
+
+def import_excel_via_al_endpoint(
+    tenant_id: str, environment: str, company_id: str, token: str,
+    package_code: str, file_bytes: bytes,
+) -> dict:
+    """
+    AJOUTÉ (27/08/2026) — Option 1 des chantiers post-démo : contourne la
+    limite documentée de l'API Automation standard (configurationPackages/
+    file/content attend un fichier .rapidstart, pas un xlsx brut — cause
+    confirmée de "unsupported compression method" après une semaine de
+    diagnostic). Appelle un nouvel endpoint AL custom (talan/qctools,
+    voir bc-QC-Tool : Tab50109/PageAPI.ExcelImportRequest/Cod50109) qui
+    reproduit ce que fait le bouton "Importer d'Excel" de BC, mais par API.
+
+    ⚠️ Nécessite que l'extension AL correspondante soit publiée sur
+    l'environnement BC avant tout appel — voir bc-QC-Tool pour le code AL,
+    et son README/commentaires pour le point de vérification obligatoire
+    (signature exacte de Codeunit 8618 "Config. Excel Exchange", non
+    confirmée sans accès direct au Base App).
+
+    Retourne {"success": bool, "error": str} — volontairement simple, ce
+    endpoint ne fait QUE l'import Excel → package (pas la création du
+    package lui-même, qui doit déjà exister — voir ProcessImport côté AL).
+    """
+    url = (
+        f"https://api.businesscentral.dynamics.com/v2.0/{tenant_id}/{environment}"
+        f"/api/talan/qctools/v1.0/companies({company_id})/excelImportRequests"
+    )
+    try:
+        resp = requests.post(
+            url,
+            headers={**_headers(token), "Content-Type": "application/json"},
+            json={
+                "packageCode": package_code,
+                "fileContent": base64.b64encode(file_bytes).decode("ascii"),
+            },
+            timeout=90,
+        )
+        if not resp.ok:
+            return {"success": False, "error": f"Erreur BC API {resp.status_code} : {resp.text[:500]}"}
+        data = resp.json()
+        if not data.get("success"):
+            return {"success": False, "error": data.get("errorMessage") or "Échec sans message d'erreur fourni par AL."}
+        return {"success": True, "error": ""}
+    except Exception as e:
+        return {"success": False, "error": f"{type(e).__name__} : {e}"}
