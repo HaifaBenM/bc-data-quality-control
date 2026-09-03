@@ -1199,21 +1199,43 @@ def import_excel_via_al_endpoint(
         if not _create_resp.ok:
             return {"success": False, "error": f"Erreur BC API {_create_resp.status_code} (création requête) : {_create_resp.text[:500]}"}
         _created = _create_resp.json()
-        _entity_id = _created.get("id", "")
-        if not _entity_id:
-            return {"success": False, "error": f"id manquant dans la réponse de création : {_created!r}"}
+        # RÉVISÉ (31/08/2026) — bug trouvé : pas de champ "id" (GUID) sur
+        # cette table, seulement "entryNo" (notre clé primaire Integer).
+        # BC fournit directement le lien vers la ressource binaire via
+        # "fileContent@odata.mediaEditLink" — utilisé tel quel plutôt que
+        # reconstruit à la main, plus robuste.
+        _media_url = _created.get("fileContent@odata.mediaEditLink", "")
+        if not _media_url:
+            return {"success": False, "error": f"Lien fileContent manquant dans la réponse de création : {_created!r}"}
 
-        # Étape 2/2 — dépose le contenu séparément (déclenche ProcessImport
-        # côté AL via OnModifyRecord).
+        # Étape 2/2 — dépose le contenu binaire directement (comme pour
+        # configurationPackages/file/content), pas en JSON — déclenche
+        # ProcessImport côté AL via OnModifyRecord.
         _patch_resp = requests.patch(
-            f"{_base_url}({_entity_id})",
-            headers={**_headers(token), "Content-Type": "application/json", "If-Match": "*"},
-            json={"fileContent": base64.b64encode(file_bytes).decode("ascii")},
+            _media_url,
+            headers={
+                **_headers(token), "Content-Type": "application/octet-stream",
+                "If-Match": "*",
+                # AJOUTÉ (31/08/2026) — précaution : même mécanisme de flux
+                # binaire OData que configurationPackages/file/content, qui
+                # avait déclenché le bug de décompression HTTP côté BC
+                # (voir historique complet). Ajouté préventivement ici pour
+                # éviter de retomber sur le même piège à ce stade.
+                "Content-Encoding": "identity",
+            },
+            data=file_bytes,
             timeout=90,
         )
         if not _patch_resp.ok:
             return {"success": False, "error": f"Erreur BC API {_patch_resp.status_code} (dépôt contenu) : {_patch_resp.text[:500]}"}
-        data = _patch_resp.json()
+
+        # AJOUTÉ (31/08/2026) — le PATCH sur le flux binaire ne renvoie pas
+        # forcément le JSON complet de l'entité (souvent 204 sans corps) —
+        # relit l'enregistrement pour connaître success/errorMessage.
+        _get_resp = requests.get(f"{_base_url}({_created.get('entryNo')})", headers=_headers(token), timeout=30)
+        if not _get_resp.ok:
+            return {"success": False, "error": f"Erreur BC API {_get_resp.status_code} (relecture résultat) : {_get_resp.text[:500]}"}
+        data = _get_resp.json()
         if not data.get("success"):
             return {"success": False, "error": data.get("errorMessage") or "Échec sans message d'erreur fourni par AL."}
         return {"success": True, "error": ""}
