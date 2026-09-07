@@ -49,6 +49,23 @@ _OPTION_VALUES: dict[str, dict[str, list[str]]] = {
                                  "Produits", "Charges", "Coût des marchandises"],
         "Type comptabilisation":["", " ", "Vente", "Achat"],
     },
+    "9": {
+        # AJOUTÉ (31/08/2026) — table Pays/Région jamais couverte jusqu'ici
+        # (MDD-Pays est le premier fichier de ce domaine testé en
+        # profondeur). Confirmé par comparaison directe avec les 278
+        # erreurs BC réelles (export "Erreurs package config.", session
+        # MDD-Pays) : les valeurs du fichier étaient en français
+        # ("Ligne vide+Code Postal+Ville", "Début"...), correspondant aux
+        # LIBELLÉS affichés dans une interface BC en français, alors que
+        # BC exige les valeurs INTERNES anglaises à l'import — un champ
+        # Option se stocke toujours par sa valeur de base, jamais sa
+        # traduction. Valeurs exactes reprises telles quelles depuis le
+        # message d'erreur BC lui-même ("Valid options are ...").
+        "Format adresse":         ["", " ", "Post Code+City", "City+Post Code", "City+County+Post Code",
+                                    "Blank Line+Post Code+City", "Post Code+City/County",
+                                    "County/Post Code+City", "Custom"],
+        "Format adresse contact": ["", " ", "First", "After Company Name", "Last"],
+    },
 }
 
 _REQUIRED_FIELDS: dict[str, list[str]] = {
@@ -237,7 +254,7 @@ def build_default_plan(package_code: str = "") -> ExecutionPlan:
     return ExecutionPlan(package_code=package_code, source="default")
 
 
-def _build_field_meta(table_id: int, pf: dict) -> FieldMeta | None:
+def _build_field_meta(table_id: int, pf: dict, dynamic_opts: dict[int, list[str]] | None = None) -> FieldMeta | None:
     field_name = pf.get("fieldCaption", "") or pf.get("fieldInternalName", "")
     if not field_name:
         return None
@@ -249,7 +266,20 @@ def _build_field_meta(table_id: int, pf: dict) -> FieldMeta | None:
     is_req     = field_name in _REQUIRED_FIELDS.get(tid_str, [])
     is_post_req= field_name in _POSTING_REQUIRED_FIELDS.get(tid_str, [])
     is_nz_req  = field_name in _NONZERO_REQUIRED_FIELDS.get(tid_str, [])
-    opts       = _OPTION_VALUES.get(tid_str, {}).get(field_name, [])
+    # RÉVISÉ (31/08/2026) — demande Rami : "je veux que ça soit dynamique"
+    # — _OPTION_VALUES (liste statique, découverte au coup par coup à
+    # chaque nouvelle table rencontrée) n'est plus la source principale.
+    # dynamic_opts (pré-récupéré via le nouvel endpoint AL /optionValues,
+    # voir build_plan_from_bc) prime quand disponible ; repli sur la
+    # liste statique uniquement si l'appel dynamique a échoué (extension
+    # AL pas encore déployée sur cet environnement, erreur réseau...) —
+    # aucune régression sur les tables déjà connues dans ce cas.
+    field_id = int(pf.get("fieldId") or 0)
+    opts = None
+    if dynamic_opts is not None:
+        opts = dynamic_opts.get(field_id)
+    if opts is None:
+        opts = _OPTION_VALUES.get(tid_str, {}).get(field_name, [])
 
     return FieldMeta(
         field_name=field_name,
@@ -337,8 +367,31 @@ def build_plan_from_bc(
             }
 
             meta_map: dict[str, FieldMeta] = {}
+            # AJOUTÉ (31/08/2026) — pré-récupère dynamiquement les valeurs
+            # Option de chaque champ Option de cette table (une fois par
+            # champ, avant la boucle de construction), pour remplacer
+            # _OPTION_VALUES par une vraie source live plutôt qu'une liste
+            # découverte au coup par coup. Échec individuel d'un champ
+            # (extension AL pas déployée, réseau...) : simplement absent
+            # du dict, _build_field_meta bascule alors sur le repli
+            # statique pour CE champ précis, sans bloquer les autres.
+            from app.core.bc_api import get_option_values
+            dyn_opts: dict[int, list[str]] = {}
             for pf in pkg_fields:
-                fm = _build_field_meta(tid, pf)
+                if str(pf.get("fieldType") or "").strip() != "Option":
+                    continue
+                fno = int(pf.get("fieldId") or 0)
+                if not fno:
+                    continue
+                try:
+                    dyn_opts[fno] = get_option_values(
+                        tenant_id, environment, company_id, tid, fno, token
+                    )
+                except Exception:
+                    pass  # repli silencieux sur _OPTION_VALUES pour ce champ précis
+
+            for pf in pkg_fields:
+                fm = _build_field_meta(tid, pf, dyn_opts)
                 if fm:
                     meta_map[fm.field_name] = fm
             plan.fields_meta[tid] = meta_map

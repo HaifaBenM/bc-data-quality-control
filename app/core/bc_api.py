@@ -515,6 +515,36 @@ def get_table_values(
         for v in values if v.get("code")
     )
 
+
+def get_option_values(
+    tenant_id:   str,
+    environment: str,
+    company_id:  str,
+    table_id:    int,
+    field_no:    int,
+    token:       str,
+) -> list[str]:
+    """
+    AJOUTÉ (31/08/2026) — remplace _OPTION_VALUES (liste codée en dur côté
+    Python, découverte au coup par coup à chaque nouvelle table rencontrée
+    — cause du point aveugle sur Pays/Région/Format adresse). Retourne la
+    liste ordonnée des libellés Option valides pour (table_id, field_no),
+    dans la langue de la session BC, via le nouvel endpoint AL générique
+    /optionValues (page 50110, voir bc-QC-Tool).
+    Raises requests.HTTPError si l'appel échoue — laisse remonter
+    l'erreur réelle pour que l'appelant puisse basculer sur le repli
+    statique (voir _OPTION_VALUES dans execution_planner.py).
+    """
+    url = (
+        f"{_qc_base(tenant_id, environment, company_id)}/optionValues"
+        f"?$filter=tableId eq {table_id} and fieldNo eq {field_no}"
+    )
+    resp = requests.get(url, headers=_headers(token), timeout=30)
+    resp.raise_for_status()
+    values = resp.json().get("value", [])
+    ordered = sorted(values, key=lambda v: int(v.get("ordinal", 0)))
+    return [str(v.get("optionCaption", "")) for v in ordered]
+
 def build_tables_data_for_export(
     tenant_id: str,
     environment: str,
