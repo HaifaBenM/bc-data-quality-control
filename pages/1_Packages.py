@@ -25,10 +25,10 @@ if not profile:
     st.error("Profil client introuvable.")
     st.stop()
 
-tenant_id     = profile.get("bc_tenant_id", "").strip()
-client_id_bc  = profile.get("bc_client_id", "").strip()
-client_secret = profile.get("bc_client_secret", "").strip()
-environment   = profile.get("bc_environment", "Production").strip()
+tenant_id     = (profile.get("bc_tenant_id") or "").strip()
+client_id_bc  = (profile.get("bc_client_id") or "").strip()
+client_secret = (profile.get("bc_client_secret") or "").strip()
+environment   = (profile.get("bc_environment") or "Production").strip()
 
 if not all([tenant_id, client_id_bc, client_secret, environment]):
     st.error("Credentials BC incomplets dans le profil.")

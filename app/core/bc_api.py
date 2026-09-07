@@ -131,8 +131,8 @@ def resolve_company_id(profile: dict, token: str) -> str:
     Raises:
         Exception si aucune société ne correspond.
     """
-    tenant_id   = profile.get("bc_tenant_id", "").strip()
-    environment = profile.get("bc_environment", "Production").strip()
+    tenant_id   = (profile.get("bc_tenant_id") or "").strip()
+    environment = (profile.get("bc_environment") or "Production").strip()
     company_id  = profile.get("bc_company_id", "").strip()
     company_name = profile.get("bc_company_name", "").strip()
 
@@ -188,10 +188,10 @@ def get_config_packages(profile: dict) -> tuple[list[dict], str]:
     Raises:
         Exception avec message lisible si auth ou appel API échoue.
     """
-    tenant_id     = profile.get("bc_tenant_id", "").strip()
-    client_id     = profile.get("bc_client_id", "").strip()
-    client_secret = profile.get("bc_client_secret", "").strip()
-    environment   = profile.get("bc_environment", "Production").strip()
+    tenant_id     = (profile.get("bc_tenant_id") or "").strip()
+    client_id     = (profile.get("bc_client_id") or "").strip()
+    client_secret = (profile.get("bc_client_secret") or "").strip()
+    environment   = (profile.get("bc_environment") or "Production").strip()
 
     if not all([tenant_id, client_id, client_secret, environment]):
         raise ValueError(

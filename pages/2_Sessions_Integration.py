@@ -203,10 +203,10 @@ def _load_companies_ses(client_code: str) -> tuple[list, str, str]:
         p = get_profile_by_code(client_code)
         if not p:
             return [], "", ""
-        tid = p.get("bc_tenant_id", "").strip()
-        cid = p.get("bc_client_id", "").strip()
-        cs  = p.get("bc_client_secret", "").strip()
-        env = p.get("bc_environment", "").strip()
+        tid = (p.get("bc_tenant_id") or "").strip()
+        cid = (p.get("bc_client_id") or "").strip()
+        cs  = (p.get("bc_client_secret") or "").strip()
+        env = (p.get("bc_environment") or "").strip()
         if not all([tid, cid, cs, env]):
             return [], "", ""
         tok       = get_access_token(tid, cid, cs)
@@ -222,10 +222,10 @@ def _load_pkgs_ses(client_code: str, company_id: str, only_visible: bool) -> lis
         p = get_profile_by_code(client_code)
         if not p:
             return []
-        tid = p.get("bc_tenant_id", "").strip()
-        cid = p.get("bc_client_id", "").strip()
-        cs  = p.get("bc_client_secret", "").strip()
-        env = p.get("bc_environment", "").strip()
+        tid = (p.get("bc_tenant_id") or "").strip()
+        cid = (p.get("bc_client_id") or "").strip()
+        cs  = (p.get("bc_client_secret") or "").strip()
+        env = (p.get("bc_environment") or "").strip()
         if not all([tid, cid, cs, env, company_id]):
             return []
         tok = get_access_token(tid, cid, cs)
@@ -253,10 +253,10 @@ def _try_live_gl_account(client_code: str, company_id: str) -> dict:
         p = get_profile_by_code(client_code)
         if not p:
             return {}
-        tid = p.get("bc_tenant_id", "").strip()
-        cid = p.get("bc_client_id", "").strip()
-        cs  = p.get("bc_client_secret", "").strip()
-        env = p.get("bc_environment", "").strip()
+        tid = (p.get("bc_tenant_id") or "").strip()
+        cid = (p.get("bc_client_id") or "").strip()
+        cs  = (p.get("bc_client_secret") or "").strip()
+        env = (p.get("bc_environment") or "").strip()
         if not all([tid, cid, cs, env, company_id]):
             return {}
         tok  = get_access_token(tid, cid, cs)
@@ -940,10 +940,10 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
                     with st.spinner("Vérification BC en cours..."):
                         try:
                             _p = get_profile_by_code(cfg.get("client_code", ""))
-                            _tid = _p.get("bc_tenant_id", "").strip()
-                            _cid = _p.get("bc_client_id", "").strip()
-                            _cs  = _p.get("bc_client_secret", "").strip()
-                            _env = _p.get("bc_environment", "").strip()
+                            _tid = (_p.get("bc_tenant_id") or "").strip()
+                            _cid = (_p.get("bc_client_id") or "").strip()
+                            _cs  = (_p.get("bc_client_secret") or "").strip()
+                            _env = (_p.get("bc_environment") or "").strip()
                             if not all([_tid, _cid, _cs, _env, cfg.get("company_id")]):
                                 st.session_state[_integ_key] = {"stage": "idle", "error": "Credentials BC incomplets pour ce profil."}
                             else:
@@ -1842,10 +1842,10 @@ with tab_main:
                                 _original_bytes_e3 = st.session_state.get("original_file_bytes")
                                 try:
                                     _p = get_profile_by_code(active_client)
-                                    _tid = _p.get("bc_tenant_id", "").strip()
-                                    _cid = _p.get("bc_client_id", "").strip()
-                                    _cs  = _p.get("bc_client_secret", "").strip()
-                                    _env = _p.get("bc_environment", "").strip()
+                                    _tid = (_p.get("bc_tenant_id") or "").strip()
+                                    _cid = (_p.get("bc_client_id") or "").strip()
+                                    _cs  = (_p.get("bc_client_secret") or "").strip()
+                                    _env = (_p.get("bc_environment") or "").strip()
                                     if not all([_tid, _cid, _cs, _env, cfg.get("company_id"), _original_bytes_e3]):
                                         st.session_state[_bc_check_key] = {"success": False, "error": "Credentials BC ou fichier original manquants."}
                                     else:
