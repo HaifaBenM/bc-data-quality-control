@@ -1127,21 +1127,16 @@ def run_bc_import_check(
         if not _al_import.get("success"):
             raise Exception(f"Import Excel (endpoint AL) : {_al_import.get('error', '')}")
 
-        # RÉVISÉ (27/08/2026) — bug réel rencontré : "Import Status is not
-        # completed. You must import the package before you apply it."
-        # L'import BC est asynchrone — le POST répond immédiatement (204),
-        # mais le traitement réel se termine un peu après. Lire le statut
-        # tout de suite après pouvait donc remonter un importStatus encore
-        # "InProgress", faisant croire l'import terminé alors qu'il ne
-        # l'était pas encore côté BC. Sonde le statut jusqu'à confirmation
-        # réelle (importStatus == "Completed"), jusqu'à 20s, avant de
-        # considérer l'import comme fini.
-        status = None
-        for _ in range(10):
-            status = get_configuration_package_status(tenant_id, environment, company_id, token, package_code)
-            if status and str(status.get("importStatus", "")).lower() == "completed":
-                break
-            time.sleep(2)
+        # RÉVISÉ (31/08/2026) — la boucle de sondage "importStatus ==
+        # Completed" n'a plus de sens depuis le passage au nouvel endpoint
+        # AL custom : ce champ n'est mis à jour QUE par l'action standard
+        # Microsoft.NAV.import, qu'on ne déclenche plus. Attendre dessus
+        # aurait fait patienter 20s pour rien à chaque appel, avant
+        # d'abandonner sans jamais y arriver. Une seule lecture directe du
+        # statut suffit maintenant (numberOfErrors, la seule donnée
+        # pertinente, est recalculé à chaque lecture indépendamment du
+        # mécanisme d'import utilisé).
+        status = get_configuration_package_status(tenant_id, environment, company_id, token, package_code)
 
         result["success"]    = True
         result["package_id"] = package_id

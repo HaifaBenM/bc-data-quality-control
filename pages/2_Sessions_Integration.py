@@ -996,35 +996,20 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
 
             if _integ["stage"] == "imported":
                 _integ_status = _integ.get("status") or {}
-                _import_status_str = str(_integ_status.get("importStatus", "")).lower()
                 _nb_err_integ = _integ_status.get("numberOfErrors", "?")
-                # RÉVISÉ (27/08/2026, 2e passe) — bug trouvé : "Error" tombait
-                # dans le même message que "InProgress" ("pas encore
-                # confirmé... relance dans quelques secondes"), alors que
-                # "Error" est un vrai échec BC (relancer ne sert à rien) —
-                # message trompeur. Distingue maintenant clairement les deux
-                # cas, et affiche le vrai message d'erreur BC (importError)
-                # quand il y en a un, au lieu de suggérer d'attendre.
-                if _import_status_str == "error":
-                    st.markdown(
-                        f'<div class="card-major">🔴 BC a rejeté l\'import — '
-                        f'{_integ_status.get("importError") or "aucun détail fourni par BC."}</div>',
-                        unsafe_allow_html=True,
-                    )
-                    # AJOUTÉ (27/08/2026) — nouveau diagnostic : compare ce
-                    # que BC a réellement stocké après le dépôt à ce qu'on
-                    # lui a envoyé, pour savoir si la corruption vient du
-                    # stockage côté BC plutôt que de notre requête.
-                    if is_consultant() and _integ.get("upload_readback"):
-                        st.caption(f"🔬 Relecture après dépôt : {_integ['upload_readback']}")
-                elif _import_status_str != "completed":
-                    st.markdown(
-                        f'<div class="card-minor">⏳ BC n\'a pas encore confirmé la fin de l\'import '
-                        f'(statut actuel : {_integ_status.get("importStatus", "inconnu")}) — relance '
-                        f'"Vérifier avant intégration" dans quelques secondes.</div>',
-                        unsafe_allow_html=True,
-                    )
-                elif _nb_err_integ == 0:
+                # RÉVISÉ (31/08/2026) — bug réel trouvé : depuis le passage
+                # au nouvel endpoint AL custom (qui appelle ImportExcel
+                # directement, contournant l'action standard Microsoft.NAV.
+                # import), les champs "importStatus"/"importError" du
+                # package ne sont PLUS jamais mis à jour par notre import —
+                # ce sont des champs propres au mécanisme standard qu'on
+                # ne déclenche plus. Résultat : l'écran affichait un vieux
+                # statut "Error" figé depuis les tout premiers essais
+                # (avant tous ces fixes), jamais nettoyé depuis. Repose
+                # maintenant uniquement sur "numberOfErrors", recalculé à
+                # chaque lecture à partir des vraies données du package,
+                # peu importe le mécanisme d'import utilisé.
+                if _nb_err_integ == 0:
                     st.markdown('<div class="card-ref">✅ 0 erreur — le fichier peut être appliqué dans BC.</div>', unsafe_allow_html=True)
                     st.warning("⚠️ L'étape suivante écrit réellement les données dans Business Central — action irréversible.")
                     _confirm = st.checkbox("Je confirme vouloir intégrer ces données dans Business Central", key=f"confirm_apply_{sn}")
