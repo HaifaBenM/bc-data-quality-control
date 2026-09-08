@@ -449,6 +449,103 @@ def _filter_resolved_prereqs(all_anomalies: list, resolved_by_table: dict | None
     return kept, resolved_count
 
 
+def run_quality_analysis(pr: dict, cfg: dict, early_cache: dict | None = None) -> tuple[dict, dict, dict]:
+    """
+    AJOUTÉ (01/09/2026) — demande Rami : cycle complet "corriger un lot →
+    réanalyser → voir le compteur baisser", pour travailler par type
+    d'erreur sur un gros socle (MDD Comptabilité, 2743 erreurs réelles)
+    sans attendre d'avoir tout corrigé pour la moindre vérification.
+
+    Factorisé depuis le bloc du bouton "🚀 Lancer l'analyse qualité →"
+    (comportement strictement identique, aucun changement de logique) —
+    pour être appelable aussi bien au premier lancement (avec le cache
+    early_cache déjà calculé pour le gate niveaux, évite un recalcul
+    redondant) qu'à chaque réanalyse après correction (early_cache=None,
+    l'exec_plan est alors recalculé — nécessaire de toute façon puisque
+    les données du fichier ont changé entre-temps).
+
+    Retourne (merged, axe_c, axe_a) — merged/axe_c sont ce que les deux
+    appelants stockent dans st.session_state.merged_result / axe_c_result ;
+    axe_a est renvoyé séparément pour son "lines_analyzed" (nombre de
+    lignes du fichier), utilisé par les deux appelants pour l'affichage.
+    """
+    api_key     = get_gemini_api_key()
+    client_code = cfg.get("client_code", "")
+
+    if early_cache:
+        axe_a = early_cache["axe_a"]
+        axe_b = early_cache["axe_b"]
+        _exec_plan = early_cache["exec_plan"]
+    else:
+        with st.spinner("⏳ Analyse des contraintes..."):
+            _exec_plan = get_execution_plan(
+                profile_code = client_code,
+                company_id   = cfg.get("company_id", ""),
+                package_code = cfg.get("pkg_code", ""),
+            )
+            _meta_loader = MetadataLoader(client_code, cfg.get("company_id", ""))
+            _sim_ctx     = SimulationContext()
+            axe_a        = validate_file_axe_a(pr, execution_plan=_exec_plan)
+
+        with st.spinner("⏳ Vérification des références..."):
+            axe_b = validate_file_axe_b(
+                pr,
+                profile_code    = client_code,
+                company_id      = cfg.get("company_id", ""),
+                sim_context     = _sim_ctx,
+                metadata_loader = _meta_loader,
+                execution_plan  = _exec_plan,
+            )
+
+    axe_c = {"available": False, "total_suggestions": 0, "auto_corrected": 0, "by_sheet": {}}
+    if api_key:
+        with st.spinner("🤖 Suggestions IA en cours..."):
+            axe_c = validate_file_axe_c(axe_a, axe_b, pr, api_key=api_key)
+
+    merged = merge_results(axe_a, axe_b, axe_c, parse_result=pr)
+
+    if api_key:
+        try:
+            from app.core.coherence_detector import get_eligible_fields, detect_rare_pairs
+            _diag_lines = []
+            for _sn_diag in pr.get("data_tables", []):
+                _df_diag = pr.get("sheets", {}).get(_sn_diag)
+                _meta_diag = pr.get("metadata", {}).get(_sn_diag, {})
+                _tid_diag = _meta_diag.get("table_id", "")
+                if _df_diag is None or _df_diag.empty or not _tid_diag:
+                    continue
+                try:
+                    _elig = [f for f in get_eligible_fields(_exec_plan, int(_tid_diag)) if f in _df_diag.columns]
+                except (ValueError, TypeError):
+                    _elig = []
+                _cands = detect_rare_pairs(_df_diag, _elig, max_pair_ratio=0.12) if len(_elig) >= 2 else []
+                _diag_lines.append(
+                    f"{_sn_diag} (table {_tid_diag}) : {len(_elig)} champ(s) éligible(s) {_elig[:6]}, "
+                    f"{len(_cands)} candidat(s) avant IA"
+                )
+                for _c in _cands[:5]:
+                    _diag_lines.append(f"    -> {_c}")
+
+            with st.spinner("🧠 Détection des incohérences en cours..."):
+                _coherence = validate_coherence_axe_c(pr, _exec_plan, api_key)
+            for _sn, _coh_anomalies in _coherence.get("by_sheet", {}).items():
+                if not _coh_anomalies:
+                    continue
+                merged["all_anomalies"].extend(_coh_anomalies)
+                merged["by_sheet"].setdefault(_sn, []).extend(_coh_anomalies)
+
+            from app.core.validator_axe_c import LAST_GEMINI_ERROR
+            _diag_lines.append(f"Total incohérences détectées par l'IA : {_coherence.get('total_flagged', 0)}")
+            _diag_lines.append(f"Dernière erreur Gemini (vide = aucune) : {LAST_GEMINI_ERROR or '(aucune)'}")
+            st.session_state["_ia_diag_text"]  = "\n".join(_diag_lines)
+            st.session_state["_ia_diag_error"] = LAST_GEMINI_ERROR
+        except Exception as _coh_exc:
+            st.session_state["_ia_diag_text"]  = f"Exception : {_coh_exc}"
+            st.session_state["_ia_diag_error"] = str(_coh_exc)
+
+    return merged, axe_c, axe_a
+
+
 def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = None, resolved_by_table: dict | None = None, roadmap: list | None = None):
     """
     RÉVISÉ (26/08/2026) — demande Rami : fusion de l'ancien tableau de
@@ -705,6 +802,12 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
         if _propagate_fb:
             (st.success if _propagate_fb[0] == "success" else st.info)(_propagate_fb[1])
 
+        # AJOUTÉ (01/09/2026) — même piège, même fix, pour le nouveau
+        # cycle "Appliquer et réanalyser".
+        _reanalyze_fb = st.session_state.pop(f"_reanalyze_feedback_{sn}", None)
+        if _reanalyze_fb:
+            (st.success if _reanalyze_fb[0] == "success" else st.info)(_reanalyze_fb[1])
+
         def _row(a: dict) -> dict:
             _key = (a.get("Champ", ""), str(a.get("Valeur", "")).strip())
             _is_corrigible = a.get("Classification") in ("VALEUR_CORRIGIBLE", "SUGGESTION_IA")
@@ -761,16 +864,14 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
         # plafond gardent leur comportement par défaut (calculé ci-dessus,
         # overrides de propagation compris) et sont quand même incluses
         # dans le fichier généré.
-        _MAX_EDITABLE_ROWS = 400
-        _overflow_rows = edit_rows[_MAX_EDITABLE_ROWS:]
-        edit_rows_display = edit_rows[:_MAX_EDITABLE_ROWS]
-
-        if _overflow_rows:
-            st.caption(
-                f"⚠️ {len(_overflow_rows)} ligne(s) supplémentaire(s) non affichée(s) ci-dessous "
-                f"(volume trop important pour l'édition interactive) — incluses dans le fichier "
-                f"généré avec leur valeur par défaut, non modifiables dans ce run."
-            )
+        # RÉVISÉ (01/09/2026) — demande Rami : retire le plafond — avec le
+        # nouveau cycle "filtrer par type d'erreur -> corriger -> appliquer
+        # et réanalyser", le tableau n'affiche jamais plusieurs milliers de
+        # lignes d'un coup en pratique (le filtre les réduit déjà avant
+        # affichage). Risque de ralentissement assumé si un filtre très
+        # large est utilisé malgré tout — à surveiller si ça se produit.
+        _overflow_rows: list = []
+        edit_rows_display = edit_rows
 
         _column_config = {
             "Appliquer": st.column_config.CheckboxColumn(help="Cocher pour inclure cette ligne dans le fichier généré"),
@@ -790,27 +891,38 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
         )
 
         if _propagate_clicked:
-            # RÉVISÉ (27/08/2026, jour de la démo) — bug évité : la
-            # comparaison utilisait "Correction suggérée", colonne
-            # retirée de l'affichage (fusionnée dans "🤖 Suggestion IA",
-            # qui inclut un "(X%)" que "Nouvelle valeur" n'a jamais —
-            # comparer directement aurait détecté un "changement" sur
-            # CHAQUE ligne, même non modifiée). Comparaison désormais
-            # contre la valeur ORIGINALE de "Nouvelle valeur" (avant
-            # toute édition), qui reflète fidèlement ce qui était
-            # pré-rempli par défaut.
-            _original_nv_by_key = {
-                (r["Ligne"], r["Champ"]): r["Nouvelle valeur"] for r in edit_rows_display
-            }
-            _new_overrides = dict(_propagate_overrides)
-            _propagated = 0
+            # RÉVISÉ (01/09/2026) — bug de conception trouvé : l'ancienne
+            # logique exigeait de détecter un CHANGEMENT par rapport à la
+            # valeur par défaut de CHAQUE ligne individuellement — si une
+            # ligne avait déjà la bonne valeur pré-remplie (ex. suggestion
+            # IA automatique) et qu'on la ressaisissait à l'identique, rien
+            # n'était détecté comme "modifié", donc rien ne se propageait
+            # vers les lignes réellement vides du même groupe (Champ +
+            # Valeur source identiques). Nouvelle approche, plus robuste :
+            # pour chaque groupe (Champ, Valeur source), on prend la valeur
+            # non vide la plus fréquente déjà présente dans "Nouvelle
+            # valeur" sur ce groupe, et on l'applique à toutes les lignes
+            # du groupe qui ne l'ont pas encore (vides ou différentes) —
+            # un vrai "rendre cohérent", pas juste "recopier un changement
+            # détecté".
+            from collections import Counter
+            _by_key: dict[tuple, list[str]] = {}
             for _, row in edited.iterrows():
-                _nv = str(row["Nouvelle valeur"]).strip()
-                _orig_nv = str(_original_nv_by_key.get((row["Ligne"], row["Champ"]), "")).strip()
-                if _nv and _nv != _orig_nv:
-                    _key = (row["Champ"], str(row["Valeur source"]).strip())
-                    _new_overrides[_key] = _nv
-            # Compte les lignes qui vont effectivement changer au prochain rerun
+                _k = (row["Champ"], str(row["Valeur source"]).strip())
+                _v = str(row["Nouvelle valeur"]).strip()
+                if _v:
+                    _by_key.setdefault(_k, []).append(_v)
+
+            _new_overrides = dict(_propagate_overrides)
+            for _k, _vals in _by_key.items():
+                _most_common_val, _count = Counter(_vals).most_common(1)[0]
+                # Ne propage que si au moins 2 lignes partagent déjà cette
+                # valeur — sinon rien de significatif à "rendre cohérent"
+                # (une seule ligne renseignée, pas de majorité à étendre).
+                if _count >= 2:
+                    _new_overrides[_k] = _most_common_val
+
+            _propagated = 0
             for r in edit_rows:
                 _key = (r["Champ"], str(r["Valeur source"]).strip())
                 if _key in _new_overrides and str(r["Nouvelle valeur"]).strip() != _new_overrides[_key]:
@@ -829,12 +941,86 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
                 st.session_state[f"_propagate_feedback_{sn}"] = ("info", "ℹ️ Rien à propager — soit aucune autre ligne ne partage la même valeur source dans ce champ, soit toutes l'ont déjà.")
             st.rerun()
 
+        # AJOUTÉ (01/09/2026) — demande Rami : cycle complet pour travailler
+        # un gros socle par type d'erreur — corriger un lot (filtré),
+        # l'appliquer, voir le tableau se réanalyser et le compteur total
+        # baisser, changer de filtre, recommencer, jusqu'à 0 anomalie.
+        # Distinct de "Générer le fichier corrigé" (l'étape FINALE) : celui-
+        # ci s'utilise autant de fois que nécessaire pendant le travail.
+        _reanalyze_col, _ = st.columns([2, 3])
+        with _reanalyze_col:
+            reanalyze_clicked = st.button(
+                "🔄 Appliquer ce lot et réanalyser", use_container_width=True, key=f"reanalyze_{sn}",
+                help="Applique les corrections cochées ci-dessus au fichier de travail, puis relance une analyse complète — le compteur d'anomalies se met à jour en conséquence.",
+            )
+        if reanalyze_clicked:
+            _working_bytes = st.session_state.get("working_file_bytes") or st.session_state.get("original_file_bytes")
+            if not _working_bytes:
+                st.error("❌ Fichier introuvable en mémoire — remontez à l'étape 2.")
+            else:
+                _selected_ra = edited[
+                    (edited["Appliquer"] == True)
+                    & (edited["Nouvelle valeur"].astype(str).str.strip() != "")
+                ]
+                _corrections_ra = [
+                    {"sheet": row["Onglet"], "excel_row": int(row["Ligne"]), "column_name": row["Champ"], "new_value": row["Nouvelle valeur"]}
+                    for _, row in _selected_ra.iterrows()
+                ]
+                _corrections_ra += [
+                    {"sheet": r["Onglet"], "excel_row": int(r["Ligne"]), "column_name": r["Champ"], "new_value": r["Nouvelle valeur"]}
+                    for r in _overflow_rows
+                    if r["Appliquer"] and str(r["Nouvelle valeur"]).strip()
+                ]
+                if not _corrections_ra:
+                    st.info("ℹ️ Aucune correction cochée avec une valeur renseignée — coche « Appliquer » sur au moins une ligne.")
+                else:
+                    try:
+                        with st.spinner("Application des corrections..."):
+                            _new_working_bytes = apply_corrections(_working_bytes, _corrections_ra)
+                        # Ré-emballe les octets bruts dans un objet compatible
+                        # avec parse_uploaded_file (attend un fichier uploadé,
+                        # pas des bytes nus — voir file_parser.py).
+                        import io as _io_reparse
+                        _wrapper = _io_reparse.BytesIO(_new_working_bytes)
+                        _wrapper.name = cfg.get("file_name", "fichier.xlsx")
+                        with st.spinner("Nouvelle analyse en cours..."):
+                            _new_pr = parse_uploaded_file(_wrapper)
+                        if not _new_pr.get("success"):
+                            st.error("❌ Le fichier de travail n'est plus lisible après correction — " + "; ".join(_new_pr.get("errors", [])))
+                        else:
+                            _new_merged, _new_axe_c, _new_axe_a = run_quality_analysis(_new_pr, cfg, early_cache=None)
+                            st.session_state["working_file_bytes"] = _new_working_bytes
+                            st.session_state.parse_result  = _new_pr
+                            st.session_state.merged_result = _new_merged
+                            st.session_state.axe_c_result  = _new_axe_c
+                            _all_ra = _new_merged.get("all_anomalies", [])
+                            _real_ra = [a for a in _all_ra if a.get("Ligne", 0) > 0]
+                            st.session_state.config["total"] = len(_real_ra)
+                            st.session_state.config["major"] = sum(1 for a in _real_ra if a.get("Sévérité") == "Majeure")
+                            st.session_state.config["minor"] = sum(1 for a in _real_ra if a.get("Sévérité") == "Mineure")
+                            st.session_state.config["lines"] = _new_axe_a.get("lines_analyzed", 0)
+                            st.session_state[f"_reanalyze_feedback_{sn}"] = (
+                                "success",
+                                f"✅ {len(_corrections_ra)} correction(s) appliquée(s) — {len(_real_ra)} anomalie(s) restante(s)."
+                            )
+                            st.rerun()
+                    except Exception as _ra_exc:
+                        st.error(f"❌ Erreur lors de la réanalyse : {_ra_exc}")
+
         cgen1, cgen2, cgen3 = st.columns([1, 1, 2])
         with cgen1:
             gen_clicked = st.button("0️⃣ Générer le fichier corrigé", type="primary", use_container_width=True, key=f"gen_{sn}")
 
         if gen_clicked:
-            original_bytes = st.session_state.get("original_file_bytes")
+            # RÉVISÉ (01/09/2026) — demande Rami : cycle "corriger un lot →
+            # réanalyser → recommencer". Utilise le fichier DE TRAVAIL
+            # (déjà mis à jour à chaque cycle "Appliquer et réanalyser" ci-
+            # dessous) comme base, au lieu du fichier original — sinon les
+            # lots déjà appliqués aux cycles précédents seraient perdus au
+            # moment de la génération finale. Repli sur le fichier
+            # original si aucun cycle n'a encore été fait (usage
+            # inchangé du flux "tout corriger d'un coup, générer à la fin").
+            original_bytes = st.session_state.get("working_file_bytes") or st.session_state.get("original_file_bytes")
             if not original_bytes:
                 st.error("❌ Fichier original introuvable en mémoire — remontez à l'étape 2.")
             else:
@@ -2123,133 +2309,14 @@ with tab_main:
                     "🚀 Lancer l'analyse qualité →", type="primary", use_container_width=True,
                     disabled=not _levels_ok,
                 ):
-                    api_key     = get_gemini_api_key()
-                    client_code = cfg.get("client_code", "")
                     _early = st.session_state.get(_early_axeb_key)
+                    merged, axe_c, axe_a = run_quality_analysis(pr, cfg, early_cache=_early)
 
-                    if _early:
-                        # Déjà calculés pour le gate niveaux — pas la peine de relancer
-                        # Axe A/Axe B une seconde fois pour le même fichier/package.
-                        axe_a = _early["axe_a"]
-                        axe_b = _early["axe_b"]
-                        # CORRIGÉ (26/08/2026, jour J) — BUG RÉEL trouvé : _exec_plan
-                        # n'était JAMAIS défini dans cette branche (seulement dans le
-                        # else ci-dessous) — toute la détection de cohérence IA plus
-                        # bas (qui a besoin de _exec_plan) plantait silencieusement
-                        # (NameError) à chaque fois qu'un cache _early existait déjà —
-                        # c'est-à-dire À CHAQUE FOIS en pratique, puisque l'Étape 3
-                        # calcule toujours ce cache avant qu'on clique "Lancer
-                        # l'analyse qualité". Cause racine probable de "aucune
-                        # suggestion IA, jamais, même après tous les autres fixes".
-                        _exec_plan = _early["exec_plan"]
-                    else:
-                        with st.spinner("⏳ Analyse des contraintes..."):
-                            _exec_plan = get_execution_plan(
-                                profile_code = client_code,
-                                company_id   = cfg.get("company_id", ""),
-                                package_code = cfg.get("pkg_code", ""),
-                            )
-                            _meta_loader = MetadataLoader(client_code, cfg.get("company_id", ""))
-                            _sim_ctx     = SimulationContext()
-                            axe_a        = validate_file_axe_a(pr, execution_plan=_exec_plan)
-
-                        with st.spinner("⏳ Vérification des références..."):
-                            axe_b = validate_file_axe_b(
-                                pr,
-                                profile_code    = client_code,
-                                company_id      = cfg.get("company_id", ""),
-                                sim_context     = _sim_ctx,
-                                metadata_loader = _meta_loader,
-                                execution_plan  = _exec_plan,
-                            )
-
-                    axe_c = {"available": False, "total_suggestions": 0, "auto_corrected": 0, "by_sheet": {}}
-                    if api_key:
-                        with st.spinner("🤖 Suggestions IA en cours..."):
-                            axe_c = validate_file_axe_c(axe_a, axe_b, pr, api_key=api_key)
-
-                    merged = merge_results(axe_a, axe_b, axe_c, parse_result=pr)
-
-                    # AJOUTÉ (26/08/2026, jour J) — FIX CRITIQUE : la détection
-                    # de cohérence (validate_coherence_axe_c, coherence_
-                    # detector.py — combinaisons de champs statistiquement
-                    # rares) était codée et fusionnée en feature-branch mais
-                    # jamais réellement appelée ici — la page n'invoquait que
-                    # l'ancien validate_file_axe_c (enrichissement d'anomalies
-                    # déjà détectées), jamais le nouveau détecteur autonome.
-                    # Résultat : aucune suggestion IA de ce type ne remontait
-                    # jamais, quel que soit le seuil. Ses anomalies ont un
-                    # format légèrement différent (Sévérité="Info",
-                    # Classification="SUGGESTION_IA", "Correction suggérée"
-                    # déjà formatée avec 🧠 + confiance) — ajoutées ici
-                    # directement à all_anomalies/by_sheet comme des entrées
-                    # de plein droit, sans toucher à merge_results() (déjà
-                    # fragile un jour de démo, on ne touche pas à ce qui
-                    # fonctionne).
-                    if not api_key:
-                        st.warning("⚠️ Détection de cohérence IA sautée : clé API vide à ce point précis du code (get_gemini_api_key() a renvoyé une valeur vide).")
-                    if api_key:
-                        try:
-                            # AJOUTÉ (26/08/2026, jour J) — diagnostic : montre
-                            # précisément où la chaîne s'arrête (champs éligibles
-                            # trouvés ? candidats statistiques avant l'IA ?) au
-                            # lieu de deviner encore à l'aveugle.
-                            # RÉVISÉ (26/08/2026, 2e passe) — retiré la condition
-                            # is_consultant() : aucune trace visible ne remontait
-                            # plus du tout, sans savoir si c'était parce que rien
-                            # n'y était détecté, ou parce que le rôle actif
-                            # masquait tout diagnostic. Affiché systématiquement
-                            # tant qu'on n'a pas confirmé le vrai fix.
-                            from app.core.coherence_detector import get_eligible_fields, detect_rare_pairs
-                            _diag_lines = []
-                            for _sn_diag in pr.get("data_tables", []):
-                                _df_diag = pr.get("sheets", {}).get(_sn_diag)
-                                _meta_diag = pr.get("metadata", {}).get(_sn_diag, {})
-                                _tid_diag = _meta_diag.get("table_id", "")
-                                if _df_diag is None or _df_diag.empty or not _tid_diag:
-                                    continue
-                                try:
-                                    _elig = [f for f in get_eligible_fields(_exec_plan, int(_tid_diag)) if f in _df_diag.columns]
-                                except (ValueError, TypeError):
-                                    _elig = []
-                                _cands = detect_rare_pairs(_df_diag, _elig, max_pair_ratio=0.12) if len(_elig) >= 2 else []
-                                _diag_lines.append(
-                                    f"{_sn_diag} (table {_tid_diag}) : {len(_elig)} champ(s) éligible(s) {_elig[:6]}, "
-                                    f"{len(_cands)} candidat(s) avant IA"
-                                )
-                                for _c in _cands[:5]:
-                                    _diag_lines.append(f"    -> {_c}")
-
-                            with st.spinner("🧠 Détection des incohérences en cours..."):
-                                _coherence = validate_coherence_axe_c(pr, _exec_plan, api_key)
-                            for _sn, _coh_anomalies in _coherence.get("by_sheet", {}).items():
-                                if not _coh_anomalies:
-                                    continue
-                                merged["all_anomalies"].extend(_coh_anomalies)
-                                merged["by_sheet"].setdefault(_sn, []).extend(_coh_anomalies)
-
-                            # RÉVISÉ (27/08/2026, jour de la démo) — demande Rami :
-                            # rendre le diagnostic copiable en un clic (bouton de
-                            # copie natif de st.code), et TOUJOURS visible, y
-                            # compris la ligne d'erreur Gemini même vide — un seul
-                            # bloc à copier-coller intégralement, plus besoin de
-                            # recopier plusieurs lignes à la main.
-                            from app.core.validator_axe_c import LAST_GEMINI_ERROR
-                            _diag_lines.append(f"Total incohérences détectées par l'IA : {_coherence.get('total_flagged', 0)}")
-                            _diag_lines.append(f"Dernière erreur Gemini (vide = aucune) : {LAST_GEMINI_ERROR or '(aucune)'}")
-                            # RÉVISÉ (27/08/2026, 2e passe) — bug trouvé : ce bloc ne
-                            # s'affichait QUE pendant l'exécution du clic "Lancer
-                            # l'analyse qualité" — au rerun suivant (n'importe quelle
-                            # interaction sur l'Étape 4), il disparaissait, rendant la
-                            # copie impossible. Persisté en session_state, réaffiché
-                            # en permanence dans display_merged_analysis (voir plus
-                            # bas) tant qu'une nouvelle analyse n'écrase pas ces
-                            # valeurs.
-                            st.session_state["_ia_diag_text"]  = "\n".join(_diag_lines)
-                            st.session_state["_ia_diag_error"] = LAST_GEMINI_ERROR
-                        except Exception as _coh_exc:
-                            st.session_state["_ia_diag_text"]  = f"Exception : {_coh_exc}"
-                            st.session_state["_ia_diag_error"] = str(_coh_exc)
+                    # AJOUTÉ (01/09/2026) — initialise le fichier de travail
+                    # du cycle "Appliquer et réanalyser" — démarre comme
+                    # une copie de l'original, mis à jour à chaque lot de
+                    # corrections appliqué depuis l'Étape 4.
+                    st.session_state["working_file_bytes"] = st.session_state.get("original_file_bytes")
 
                     st.session_state.merged_result = merged
                     st.session_state.axe_c_result  = axe_c
