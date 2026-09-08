@@ -688,615 +688,634 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
     real_anomalies = [a for a in anomalies if a.get("Ligne", 0) > 0]
     info_anomalies = [a for a in anomalies if a.get("Ligne", 0) == 0]
 
-    if not real_anomalies and not info_anomalies:
-        st.success("✅ Aucune anomalie.")
+    _no_anomalies = not real_anomalies and not info_anomalies
+    if _no_anomalies:
+        st.success("✅ Aucune anomalie sur cet onglet.")
         st.session_state["prerequisites_report"] = build_prerequisites_report(
             [a for a in all_anomalies if a.get("Ligne", 0) > 0],
             profile_code=cfg.get("client_code", ""), company_id=cfg.get("company_id", ""),
         )
-        return
-
-    nb_maj = sum(1 for a in real_anomalies if a.get("Sévérité") == "Majeure")
-    nb_min = sum(1 for a in real_anomalies if a.get("Sévérité") == "Mineure")
-    nb_ia = sum(1 for a in real_anomalies if a.get("suggestion_ia"))
-    t1, t2, t3, t4 = st.columns(4)
-    t1.metric("Anomalies", len(real_anomalies))
-    t2.metric("🔴 Majeures", nb_maj)
-    t3.metric("🟠 Mineures", nb_min)
-    # RÉVISÉ (26/08/2026) — demande Rami : rendre "IA suggère" cliquable,
-    # avec le détail des modifications proposées par l'IA — st.metric ne
-    # supporte aucune interaction, remplacé par un st.popover (même
-    # composant déjà utilisé ailleurs dans l'app) qui affiche le chiffre
-    # comme libellé et le détail de chaque suggestion au clic.
-    with t4:
-        with st.popover(f"🤖 IA suggère : {nb_ia}", use_container_width=True):
-            _ia_rows = [a for a in real_anomalies if a.get("suggestion_ia")]
-            if not _ia_rows:
-                st.caption("Aucune suggestion IA sur cet onglet pour l'instant.")
-            for _a in _ia_rows[:30]:
-                st.markdown(
-                    f"**{_a.get('Champ', '')}** (ligne {_a.get('Ligne', '')}, "
-                    f"{_a.get('Identifiant métier', '')}) : "
-                    f"`{_a.get('Valeur', '')}` → **{_a.get('suggestion_ia', '')}** "
-                    f"({_a.get('confiance_ia', 0)}% de confiance)"
-                )
-                if _a.get("Message"):
-                    st.caption(_a["Message"])
-                st.markdown("---")
-            if len(_ia_rows) > 30:
-                st.caption(f"... et {len(_ia_rows) - 30} autre(s), non affichée(s) ici.")
-
-    # AJOUTÉ (26/08/2026) — demande Rami : filtres façon Excel. Streamlit
-    # n'a pas de filtre par en-tête de colonne comme Excel — ces menus
-    # déroulants au-dessus du tableau font le même travail (rétrécir les
-    # lignes affichées par valeur de colonne), juste présentés autrement.
-    # Champ et Classification ajoutés en plus de Sévérité/Type d'anomalie
-    # déjà existants, pour couvrir toutes les colonnes utiles à la
-    # recherche d'une ligne précise à corriger.
-    # RÉVISÉ (27/08/2026, 3e passe) — demande Rami : déclencheur encore plus
-    # compact (taille bouton normal, pas de colonne dédiée) tout en gardant
-    # les 4 filtres sur UNE SEULE ligne une fois ouverts — impossible avec
-    # un st.expander (son contenu reste contraint à la largeur de la
-    # colonne qui le contient, même étroite). st.popover s'affiche en
-    # panneau flottant : déclencheur compact ET contenu pleine largeur au
-    # clic, sans dépendre l'un de l'autre.
-    # RÉVISÉ (27/08/2026, 4e passe) — demande Rami : "pas beau, pas lisible"
-    # — 4 colonnes côte à côte dans un popover (nativement étroit) tronquait
-    # tout (valeurs sélectionnées, icônes de suppression illisibles,
-    # entassées). Empilé verticalement à la place : chaque filtre prend
-    # toute la largeur du popover, plus de troncature.
-    # AJOUTÉ (27/08/2026, 6e passe) — demande Rami : Filtres, bascule
-    # Sélectionner/Désélectionner et Propager regroupés sur UNE SEULE
-    # rangée (Désélectionner + Propager à gauche, Filtres à l'autre bout),
-    # toutes les 3 à la même taille naturelle (pas de use_container_width).
-    # _editor_gen_key avancé plus tôt dans la fonction (ne dépendait pas
-    # vraiment de `filtered`, juste conventionnellement placé après avant).
-    _editor_gen_key = f"merged_editor_gen_{sn}"
-    if _editor_gen_key not in st.session_state:
-        st.session_state[_editor_gen_key] = 0
-
-    _all_sel_key = f"_all_selected_state_{sn}"
-    if _all_sel_key not in st.session_state:
-        st.session_state[_all_sel_key] = False
-    _toggle_label = "⬜ Désélectionner" if st.session_state[_all_sel_key] else "✅ Sélectionner"
-
-    # RÉVISÉ (27/08/2026, 9e passe) — demande Rami : Propager n'est PAS
-    # réservé au consultant — corrigible par le client aussi, retiré de la
-    # restriction is_consultant().
-    _rowsel1, _rowsel2, _row_spacer, _rowsel3 = st.columns([1, 1, 4, 2])
-
-    with _rowsel1:
-        if st.button(_toggle_label, key=f"btn_toggle_select_{sn}", use_container_width=True):
-            st.session_state[_all_sel_key] = not st.session_state[_all_sel_key]
-            st.session_state[f"_merged_select_override_{sn}"] = st.session_state[_all_sel_key]
-            st.session_state[_editor_gen_key] += 1
-            st.rerun()
-    _select_override = st.session_state.pop(f"_merged_select_override_{sn}", None)
-    _propagate_overrides: dict = st.session_state.get(f"_propagate_overrides_{sn}", {})
-
-    _propagate_clicked = False
-    if _rowsel2 is not None:
-        with _rowsel2:
-            _propagate_clicked = st.button(
-                "🔁 Propager", key=f"btn_propagate_{sn}", use_container_width=True,
-                help="Applique chaque correction saisie à toutes les autres lignes ayant la même valeur source dans le même champ",
-            )
-
-    with _rowsel3:
-        # RÉVISÉ (27/08/2026, 4e/5e/6e passes) — voir historique complet du
-        # popover Filtres dans les commentaires précédents (largeur, police,
-        # empilement vertical du contenu) — juste déplacé dans cette rangée
-        # commune, comportement interne inchangé.
-        with st.popover("🔍 Filtres", use_container_width=True):
-            sevs = sorted(set(a.get("Sévérité", "") for a in real_anomalies))
-            filt_sev = st.multiselect("Sévérité", sevs, default=sevs, key=f"fs_{sn}")
-
-            types = sorted(set(a.get("Type d'anomalie", "") for a in real_anomalies))
-            filt_type = st.multiselect("Type d'anomalie", types, default=types, key=f"ft_{sn}")
-
-            champs = sorted(set(a.get("Champ", "") for a in real_anomalies))
-            filt_champ = st.multiselect("Champ", champs, default=champs, key=f"fc_{sn}")
-
-            _cls_label = {
-                "PREALABLE_BC_REQUIS": "🟣 Prérequis BC requis",
-                "VALEUR_CORRIGIBLE":   "✏️ Corrigible",
-                "SUGGESTION_IA":       "🧠 Suggestion IA",
-            }
-            clss = sorted(set(a.get("Classification", "") for a in real_anomalies))
-            filt_cls = st.multiselect(
-                "Classification", clss, default=clss, key=f"fcl_{sn}",
-                format_func=lambda c: _cls_label.get(c, c or "(aucune)"),
-            )
-
-    filtered = [
-        a for a in real_anomalies
-        if a.get("Sévérité", "") in filt_sev
-        and a.get("Type d'anomalie", "") in filt_type
-        and a.get("Champ", "") in filt_champ
-        and a.get("Classification", "") in filt_cls
-    ]
-
-    if not filtered:
-        st.info("Aucune ligne ne correspond aux filtres sélectionnés.")
-    else:
-        _sev_icon = {"Majeure": "🔴 Majeure", "Mineure": "🟠 Mineure"}
-        _has_ia_col = any(a.get("suggestion_ia") for a in filtered)
 
 
-        # AJOUTÉ (26/08/2026, 2e passe) ; RÉVISÉ (27/08/2026, retrait Copier) —
-        # affichage du message persisté posé par "🔁 Propager" lors du run
-        # précédent, juste avant son propre st.rerun() — voir commentaire sur
-        # le piège "message avant rerun jamais visible" plus bas.
-        _propagate_fb = st.session_state.pop(f"_propagate_feedback_{sn}", None)
-        if _propagate_fb:
-            (st.success if _propagate_fb[0] == "success" else st.info)(_propagate_fb[1])
-
-        # AJOUTÉ (01/09/2026) — même piège, même fix, pour le nouveau
-        # cycle "Appliquer et réanalyser".
-        _reanalyze_fb = st.session_state.pop(f"_reanalyze_feedback_{sn}", None)
-        if _reanalyze_fb:
-            (st.success if _reanalyze_fb[0] == "success" else st.info)(_reanalyze_fb[1])
-
-        def _row(a: dict) -> dict:
-            _key = (a.get("Champ", ""), str(a.get("Valeur", "")).strip())
-            _is_corrigible = a.get("Classification") in ("VALEUR_CORRIGIBLE", "SUGGESTION_IA")
-            _suggestion = a.get("Correction suggérée", "")
-            # RÉVISÉ (26/08/2026, jour J) — demande Rami : une anomalie
-            # d'incohérence IA n'a pas de "Correction suggérée" classique
-            # (désormais dans sa propre colonne "🤖 Suggestion IA", voir
-            # coherence_detector.py) — sans repli, "Nouvelle valeur"
-            # resterait vide et impossible à appliquer directement. Repli
-            # sur suggestion_ia uniquement quand Correction suggérée est
-            # vide, pour que la ligne reste éditable/applicable de bout en
-            # bout comme les autres.
-            if not _suggestion:
-                _suggestion = a.get("suggestion_ia", "")
-            _nouvelle = _propagate_overrides.get(_key, _suggestion)
-            _appliquer = (
-                _select_override if _select_override is not None
-                else (_is_corrigible and bool(str(_nouvelle).strip()))
-            )
-            # RÉVISÉ (27/08/2026, jour de la démo) — demande Rami : retirer
-            # "Correction suggérée" de l'affichage, la remplacer à sa place
-            # par "🤖 Suggestion IA" — une seule colonne de suggestion
-            # visible, quelle que soit son origine (similarité de texte ou
-            # IA). Rien ne change en interne : "Correction suggérée" (a.get
-            # ci-dessus, via _suggestion) continue de servir au pré-
-            # remplissage de "Nouvelle valeur" — seule la colonne AFFICHÉE
-            # change.
-            _ia_display = ""
-            if a.get("suggestion_ia"):
-                _ia_display = f"{a['suggestion_ia']} ({a.get('confiance_ia', 0)}%)"
-            elif a.get("Correction suggérée"):
-                _ia_display = a["Correction suggérée"]
-            out = {
-                "Appliquer":          _appliquer,
-                "Onglet":             a.get("Onglet", ""),
-                "Ligne":              a.get("Ligne", ""),
-                "Identifiant métier": a.get("Identifiant métier", ""),
-                "Champ":              a.get("Champ", ""),
-                "Type d'anomalie":    a.get("Type d'anomalie", ""),
-                "Sévérité":           _sev_icon.get(a.get("Sévérité", ""), a.get("Sévérité", "")),
-                "Classification":     _cls_label.get(a.get("Classification", ""), ""),
-                "Message":            a.get("Message", ""),
-                "Valeur source":      a.get("Valeur", ""),
-                "🤖 Suggestion IA":    _ia_display,
-                "Nouvelle valeur":    _nouvelle,
-            }
-            return out
-
-        edit_rows = [_row(a) for a in filtered]
-
-        # RÉVISÉ (26/08/2026) — même plafond que l'ancien tableau de
-        # correction (perf/stabilité WebSocket, voir historique) — appliqué
-        # maintenant au tableau fusionné dans son ensemble. Les lignes hors
-        # plafond gardent leur comportement par défaut (calculé ci-dessus,
-        # overrides de propagation compris) et sont quand même incluses
-        # dans le fichier généré.
-        # RÉVISÉ (01/09/2026) — demande Rami : retire le plafond — avec le
-        # nouveau cycle "filtrer par type d'erreur -> corriger -> appliquer
-        # et réanalyser", le tableau n'affiche jamais plusieurs milliers de
-        # lignes d'un coup en pratique (le filtre les réduit déjà avant
-        # affichage). Risque de ralentissement assumé si un filtre très
-        # large est utilisé malgré tout — à surveiller si ça se produit.
-        _overflow_rows: list = []
-        edit_rows_display = edit_rows
-
-        _column_config = {
-            "Appliquer": st.column_config.CheckboxColumn(help="Cocher pour inclure cette ligne dans le fichier généré"),
-            "Nouvelle valeur": st.column_config.TextColumn(help="Modifiable — tapez la valeur correcte pour cette cellule"),
-        }
-        edited = st.data_editor(
-            pd.DataFrame(edit_rows_display),
-            use_container_width=True,
-            hide_index=True,
-            height=min(450, 50 + len(edit_rows_display) * 35),
-            disabled=[
-                "Onglet", "Ligne", "Identifiant métier", "Champ", "Type d'anomalie",
-                "Sévérité", "Classification", "Message", "Valeur source", "🤖 Suggestion IA",
-            ],
-            column_config=_column_config,
-            key=f"merged_editor_{sn}_{st.session_state[_editor_gen_key]}",
-        )
-
-        if _propagate_clicked:
-            # RÉVISÉ (01/09/2026) — bug de conception trouvé : l'ancienne
-            # logique exigeait de détecter un CHANGEMENT par rapport à la
-            # valeur par défaut de CHAQUE ligne individuellement — si une
-            # ligne avait déjà la bonne valeur pré-remplie (ex. suggestion
-            # IA automatique) et qu'on la ressaisissait à l'identique, rien
-            # n'était détecté comme "modifié", donc rien ne se propageait
-            # vers les lignes réellement vides du même groupe (Champ +
-            # Valeur source identiques). Nouvelle approche, plus robuste :
-            # pour chaque groupe (Champ, Valeur source), on prend la valeur
-            # non vide la plus fréquente déjà présente dans "Nouvelle
-            # valeur" sur ce groupe, et on l'applique à toutes les lignes
-            # du groupe qui ne l'ont pas encore (vides ou différentes) —
-            # un vrai "rendre cohérent", pas juste "recopier un changement
-            # détecté".
-            from collections import Counter
-            _by_key: dict[tuple, list[str]] = {}
-            for _, row in edited.iterrows():
-                _k = (row["Champ"], str(row["Valeur source"]).strip())
-                _v = str(row["Nouvelle valeur"]).strip()
-                if _v:
-                    _by_key.setdefault(_k, []).append(_v)
-
-            _new_overrides = dict(_propagate_overrides)
-            for _k, _vals in _by_key.items():
-                _most_common_val, _count = Counter(_vals).most_common(1)[0]
-                # Ne propage que si au moins 2 lignes partagent déjà cette
-                # valeur — sinon rien de significatif à "rendre cohérent"
-                # (une seule ligne renseignée, pas de majorité à étendre).
-                if _count >= 2:
-                    _new_overrides[_k] = _most_common_val
-
-            _propagated = 0
-            for r in edit_rows:
-                _key = (r["Champ"], str(r["Valeur source"]).strip())
-                if _key in _new_overrides and str(r["Nouvelle valeur"]).strip() != _new_overrides[_key]:
-                    _propagated += 1
-            st.session_state[f"_propagate_overrides_{sn}"] = _new_overrides
-            st.session_state[_editor_gen_key] += 1
-            # RÉVISÉ (26/08/2026, 2e passe) — bug trouvé : st.success/
-            # st.info juste avant st.rerun() ne s'affichaient jamais (le
-            # rerun efface le rendu en cours avant qu'il atteigne
-            # l'écran — même piège déjà rencontré cette semaine).
-            # Message persisté en session_state, affiché au prochain
-            # rendu à la place.
-            if _propagated:
-                st.session_state[f"_propagate_feedback_{sn}"] = ("success", f"✅ {_propagated} ligne(s) mise(s) à jour avec la même correction.")
-            else:
-                st.session_state[f"_propagate_feedback_{sn}"] = ("info", "ℹ️ Rien à propager — soit aucune autre ligne ne partage la même valeur source dans ce champ, soit toutes l'ont déjà.")
-            st.rerun()
-
-        # AJOUTÉ (01/09/2026) — demande Rami : cycle complet pour travailler
-        # un gros socle par type d'erreur — corriger un lot (filtré),
-        # l'appliquer, voir le tableau se réanalyser et le compteur total
-        # baisser, changer de filtre, recommencer, jusqu'à 0 anomalie.
-        # Distinct de "Générer le fichier corrigé" (l'étape FINALE) : celui-
-        # ci s'utilise autant de fois que nécessaire pendant le travail.
-        _reanalyze_col, _ = st.columns([2, 3])
-        with _reanalyze_col:
-            reanalyze_clicked = st.button(
-                "🔄 Appliquer ce lot et réanalyser", use_container_width=True, key=f"reanalyze_{sn}",
-                help="Applique les corrections cochées ci-dessus au fichier de travail, puis relance une analyse complète — le compteur d'anomalies se met à jour en conséquence.",
-            )
-        if reanalyze_clicked:
-            _working_bytes = st.session_state.get("working_file_bytes") or st.session_state.get("original_file_bytes")
-            if not _working_bytes:
-                st.error("❌ Fichier introuvable en mémoire — remontez à l'étape 2.")
-            else:
-                _selected_ra = edited[
-                    (edited["Appliquer"] == True)
-                    & (edited["Nouvelle valeur"].astype(str).str.strip() != "")
-                ]
-                _corrections_ra = [
-                    {"sheet": row["Onglet"], "excel_row": int(row["Ligne"]), "column_name": row["Champ"], "new_value": row["Nouvelle valeur"]}
-                    for _, row in _selected_ra.iterrows()
-                ]
-                _corrections_ra += [
-                    {"sheet": r["Onglet"], "excel_row": int(r["Ligne"]), "column_name": r["Champ"], "new_value": r["Nouvelle valeur"]}
-                    for r in _overflow_rows
-                    if r["Appliquer"] and str(r["Nouvelle valeur"]).strip()
-                ]
-                if not _corrections_ra:
-                    st.info("ℹ️ Aucune correction cochée avec une valeur renseignée — coche « Appliquer » sur au moins une ligne.")
-                else:
-                    try:
-                        with st.spinner("Application des corrections..."):
-                            _new_working_bytes, _apply_diag = apply_corrections(_working_bytes, _corrections_ra, return_diagnostics=True)
-                        # Ré-emballe les octets bruts dans un objet compatible
-                        # avec parse_uploaded_file (attend un fichier uploadé,
-                        # pas des bytes nus — voir file_parser.py).
-                        import io as _io_reparse
-                        _wrapper = _io_reparse.BytesIO(_new_working_bytes)
-                        _wrapper.name = cfg.get("file_name", "fichier.xlsx")
-                        with st.spinner("Nouvelle analyse en cours..."):
-                            _new_pr = parse_uploaded_file(_wrapper)
-                        if not _new_pr.get("success"):
-                            st.error("❌ Le fichier de travail n'est plus lisible après correction — " + "; ".join(_new_pr.get("errors", [])))
-                        else:
-                            _new_merged, _new_axe_c, _new_axe_a = run_quality_analysis(_new_pr, cfg, early_cache=None, include_ai=False)
-                            st.session_state["working_file_bytes"] = _new_working_bytes
-                            st.session_state.parse_result  = _new_pr
-                            st.session_state.merged_result = _new_merged
-                            st.session_state.axe_c_result  = _new_axe_c
-                            _all_ra = _new_merged.get("all_anomalies", [])
-                            _real_ra = [a for a in _all_ra if a.get("Ligne", 0) > 0]
-                            st.session_state.config["total"] = len(_real_ra)
-                            st.session_state.config["major"] = sum(1 for a in _real_ra if a.get("Sévérité") == "Majeure")
-                            st.session_state.config["minor"] = sum(1 for a in _real_ra if a.get("Sévérité") == "Mineure")
-                            st.session_state.config["lines"] = _new_axe_a.get("lines_analyzed", 0)
-                            # RÉVISÉ (01/09/2026) — demande Rami : rendre visible
-                            # combien de corrections ont RÉELLEMENT été
-                            # appliquées (vs. ignorées silencieusement avant ce
-                            # fix — colonne/ligne introuvable dans le fichier
-                            # réel) — sans ça, impossible de savoir si le
-                            # compteur qui ne bouge pas vient d'une correction
-                            # qui n'a jamais pris, ou d'autre chose.
-                            _msg = f"✅ {_apply_diag['applied']}/{len(_corrections_ra)} correction(s) réellement appliquée(s) — {len(_real_ra)} anomalie(s) restante(s)."
-                            if _apply_diag["skipped"]:
-                                _first_skip = _apply_diag["skipped"][0]
-                                _msg += f" ⚠️ {len(_apply_diag['skipped'])} ignorée(s), ex. : {_first_skip['reason']}"
-                            st.session_state[f"_reanalyze_feedback_{sn}"] = (
-                                "success" if not _apply_diag["skipped"] else "info",
-                                _msg,
-                            )
-                            st.rerun()
-                    except Exception as _ra_exc:
-                        st.error(f"❌ Erreur lors de la réanalyse : {_ra_exc}")
-
-        cgen1, cgen2, cgen3 = st.columns([1, 1, 2])
-        with cgen1:
-            gen_clicked = st.button("0️⃣ Générer le fichier corrigé", type="primary", use_container_width=True, key=f"gen_{sn}")
-
-        if gen_clicked:
-            # RÉVISÉ (01/09/2026) — demande Rami : cycle "corriger un lot →
-            # réanalyser → recommencer". Utilise le fichier DE TRAVAIL
-            # (déjà mis à jour à chaque cycle "Appliquer et réanalyser" ci-
-            # dessous) comme base, au lieu du fichier original — sinon les
-            # lots déjà appliqués aux cycles précédents seraient perdus au
-            # moment de la génération finale. Repli sur le fichier
-            # original si aucun cycle n'a encore été fait (usage
-            # inchangé du flux "tout corriger d'un coup, générer à la fin").
-            original_bytes = st.session_state.get("working_file_bytes") or st.session_state.get("original_file_bytes")
-            if not original_bytes:
-                st.error("❌ Fichier original introuvable en mémoire — remontez à l'étape 2.")
-            else:
-                selected = edited[
-                    (edited["Appliquer"] == True)
-                    & (edited["Nouvelle valeur"].astype(str).str.strip() != "")
-                ]
-                corrections = [
-                    {"sheet": row["Onglet"], "excel_row": int(row["Ligne"]), "column_name": row["Champ"], "new_value": row["Nouvelle valeur"]}
-                    for _, row in selected.iterrows()
-                ]
-                corrections += [
-                    {"sheet": r["Onglet"], "excel_row": int(r["Ligne"]), "column_name": r["Champ"], "new_value": r["Nouvelle valeur"]}
-                    for r in _overflow_rows
-                    if r["Appliquer"] and str(r["Nouvelle valeur"]).strip()
-                ]
-                try:
-                    generated_bytes = apply_corrections(original_bytes, corrections) if corrections else original_bytes
-                    _guid_cols_by_sheet: dict[str, set[str]] | None = None
-                    _early_key = f"early_axeab_{cfg.get('pkg_code', '')}_{cfg.get('company_id', '')}_{cfg.get('file_name', '')}"
-                    _cached_plan = st.session_state.get(_early_key, {}).get("exec_plan")
-                    if _cached_plan is not None:
-                        try:
-                            from app.core.bc_excel_processor import extract_sheets_info
-                            _sheets_info = extract_sheets_info(original_bytes)
-                            _guid_cols_by_sheet = {}
-                            for _si in _sheets_info:
-                                _tid = int(_si["table_id"]) if str(_si["table_id"]).isdigit() else 0
-                                if not _tid:
-                                    continue
-                                _defs = _cached_plan.get_field_defs_for_table(_tid)
-                                _guid_names = {n for n, fm in _defs.items() if fm.al_type == "Guid"}
-                                if _guid_names:
-                                    _guid_cols_by_sheet[_si["sheet_name"]] = _guid_names
-                        except Exception:
-                            _guid_cols_by_sheet = None
-                    generated_bytes = clear_id_reference_columns(generated_bytes, guid_column_names=_guid_cols_by_sheet)
-                    st.session_state["generated_file_bytes"] = generated_bytes
-                    st.session_state["generated_file_name"] = f"CORRIGE_{cfg.get('file_name', 'fichier.xlsx')}"
-                    # AJOUTÉ (27/08/2026) — demande Rami : une nouvelle
-                    # génération de fichier doit repartir sur un état
-                    # d'intégration BC neuf — sinon un ancien message
-                    # d'erreur ("BC a rejeté l'import...") d'un test
-                    # précédent restait affiché malgré un fichier régénéré
-                    # entre-temps, laissant croire que le nouveau fichier
-                    # posait le même problème.
-                    st.session_state[f"bc_integration_{sn}"] = {"stage": "idle"}
-                    st.success(f"✅ Fichier généré — {len(corrections)} correction(s) appliquée(s).")
-                except Exception as e:
-                    st.error(f"❌ Erreur lors de la génération : {e}")
-
-        if st.session_state.get("generated_file_bytes"):
-            with cgen2:
-                st.download_button(
-                    "⬇️ Télécharger le fichier corrigé",
-                    data=st.session_state["generated_file_bytes"],
-                    file_name=st.session_state.get("generated_file_name", "fichier_corrige.xlsx"),
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key="dl_generated_file",
-                    use_container_width=True,
-                )
-
-            # AJOUTÉ (27/08/2026) — demande Rami, point 2 des chantiers
-            # post-démo : intégration directe du fichier corrigé dans BC,
-            # pour que le client puisse le faire sans dépendre du
-            # consultant. Réutilise run_bc_import_check (créer le package
-            # si besoin, déposer le fichier CORRIGÉ, importer sans écrire —
-            # "Valider"). L'étape "Appliquer" (écriture réelle, irréversible
-            # côté BC) est volontairement séparée et exige une confirmation
-            # explicite avant de se déclencher.
-            st.markdown("---")
-            st.markdown('<div class="step-header">🚀 Intégrer directement dans BC</div>', unsafe_allow_html=True)
-
-            _integ_key = f"bc_integration_{sn}"
-            if _integ_key not in st.session_state:
-                st.session_state[_integ_key] = {"stage": "idle"}
-            _integ = st.session_state[_integ_key]
-
-            if _integ["stage"] in ("idle", "imported"):
-                _integ_btn_col1, _ = st.columns([1, 3])
-                with _integ_btn_col1:
-                    _btn1_clicked = st.button("1️⃣ Vérifier avant intégration", key=f"btn_integ_check_{sn}", use_container_width=True)
-                if _btn1_clicked:
-                    # AJOUTÉ (27/08/2026) — diagnostic réel : inspecte le
-                    # contenu binaire du fichier RÉELLEMENT envoyé à BC,
-                    # entrée par entrée, pour savoir avec certitude si le
-                    # fix ZIP_DEFLATED est bien effectif sur CE fichier
-                    # précis — au lieu de deviner encore si c'est un fichier
-                    # périmé en mémoire ou un vrai bug résiduel.
-                    if is_consultant():
-                        try:
-                            import zipfile as _zf_diag, io as _io_diag
-                            _diag_zip = _zf_diag.ZipFile(_io_diag.BytesIO(st.session_state["generated_file_bytes"]))
-                            _non_standard = [
-                                f"{info.filename} (méthode {info.compress_type})"
-                                for info in _diag_zip.infolist()
-                                if info.compress_type != _zf_diag.ZIP_DEFLATED and info.compress_type != _zf_diag.ZIP_STORED
-                            ]
-                            with st.expander("🔬 Diagnostic compression fichier (consultant)", expanded=bool(_non_standard)):
-                                st.caption(f"{len(_diag_zip.infolist())} entrée(s) au total dans le fichier envoyé.")
-                                if _non_standard:
-                                    st.error("Entrée(s) avec une méthode de compression NON standard :")
-                                    for _ns in _non_standard:
-                                        st.code(_ns)
-                                else:
-                                    st.success("Toutes les entrées sont en DEFLATE (8) ou STORED (0) — standard, aucune anomalie de compression détectée sur ce fichier.")
-                        except Exception as _diag_zip_e:
-                            st.warning(f"Diagnostic compression impossible : {_diag_zip_e}")
-
-                    with st.spinner("Vérification BC en cours..."):
-                        try:
-                            _p = get_profile_by_code(cfg.get("client_code", ""))
-                            _tid = (_p.get("bc_tenant_id") or "").strip()
-                            _cid = (_p.get("bc_client_id") or "").strip()
-                            _cs  = (_p.get("bc_client_secret") or "").strip()
-                            _env = (_p.get("bc_environment") or "").strip()
-                            if not all([_tid, _cid, _cs, _env, cfg.get("company_id")]):
-                                st.session_state[_integ_key] = {"stage": "idle", "error": "Credentials BC incomplets pour ce profil."}
-                            else:
-                                _tok = get_access_token(_tid, _cid, _cs)
-                                # RÉVISÉ (27/08/2026) — bug réel signalé par Rami :
-                                # créait TOUJOURS un nouveau package vide dans BC,
-                                # même quand la session partait déjà d'un package
-                                # BC EXISTANT (choisi à l'Étape 1) — logiquement
-                                # incohérent, et le package vide généré n'avait
-                                # aucune table configurée. Réutilise maintenant le
-                                # code package de la session si disponible ; ne
-                                # génère un nouveau code que si la session n'a
-                                # vraiment aucun package associé (futur mode
-                                # "session sans package" — pas encore construit).
-                                _pkg_code_integ = cfg.get("pkg_code") or f"QC-{cfg.get('session_name', 'temp')}"[:20]
-                                _res = run_bc_import_check(
-                                    _tid, _env, cfg["company_id"], _tok,
-                                    _pkg_code_integ, f"Intégration QC — {cfg.get('session_name', '')}",
-                                    st.session_state["generated_file_bytes"],
-                                )
-                                if _res.get("success"):
-                                    st.session_state[_integ_key] = {
-                                        "stage": "imported",
-                                        "package_id": _res["package_id"],
-                                        "package_code": _pkg_code_integ,
-                                        "status": _res.get("status"),
-                                        "creds": (_tid, _env, cfg["company_id"], _tok),
-                                        # AJOUTÉ (27/08/2026) — nouveau diagnostic :
-                                        # ce que BC a réellement stocké après le
-                                        # dépôt, comparé octet pour octet à ce
-                                        # qu'on lui a envoyé.
-                                        "upload_readback": _res.get("upload_readback", ""),
-                                    }
-                                    # AJOUTÉ (27/08/2026) — demande Rami : un
-                                    # indicateur clair de fin de vérification —
-                                    # le sondage BC peut prendre jusqu'à 20s,
-                                    # un simple retour de spinner ne suffisait
-                                    # pas à signaler "c'est fini".
-                                    st.toast("✅ Vérification BC terminée.")
-                                else:
-                                    st.session_state[_integ_key] = {"stage": "idle", "error": _res.get("error", "")}
-                                    st.toast("⚠️ Vérification BC terminée — erreur détectée.")
-                        except Exception as _integ_exc:
-                            st.session_state[_integ_key] = {"stage": "idle", "error": f"{type(_integ_exc).__name__} : {_integ_exc}"}
-                            st.toast("⚠️ Vérification BC terminée — erreur technique.")
-
-            _integ = st.session_state[_integ_key]
-            if _integ.get("error"):
-                st.markdown(f'<div class="card-major">🔴 {_integ["error"]}</div>', unsafe_allow_html=True)
-
-            if _integ["stage"] == "imported":
-                _integ_status = _integ.get("status") or {}
-                _nb_err_integ = _integ_status.get("numberOfErrors", "?")
-                # RÉVISÉ (31/08/2026) — bug réel trouvé : depuis le passage
-                # au nouvel endpoint AL custom (qui appelle ImportExcel
-                # directement, contournant l'action standard Microsoft.NAV.
-                # import), les champs "importStatus"/"importError" du
-                # package ne sont PLUS jamais mis à jour par notre import —
-                # ce sont des champs propres au mécanisme standard qu'on
-                # ne déclenche plus. Résultat : l'écran affichait un vieux
-                # statut "Error" figé depuis les tout premiers essais
-                # (avant tous ces fixes), jamais nettoyé depuis. Repose
-                # maintenant uniquement sur "numberOfErrors", recalculé à
-                # chaque lecture à partir des vraies données du package,
-                # peu importe le mécanisme d'import utilisé.
-                if _nb_err_integ == 0:
-                    st.markdown('<div class="card-ref">✅ 0 erreur — le fichier peut être appliqué dans BC.</div>', unsafe_allow_html=True)
-                    st.warning("⚠️ L'étape suivante écrit réellement les données dans Business Central — action irréversible.")
-                    _confirm = st.checkbox("Je confirme vouloir intégrer ces données dans Business Central", key=f"confirm_apply_{sn}")
-                    _btn2_clicked = False
-                    if _confirm:
-                        _integ_btn_col2, _ = st.columns([1, 3])
-                        with _integ_btn_col2:
-                            _btn2_clicked = st.button("2️⃣ Appliquer dans BC", type="primary", key=f"btn_integ_apply_{sn}", use_container_width=True)
-                    if _btn2_clicked:
-                        with st.spinner("Intégration dans BC en cours..."):
-                            try:
-                                _tid, _env, _company_id, _tok = _integ["creds"]
-                                apply_configuration_package(_tid, _env, _company_id, _tok, _integ["package_id"])
-
-                                # AJOUTÉ (27/08/2026) — après une intégration réussie :
-                                # marque automatiquement la session comme "Terminée"
-                                # (confirmé par Rami) et met à jour la mémoire
-                                # inter-sessions pour la table concernée si c'est
-                                # une session fille (même règle que la sauvegarde
-                                # complète — voir plus bas dans ce fichier).
-                                _sid = st.session_state.get("resumed_session_id") or st.session_state.get("saved_session_id")
-                                if _sid:
-                                    try:
-                                        update_session(_sid, {"status": "Terminée"})
-                                    except Exception:
-                                        pass
-                                _tid_mem = cfg.get("table_id")
-                                if _tid_mem:
-                                    try:
-                                        from app.core.bc_excel_processor import extract_key_values_by_table
-                                        from app.db.metadata_db import save_pending_codes
-                                        _codes_all = extract_key_values_by_table(st.session_state["generated_file_bytes"])
-                                        _codes_scoped = {k: v for k, v in _codes_all.items() if k == _tid_mem}
-                                        if _codes_scoped and _sid:
-                                            save_pending_codes(
-                                                session_id=_sid, profile_code=cfg.get("client_code", ""),
-                                                company_id=cfg.get("company_id", ""), codes_by_table=_codes_scoped,
-                                            )
-                                    except Exception:
-                                        pass
-
-                                st.session_state[_integ_key] = {"stage": "applied"}
-                                st.success("✅ Données intégrées dans Business Central avec succès. Session marquée « Terminée ».")
-                            except Exception as _apply_exc:
-                                st.error(f"❌ Échec de l'intégration : {_apply_exc}")
-                else:
+    if real_anomalies:
+        nb_maj = sum(1 for a in real_anomalies if a.get("Sévérité") == "Majeure")
+        nb_min = sum(1 for a in real_anomalies if a.get("Sévérité") == "Mineure")
+        nb_ia = sum(1 for a in real_anomalies if a.get("suggestion_ia"))
+        t1, t2, t3, t4 = st.columns(4)
+        t1.metric("Anomalies", len(real_anomalies))
+        t2.metric("🔴 Majeures", nb_maj)
+        t3.metric("🟠 Mineures", nb_min)
+        # RÉVISÉ (26/08/2026) — demande Rami : rendre "IA suggère" cliquable,
+        # avec le détail des modifications proposées par l'IA — st.metric ne
+        # supporte aucune interaction, remplacé par un st.popover (même
+        # composant déjà utilisé ailleurs dans l'app) qui affiche le chiffre
+        # comme libellé et le détail de chaque suggestion au clic.
+        with t4:
+            with st.popover(f"🤖 IA suggère : {nb_ia}", use_container_width=True):
+                _ia_rows = [a for a in real_anomalies if a.get("suggestion_ia")]
+                if not _ia_rows:
+                    st.caption("Aucune suggestion IA sur cet onglet pour l'instant.")
+                for _a in _ia_rows[:30]:
                     st.markdown(
-                        f'<div class="card-major">🔴 {_nb_err_integ} erreur(s) détectée(s) par BC sur le fichier corrigé — '
-                        f'corrige-les avant de pouvoir intégrer.</div>',
-                        unsafe_allow_html=True,
+                        f"**{_a.get('Champ', '')}** (ligne {_a.get('Ligne', '')}, "
+                        f"{_a.get('Identifiant métier', '')}) : "
+                        f"`{_a.get('Valeur', '')}` → **{_a.get('suggestion_ia', '')}** "
+                        f"({_a.get('confiance_ia', 0)}% de confiance)"
                     )
+                    if _a.get("Message"):
+                        st.caption(_a["Message"])
+                    st.markdown("---")
+                if len(_ia_rows) > 30:
+                    st.caption(f"... et {len(_ia_rows) - 30} autre(s), non affichée(s) ici.")
 
-            if _integ["stage"] == "applied":
-                st.markdown('<div class="card-ref">✅ Intégration terminée.</div>', unsafe_allow_html=True)
+        # AJOUTÉ (26/08/2026) — demande Rami : filtres façon Excel. Streamlit
+        # n'a pas de filtre par en-tête de colonne comme Excel — ces menus
+        # déroulants au-dessus du tableau font le même travail (rétrécir les
+        # lignes affichées par valeur de colonne), juste présentés autrement.
+        # Champ et Classification ajoutés en plus de Sévérité/Type d'anomalie
+        # déjà existants, pour couvrir toutes les colonnes utiles à la
+        # recherche d'une ligne précise à corriger.
+        # RÉVISÉ (27/08/2026, 3e passe) — demande Rami : déclencheur encore plus
+        # compact (taille bouton normal, pas de colonne dédiée) tout en gardant
+        # les 4 filtres sur UNE SEULE ligne une fois ouverts — impossible avec
+        # un st.expander (son contenu reste contraint à la largeur de la
+        # colonne qui le contient, même étroite). st.popover s'affiche en
+        # panneau flottant : déclencheur compact ET contenu pleine largeur au
+        # clic, sans dépendre l'un de l'autre.
+        # RÉVISÉ (27/08/2026, 4e passe) — demande Rami : "pas beau, pas lisible"
+        # — 4 colonnes côte à côte dans un popover (nativement étroit) tronquait
+        # tout (valeurs sélectionnées, icônes de suppression illisibles,
+        # entassées). Empilé verticalement à la place : chaque filtre prend
+        # toute la largeur du popover, plus de troncature.
+        # AJOUTÉ (27/08/2026, 6e passe) — demande Rami : Filtres, bascule
+        # Sélectionner/Désélectionner et Propager regroupés sur UNE SEULE
+        # rangée (Désélectionner + Propager à gauche, Filtres à l'autre bout),
+        # toutes les 3 à la même taille naturelle (pas de use_container_width).
+        # _editor_gen_key avancé plus tôt dans la fonction (ne dépendait pas
+        # vraiment de `filtered`, juste conventionnellement placé après avant).
+        _editor_gen_key = f"merged_editor_gen_{sn}"
+        if _editor_gen_key not in st.session_state:
+            st.session_state[_editor_gen_key] = 0
+
+        _all_sel_key = f"_all_selected_state_{sn}"
+        if _all_sel_key not in st.session_state:
+            st.session_state[_all_sel_key] = False
+        _toggle_label = "⬜ Désélectionner" if st.session_state[_all_sel_key] else "✅ Sélectionner"
+
+        # RÉVISÉ (27/08/2026, 9e passe) — demande Rami : Propager n'est PAS
+        # réservé au consultant — corrigible par le client aussi, retiré de la
+        # restriction is_consultant().
+        _rowsel1, _rowsel2, _row_spacer, _rowsel3 = st.columns([1, 1, 4, 2])
+
+        with _rowsel1:
+            if st.button(_toggle_label, key=f"btn_toggle_select_{sn}", use_container_width=True):
+                st.session_state[_all_sel_key] = not st.session_state[_all_sel_key]
+                st.session_state[f"_merged_select_override_{sn}"] = st.session_state[_all_sel_key]
+                st.session_state[_editor_gen_key] += 1
+                st.rerun()
+        _select_override = st.session_state.pop(f"_merged_select_override_{sn}", None)
+        _propagate_overrides: dict = st.session_state.get(f"_propagate_overrides_{sn}", {})
+
+        _propagate_clicked = False
+        if _rowsel2 is not None:
+            with _rowsel2:
+                _propagate_clicked = st.button(
+                    "🔁 Propager", key=f"btn_propagate_{sn}", use_container_width=True,
+                    help="Applique chaque correction saisie à toutes les autres lignes ayant la même valeur source dans le même champ",
+                )
+
+        with _rowsel3:
+            # RÉVISÉ (27/08/2026, 4e/5e/6e passes) — voir historique complet du
+            # popover Filtres dans les commentaires précédents (largeur, police,
+            # empilement vertical du contenu) — juste déplacé dans cette rangée
+            # commune, comportement interne inchangé.
+            with st.popover("🔍 Filtres", use_container_width=True):
+                sevs = sorted(set(a.get("Sévérité", "") for a in real_anomalies))
+                filt_sev = st.multiselect("Sévérité", sevs, default=sevs, key=f"fs_{sn}")
+
+                types = sorted(set(a.get("Type d'anomalie", "") for a in real_anomalies))
+                filt_type = st.multiselect("Type d'anomalie", types, default=types, key=f"ft_{sn}")
+
+                champs = sorted(set(a.get("Champ", "") for a in real_anomalies))
+                filt_champ = st.multiselect("Champ", champs, default=champs, key=f"fc_{sn}")
+
+                _cls_label = {
+                    "PREALABLE_BC_REQUIS": "🟣 Prérequis BC requis",
+                    "VALEUR_CORRIGIBLE":   "✏️ Corrigible",
+                    "SUGGESTION_IA":       "🧠 Suggestion IA",
+                }
+                clss = sorted(set(a.get("Classification", "") for a in real_anomalies))
+                filt_cls = st.multiselect(
+                    "Classification", clss, default=clss, key=f"fcl_{sn}",
+                    format_func=lambda c: _cls_label.get(c, c or "(aucune)"),
+                )
+
+        filtered = [
+            a for a in real_anomalies
+            if a.get("Sévérité", "") in filt_sev
+            and a.get("Type d'anomalie", "") in filt_type
+            and a.get("Champ", "") in filt_champ
+            and a.get("Classification", "") in filt_cls
+        ]
+
+        if not filtered:
+            st.info("Aucune ligne ne correspond aux filtres sélectionnés.")
+        else:
+            _sev_icon = {"Majeure": "🔴 Majeure", "Mineure": "🟠 Mineure"}
+            _has_ia_col = any(a.get("suggestion_ia") for a in filtered)
+
+
+            # AJOUTÉ (26/08/2026, 2e passe) ; RÉVISÉ (27/08/2026, retrait Copier) —
+            # affichage du message persisté posé par "🔁 Propager" lors du run
+            # précédent, juste avant son propre st.rerun() — voir commentaire sur
+            # le piège "message avant rerun jamais visible" plus bas.
+            _propagate_fb = st.session_state.pop(f"_propagate_feedback_{sn}", None)
+            if _propagate_fb:
+                (st.success if _propagate_fb[0] == "success" else st.info)(_propagate_fb[1])
+
+            # AJOUTÉ (01/09/2026) — même piège, même fix, pour le nouveau
+            # cycle "Appliquer et réanalyser".
+            _reanalyze_fb = st.session_state.pop(f"_reanalyze_feedback_{sn}", None)
+            if _reanalyze_fb:
+                (st.success if _reanalyze_fb[0] == "success" else st.info)(_reanalyze_fb[1])
+
+            def _row(a: dict) -> dict:
+                _key = (a.get("Champ", ""), str(a.get("Valeur", "")).strip())
+                _is_corrigible = a.get("Classification") in ("VALEUR_CORRIGIBLE", "SUGGESTION_IA")
+                _suggestion = a.get("Correction suggérée", "")
+                # RÉVISÉ (26/08/2026, jour J) — demande Rami : une anomalie
+                # d'incohérence IA n'a pas de "Correction suggérée" classique
+                # (désormais dans sa propre colonne "🤖 Suggestion IA", voir
+                # coherence_detector.py) — sans repli, "Nouvelle valeur"
+                # resterait vide et impossible à appliquer directement. Repli
+                # sur suggestion_ia uniquement quand Correction suggérée est
+                # vide, pour que la ligne reste éditable/applicable de bout en
+                # bout comme les autres.
+                if not _suggestion:
+                    _suggestion = a.get("suggestion_ia", "")
+                _nouvelle = _propagate_overrides.get(_key, _suggestion)
+                _appliquer = (
+                    _select_override if _select_override is not None
+                    else (_is_corrigible and bool(str(_nouvelle).strip()))
+                )
+                # RÉVISÉ (27/08/2026, jour de la démo) — demande Rami : retirer
+                # "Correction suggérée" de l'affichage, la remplacer à sa place
+                # par "🤖 Suggestion IA" — une seule colonne de suggestion
+                # visible, quelle que soit son origine (similarité de texte ou
+                # IA). Rien ne change en interne : "Correction suggérée" (a.get
+                # ci-dessus, via _suggestion) continue de servir au pré-
+                # remplissage de "Nouvelle valeur" — seule la colonne AFFICHÉE
+                # change.
+                _ia_display = ""
+                if a.get("suggestion_ia"):
+                    _ia_display = f"{a['suggestion_ia']} ({a.get('confiance_ia', 0)}%)"
+                elif a.get("Correction suggérée"):
+                    _ia_display = a["Correction suggérée"]
+                out = {
+                    "Appliquer":          _appliquer,
+                    "Onglet":             a.get("Onglet", ""),
+                    "Ligne":              a.get("Ligne", ""),
+                    "Identifiant métier": a.get("Identifiant métier", ""),
+                    "Champ":              a.get("Champ", ""),
+                    "Type d'anomalie":    a.get("Type d'anomalie", ""),
+                    "Sévérité":           _sev_icon.get(a.get("Sévérité", ""), a.get("Sévérité", "")),
+                    "Classification":     _cls_label.get(a.get("Classification", ""), ""),
+                    "Message":            a.get("Message", ""),
+                    "Valeur source":      a.get("Valeur", ""),
+                    "🤖 Suggestion IA":    _ia_display,
+                    "Nouvelle valeur":    _nouvelle,
+                }
+                return out
+
+            edit_rows = [_row(a) for a in filtered]
+
+            # RÉVISÉ (26/08/2026) — même plafond que l'ancien tableau de
+            # correction (perf/stabilité WebSocket, voir historique) — appliqué
+            # maintenant au tableau fusionné dans son ensemble. Les lignes hors
+            # plafond gardent leur comportement par défaut (calculé ci-dessus,
+            # overrides de propagation compris) et sont quand même incluses
+            # dans le fichier généré.
+            # RÉVISÉ (01/09/2026) — demande Rami : retire le plafond — avec le
+            # nouveau cycle "filtrer par type d'erreur -> corriger -> appliquer
+            # et réanalyser", le tableau n'affiche jamais plusieurs milliers de
+            # lignes d'un coup en pratique (le filtre les réduit déjà avant
+            # affichage). Risque de ralentissement assumé si un filtre très
+            # large est utilisé malgré tout — à surveiller si ça se produit.
+            _overflow_rows: list = []
+            edit_rows_display = edit_rows
+
+            _column_config = {
+                "Appliquer": st.column_config.CheckboxColumn(help="Cocher pour inclure cette ligne dans le fichier généré"),
+                "Nouvelle valeur": st.column_config.TextColumn(help="Modifiable — tapez la valeur correcte pour cette cellule"),
+            }
+            edited = st.data_editor(
+                pd.DataFrame(edit_rows_display),
+                use_container_width=True,
+                hide_index=True,
+                height=min(450, 50 + len(edit_rows_display) * 35),
+                disabled=[
+                    "Onglet", "Ligne", "Identifiant métier", "Champ", "Type d'anomalie",
+                    "Sévérité", "Classification", "Message", "Valeur source", "🤖 Suggestion IA",
+                ],
+                column_config=_column_config,
+                key=f"merged_editor_{sn}_{st.session_state[_editor_gen_key]}",
+            )
+
+            if _propagate_clicked:
+                # RÉVISÉ (01/09/2026) — bug de conception trouvé : l'ancienne
+                # logique exigeait de détecter un CHANGEMENT par rapport à la
+                # valeur par défaut de CHAQUE ligne individuellement — si une
+                # ligne avait déjà la bonne valeur pré-remplie (ex. suggestion
+                # IA automatique) et qu'on la ressaisissait à l'identique, rien
+                # n'était détecté comme "modifié", donc rien ne se propageait
+                # vers les lignes réellement vides du même groupe (Champ +
+                # Valeur source identiques). Nouvelle approche, plus robuste :
+                # pour chaque groupe (Champ, Valeur source), on prend la valeur
+                # non vide la plus fréquente déjà présente dans "Nouvelle
+                # valeur" sur ce groupe, et on l'applique à toutes les lignes
+                # du groupe qui ne l'ont pas encore (vides ou différentes) —
+                # un vrai "rendre cohérent", pas juste "recopier un changement
+                # détecté".
+                from collections import Counter
+                _by_key: dict[tuple, list[str]] = {}
+                for _, row in edited.iterrows():
+                    _k = (row["Champ"], str(row["Valeur source"]).strip())
+                    _v = str(row["Nouvelle valeur"]).strip()
+                    if _v:
+                        _by_key.setdefault(_k, []).append(_v)
+
+                _new_overrides = dict(_propagate_overrides)
+                for _k, _vals in _by_key.items():
+                    _most_common_val, _count = Counter(_vals).most_common(1)[0]
+                    # Ne propage que si au moins 2 lignes partagent déjà cette
+                    # valeur — sinon rien de significatif à "rendre cohérent"
+                    # (une seule ligne renseignée, pas de majorité à étendre).
+                    if _count >= 2:
+                        _new_overrides[_k] = _most_common_val
+
+                _propagated = 0
+                for r in edit_rows:
+                    _key = (r["Champ"], str(r["Valeur source"]).strip())
+                    if _key in _new_overrides and str(r["Nouvelle valeur"]).strip() != _new_overrides[_key]:
+                        _propagated += 1
+                st.session_state[f"_propagate_overrides_{sn}"] = _new_overrides
+                st.session_state[_editor_gen_key] += 1
+                # RÉVISÉ (26/08/2026, 2e passe) — bug trouvé : st.success/
+                # st.info juste avant st.rerun() ne s'affichaient jamais (le
+                # rerun efface le rendu en cours avant qu'il atteigne
+                # l'écran — même piège déjà rencontré cette semaine).
+                # Message persisté en session_state, affiché au prochain
+                # rendu à la place.
+                if _propagated:
+                    st.session_state[f"_propagate_feedback_{sn}"] = ("success", f"✅ {_propagated} ligne(s) mise(s) à jour avec la même correction.")
+                else:
+                    st.session_state[f"_propagate_feedback_{sn}"] = ("info", "ℹ️ Rien à propager — soit aucune autre ligne ne partage la même valeur source dans ce champ, soit toutes l'ont déjà.")
+                st.rerun()
+
+            # AJOUTÉ (01/09/2026) — demande Rami : cycle complet pour travailler
+            # un gros socle par type d'erreur — corriger un lot (filtré),
+            # l'appliquer, voir le tableau se réanalyser et le compteur total
+            # baisser, changer de filtre, recommencer, jusqu'à 0 anomalie.
+            # Distinct de "Générer le fichier corrigé" (l'étape FINALE) : celui-
+            # ci s'utilise autant de fois que nécessaire pendant le travail.
+            _reanalyze_col, _ = st.columns([2, 3])
+            with _reanalyze_col:
+                reanalyze_clicked = st.button(
+                    "🔄 Appliquer ce lot et réanalyser", use_container_width=True, key=f"reanalyze_{sn}",
+                    help="Applique les corrections cochées ci-dessus au fichier de travail, puis relance une analyse complète — le compteur d'anomalies se met à jour en conséquence.",
+                )
+            if reanalyze_clicked:
+                _working_bytes = st.session_state.get("working_file_bytes") or st.session_state.get("original_file_bytes")
+                if not _working_bytes:
+                    st.error("❌ Fichier introuvable en mémoire — remontez à l'étape 2.")
+                else:
+                    _selected_ra = edited[
+                        (edited["Appliquer"] == True)
+                        & (edited["Nouvelle valeur"].astype(str).str.strip() != "")
+                    ]
+                    _corrections_ra = [
+                        {"sheet": row["Onglet"], "excel_row": int(row["Ligne"]), "column_name": row["Champ"], "new_value": row["Nouvelle valeur"]}
+                        for _, row in _selected_ra.iterrows()
+                    ]
+                    _corrections_ra += [
+                        {"sheet": r["Onglet"], "excel_row": int(r["Ligne"]), "column_name": r["Champ"], "new_value": r["Nouvelle valeur"]}
+                        for r in _overflow_rows
+                        if r["Appliquer"] and str(r["Nouvelle valeur"]).strip()
+                    ]
+                    if not _corrections_ra:
+                        st.info("ℹ️ Aucune correction cochée avec une valeur renseignée — coche « Appliquer » sur au moins une ligne.")
+                    else:
+                        try:
+                            with st.spinner("Application des corrections..."):
+                                _new_working_bytes, _apply_diag = apply_corrections(_working_bytes, _corrections_ra, return_diagnostics=True)
+                            # Ré-emballe les octets bruts dans un objet compatible
+                            # avec parse_uploaded_file (attend un fichier uploadé,
+                            # pas des bytes nus — voir file_parser.py).
+                            import io as _io_reparse
+                            _wrapper = _io_reparse.BytesIO(_new_working_bytes)
+                            _wrapper.name = cfg.get("file_name", "fichier.xlsx")
+                            with st.spinner("Nouvelle analyse en cours..."):
+                                _new_pr = parse_uploaded_file(_wrapper)
+                            if not _new_pr.get("success"):
+                                st.error("❌ Le fichier de travail n'est plus lisible après correction — " + "; ".join(_new_pr.get("errors", [])))
+                            else:
+                                _new_merged, _new_axe_c, _new_axe_a = run_quality_analysis(_new_pr, cfg, early_cache=None, include_ai=False)
+                                st.session_state["working_file_bytes"] = _new_working_bytes
+                                st.session_state.parse_result  = _new_pr
+                                st.session_state.merged_result = _new_merged
+                                st.session_state.axe_c_result  = _new_axe_c
+                                _all_ra = _new_merged.get("all_anomalies", [])
+                                _real_ra = [a for a in _all_ra if a.get("Ligne", 0) > 0]
+                                st.session_state.config["total"] = len(_real_ra)
+                                st.session_state.config["major"] = sum(1 for a in _real_ra if a.get("Sévérité") == "Majeure")
+                                st.session_state.config["minor"] = sum(1 for a in _real_ra if a.get("Sévérité") == "Mineure")
+                                st.session_state.config["lines"] = _new_axe_a.get("lines_analyzed", 0)
+                                # RÉVISÉ (01/09/2026) — demande Rami : rendre visible
+                                # combien de corrections ont RÉELLEMENT été
+                                # appliquées (vs. ignorées silencieusement avant ce
+                                # fix — colonne/ligne introuvable dans le fichier
+                                # réel) — sans ça, impossible de savoir si le
+                                # compteur qui ne bouge pas vient d'une correction
+                                # qui n'a jamais pris, ou d'autre chose.
+                                _msg = f"✅ {_apply_diag['applied']}/{len(_corrections_ra)} correction(s) réellement appliquée(s) — {len(_real_ra)} anomalie(s) restante(s)."
+                                if _apply_diag["skipped"]:
+                                    _first_skip = _apply_diag["skipped"][0]
+                                    _msg += f" ⚠️ {len(_apply_diag['skipped'])} ignorée(s), ex. : {_first_skip['reason']}"
+                                st.session_state[f"_reanalyze_feedback_{sn}"] = (
+                                    "success" if not _apply_diag["skipped"] else "info",
+                                    _msg,
+                                )
+                                st.rerun()
+                        except Exception as _ra_exc:
+                            st.error(f"❌ Erreur lors de la réanalyse : {_ra_exc}")
+    else:
+        # AJOUTÉ (01/09/2026) — bug réel trouvé et corrigé : plus
+        # aucune anomalie réelle sur cet onglet (cas normal en fin de
+        # cycle "Appliquer et réanalyser") ne doit JAMAIS empêcher
+        # d'atteindre Générer/Télécharger/Intégrer plus bas — avant ce
+        # fix, la fonction s'arrêtait net avec un simple message de
+        # succès, rendant tout le reste de l'écran inaccessible (et
+        # donnant à tort l'impression que les corrections étaient
+        # perdues, alors qu'elles restaient bien en mémoire). Valeurs de
+        # repli minimales pour que le code qui suit (qui référence
+        # `edited`/`_overflow_rows`) continue de fonctionner sans rien
+        # à corriger ici.
+        import pandas as _pd_fallback
+        edited = _pd_fallback.DataFrame(columns=["Onglet", "Ligne", "Champ", "Nouvelle valeur", "Appliquer", "Valeur source"])
+        _overflow_rows = []
+        edit_rows = []
+
+
+    cgen1, cgen2, cgen3 = st.columns([1, 1, 2])
+    with cgen1:
+        gen_clicked = st.button("0️⃣ Générer le fichier corrigé", type="primary", use_container_width=True, key=f"gen_{sn}")
+
+    if gen_clicked:
+        # RÉVISÉ (01/09/2026) — demande Rami : cycle "corriger un lot →
+        # réanalyser → recommencer". Utilise le fichier DE TRAVAIL
+        # (déjà mis à jour à chaque cycle "Appliquer et réanalyser" ci-
+        # dessous) comme base, au lieu du fichier original — sinon les
+        # lots déjà appliqués aux cycles précédents seraient perdus au
+        # moment de la génération finale. Repli sur le fichier
+        # original si aucun cycle n'a encore été fait (usage
+        # inchangé du flux "tout corriger d'un coup, générer à la fin").
+        original_bytes = st.session_state.get("working_file_bytes") or st.session_state.get("original_file_bytes")
+        if not original_bytes:
+            st.error("❌ Fichier original introuvable en mémoire — remontez à l'étape 2.")
+        else:
+            selected = edited[
+                (edited["Appliquer"] == True)
+                & (edited["Nouvelle valeur"].astype(str).str.strip() != "")
+            ]
+            corrections = [
+                {"sheet": row["Onglet"], "excel_row": int(row["Ligne"]), "column_name": row["Champ"], "new_value": row["Nouvelle valeur"]}
+                for _, row in selected.iterrows()
+            ]
+            corrections += [
+                {"sheet": r["Onglet"], "excel_row": int(r["Ligne"]), "column_name": r["Champ"], "new_value": r["Nouvelle valeur"]}
+                for r in _overflow_rows
+                if r["Appliquer"] and str(r["Nouvelle valeur"]).strip()
+            ]
+            try:
+                generated_bytes = apply_corrections(original_bytes, corrections) if corrections else original_bytes
+                _guid_cols_by_sheet: dict[str, set[str]] | None = None
+                _early_key = f"early_axeab_{cfg.get('pkg_code', '')}_{cfg.get('company_id', '')}_{cfg.get('file_name', '')}"
+                _cached_plan = st.session_state.get(_early_key, {}).get("exec_plan")
+                if _cached_plan is not None:
+                    try:
+                        from app.core.bc_excel_processor import extract_sheets_info
+                        _sheets_info = extract_sheets_info(original_bytes)
+                        _guid_cols_by_sheet = {}
+                        for _si in _sheets_info:
+                            _tid = int(_si["table_id"]) if str(_si["table_id"]).isdigit() else 0
+                            if not _tid:
+                                continue
+                            _defs = _cached_plan.get_field_defs_for_table(_tid)
+                            _guid_names = {n for n, fm in _defs.items() if fm.al_type == "Guid"}
+                            if _guid_names:
+                                _guid_cols_by_sheet[_si["sheet_name"]] = _guid_names
+                    except Exception:
+                        _guid_cols_by_sheet = None
+                generated_bytes = clear_id_reference_columns(generated_bytes, guid_column_names=_guid_cols_by_sheet)
+                st.session_state["generated_file_bytes"] = generated_bytes
+                st.session_state["generated_file_name"] = f"CORRIGE_{cfg.get('file_name', 'fichier.xlsx')}"
+                # AJOUTÉ (27/08/2026) — demande Rami : une nouvelle
+                # génération de fichier doit repartir sur un état
+                # d'intégration BC neuf — sinon un ancien message
+                # d'erreur ("BC a rejeté l'import...") d'un test
+                # précédent restait affiché malgré un fichier régénéré
+                # entre-temps, laissant croire que le nouveau fichier
+                # posait le même problème.
+                st.session_state[f"bc_integration_{sn}"] = {"stage": "idle"}
+                st.success(f"✅ Fichier généré — {len(corrections)} correction(s) appliquée(s).")
+            except Exception as e:
+                st.error(f"❌ Erreur lors de la génération : {e}")
+
+    if st.session_state.get("generated_file_bytes"):
+        with cgen2:
+            st.download_button(
+                "⬇️ Télécharger le fichier corrigé",
+                data=st.session_state["generated_file_bytes"],
+                file_name=st.session_state.get("generated_file_name", "fichier_corrige.xlsx"),
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="dl_generated_file",
+                use_container_width=True,
+            )
+
+        # AJOUTÉ (27/08/2026) — demande Rami, point 2 des chantiers
+        # post-démo : intégration directe du fichier corrigé dans BC,
+        # pour que le client puisse le faire sans dépendre du
+        # consultant. Réutilise run_bc_import_check (créer le package
+        # si besoin, déposer le fichier CORRIGÉ, importer sans écrire —
+        # "Valider"). L'étape "Appliquer" (écriture réelle, irréversible
+        # côté BC) est volontairement séparée et exige une confirmation
+        # explicite avant de se déclencher.
+        st.markdown("---")
+        st.markdown('<div class="step-header">🚀 Intégrer directement dans BC</div>', unsafe_allow_html=True)
+
+        _integ_key = f"bc_integration_{sn}"
+        if _integ_key not in st.session_state:
+            st.session_state[_integ_key] = {"stage": "idle"}
+        _integ = st.session_state[_integ_key]
+
+        if _integ["stage"] in ("idle", "imported"):
+            _integ_btn_col1, _ = st.columns([1, 3])
+            with _integ_btn_col1:
+                _btn1_clicked = st.button("1️⃣ Vérifier avant intégration", key=f"btn_integ_check_{sn}", use_container_width=True)
+            if _btn1_clicked:
+                # AJOUTÉ (27/08/2026) — diagnostic réel : inspecte le
+                # contenu binaire du fichier RÉELLEMENT envoyé à BC,
+                # entrée par entrée, pour savoir avec certitude si le
+                # fix ZIP_DEFLATED est bien effectif sur CE fichier
+                # précis — au lieu de deviner encore si c'est un fichier
+                # périmé en mémoire ou un vrai bug résiduel.
+                if is_consultant():
+                    try:
+                        import zipfile as _zf_diag, io as _io_diag
+                        _diag_zip = _zf_diag.ZipFile(_io_diag.BytesIO(st.session_state["generated_file_bytes"]))
+                        _non_standard = [
+                            f"{info.filename} (méthode {info.compress_type})"
+                            for info in _diag_zip.infolist()
+                            if info.compress_type != _zf_diag.ZIP_DEFLATED and info.compress_type != _zf_diag.ZIP_STORED
+                        ]
+                        with st.expander("🔬 Diagnostic compression fichier (consultant)", expanded=bool(_non_standard)):
+                            st.caption(f"{len(_diag_zip.infolist())} entrée(s) au total dans le fichier envoyé.")
+                            if _non_standard:
+                                st.error("Entrée(s) avec une méthode de compression NON standard :")
+                                for _ns in _non_standard:
+                                    st.code(_ns)
+                            else:
+                                st.success("Toutes les entrées sont en DEFLATE (8) ou STORED (0) — standard, aucune anomalie de compression détectée sur ce fichier.")
+                    except Exception as _diag_zip_e:
+                        st.warning(f"Diagnostic compression impossible : {_diag_zip_e}")
+
+                with st.spinner("Vérification BC en cours..."):
+                    try:
+                        _p = get_profile_by_code(cfg.get("client_code", ""))
+                        _tid = (_p.get("bc_tenant_id") or "").strip()
+                        _cid = (_p.get("bc_client_id") or "").strip()
+                        _cs  = (_p.get("bc_client_secret") or "").strip()
+                        _env = (_p.get("bc_environment") or "").strip()
+                        if not all([_tid, _cid, _cs, _env, cfg.get("company_id")]):
+                            st.session_state[_integ_key] = {"stage": "idle", "error": "Credentials BC incomplets pour ce profil."}
+                        else:
+                            _tok = get_access_token(_tid, _cid, _cs)
+                            # RÉVISÉ (27/08/2026) — bug réel signalé par Rami :
+                            # créait TOUJOURS un nouveau package vide dans BC,
+                            # même quand la session partait déjà d'un package
+                            # BC EXISTANT (choisi à l'Étape 1) — logiquement
+                            # incohérent, et le package vide généré n'avait
+                            # aucune table configurée. Réutilise maintenant le
+                            # code package de la session si disponible ; ne
+                            # génère un nouveau code que si la session n'a
+                            # vraiment aucun package associé (futur mode
+                            # "session sans package" — pas encore construit).
+                            _pkg_code_integ = cfg.get("pkg_code") or f"QC-{cfg.get('session_name', 'temp')}"[:20]
+                            _res = run_bc_import_check(
+                                _tid, _env, cfg["company_id"], _tok,
+                                _pkg_code_integ, f"Intégration QC — {cfg.get('session_name', '')}",
+                                st.session_state["generated_file_bytes"],
+                            )
+                            if _res.get("success"):
+                                st.session_state[_integ_key] = {
+                                    "stage": "imported",
+                                    "package_id": _res["package_id"],
+                                    "package_code": _pkg_code_integ,
+                                    "status": _res.get("status"),
+                                    "creds": (_tid, _env, cfg["company_id"], _tok),
+                                    # AJOUTÉ (27/08/2026) — nouveau diagnostic :
+                                    # ce que BC a réellement stocké après le
+                                    # dépôt, comparé octet pour octet à ce
+                                    # qu'on lui a envoyé.
+                                    "upload_readback": _res.get("upload_readback", ""),
+                                }
+                                # AJOUTÉ (27/08/2026) — demande Rami : un
+                                # indicateur clair de fin de vérification —
+                                # le sondage BC peut prendre jusqu'à 20s,
+                                # un simple retour de spinner ne suffisait
+                                # pas à signaler "c'est fini".
+                                st.toast("✅ Vérification BC terminée.")
+                            else:
+                                st.session_state[_integ_key] = {"stage": "idle", "error": _res.get("error", "")}
+                                st.toast("⚠️ Vérification BC terminée — erreur détectée.")
+                    except Exception as _integ_exc:
+                        st.session_state[_integ_key] = {"stage": "idle", "error": f"{type(_integ_exc).__name__} : {_integ_exc}"}
+                        st.toast("⚠️ Vérification BC terminée — erreur technique.")
+
+        _integ = st.session_state[_integ_key]
+        if _integ.get("error"):
+            st.markdown(f'<div class="card-major">🔴 {_integ["error"]}</div>', unsafe_allow_html=True)
+
+        if _integ["stage"] == "imported":
+            _integ_status = _integ.get("status") or {}
+            _nb_err_integ = _integ_status.get("numberOfErrors", "?")
+            # RÉVISÉ (31/08/2026) — bug réel trouvé : depuis le passage
+            # au nouvel endpoint AL custom (qui appelle ImportExcel
+            # directement, contournant l'action standard Microsoft.NAV.
+            # import), les champs "importStatus"/"importError" du
+            # package ne sont PLUS jamais mis à jour par notre import —
+            # ce sont des champs propres au mécanisme standard qu'on
+            # ne déclenche plus. Résultat : l'écran affichait un vieux
+            # statut "Error" figé depuis les tout premiers essais
+            # (avant tous ces fixes), jamais nettoyé depuis. Repose
+            # maintenant uniquement sur "numberOfErrors", recalculé à
+            # chaque lecture à partir des vraies données du package,
+            # peu importe le mécanisme d'import utilisé.
+            if _nb_err_integ == 0:
+                st.markdown('<div class="card-ref">✅ 0 erreur — le fichier peut être appliqué dans BC.</div>', unsafe_allow_html=True)
+                st.warning("⚠️ L'étape suivante écrit réellement les données dans Business Central — action irréversible.")
+                _confirm = st.checkbox("Je confirme vouloir intégrer ces données dans Business Central", key=f"confirm_apply_{sn}")
+                _btn2_clicked = False
+                if _confirm:
+                    _integ_btn_col2, _ = st.columns([1, 3])
+                    with _integ_btn_col2:
+                        _btn2_clicked = st.button("2️⃣ Appliquer dans BC", type="primary", key=f"btn_integ_apply_{sn}", use_container_width=True)
+                if _btn2_clicked:
+                    with st.spinner("Intégration dans BC en cours..."):
+                        try:
+                            _tid, _env, _company_id, _tok = _integ["creds"]
+                            apply_configuration_package(_tid, _env, _company_id, _tok, _integ["package_id"])
+
+                            # AJOUTÉ (27/08/2026) — après une intégration réussie :
+                            # marque automatiquement la session comme "Terminée"
+                            # (confirmé par Rami) et met à jour la mémoire
+                            # inter-sessions pour la table concernée si c'est
+                            # une session fille (même règle que la sauvegarde
+                            # complète — voir plus bas dans ce fichier).
+                            _sid = st.session_state.get("resumed_session_id") or st.session_state.get("saved_session_id")
+                            if _sid:
+                                try:
+                                    update_session(_sid, {"status": "Terminée"})
+                                except Exception:
+                                    pass
+                            _tid_mem = cfg.get("table_id")
+                            if _tid_mem:
+                                try:
+                                    from app.core.bc_excel_processor import extract_key_values_by_table
+                                    from app.db.metadata_db import save_pending_codes
+                                    _codes_all = extract_key_values_by_table(st.session_state["generated_file_bytes"])
+                                    _codes_scoped = {k: v for k, v in _codes_all.items() if k == _tid_mem}
+                                    if _codes_scoped and _sid:
+                                        save_pending_codes(
+                                            session_id=_sid, profile_code=cfg.get("client_code", ""),
+                                            company_id=cfg.get("company_id", ""), codes_by_table=_codes_scoped,
+                                        )
+                                except Exception:
+                                    pass
+
+                            st.session_state[_integ_key] = {"stage": "applied"}
+                            st.success("✅ Données intégrées dans Business Central avec succès. Session marquée « Terminée ».")
+                        except Exception as _apply_exc:
+                            st.error(f"❌ Échec de l'intégration : {_apply_exc}")
+            else:
+                st.markdown(
+                    f'<div class="card-major">🔴 {_nb_err_integ} erreur(s) détectée(s) par BC sur le fichier corrigé — '
+                    f'corrige-les avant de pouvoir intégrer.</div>',
+                    unsafe_allow_html=True,
+                )
+
+        if _integ["stage"] == "applied":
+            st.markdown('<div class="card-ref">✅ Intégration terminée.</div>', unsafe_allow_html=True)
 
     if info_anomalies:
         st.markdown("---")
