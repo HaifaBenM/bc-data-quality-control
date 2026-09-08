@@ -174,7 +174,7 @@ def _replace_cell_in_row(row_xml: str, cell_ref: str, new_value: str) -> str:
     return row_xml[:m.start()] + new_cell + row_xml[m.end():]
 
 
-def apply_corrections(original_bytes: bytes, corrections: list[dict]) -> bytes:
+def apply_corrections(original_bytes: bytes, corrections: list[dict], return_diagnostics: bool = False):
     """
     corrections : [{"sheet": str, "excel_row": int, "column_name": str, "new_value": str}, ...]
 
@@ -183,6 +183,16 @@ def apply_corrections(original_bytes: bytes, corrections: list[dict]) -> bytes:
     mise en forme, lignes non touchées) reste identique, octet pour octet.
     Les autres parties du zip (dont xmlMaps.xml, customXml/*) sont recopiées
     à l'identique.
+
+    RÉVISÉ (01/09/2026) — demande Rami : deux points silencieux trouvés
+    (colonne introuvable dans l'en-tête réel du fichier, ligne introuvable)
+    — une correction pouvait être ignorée sans que rien ne le signale,
+    donnant l'impression trompeuse que "rien ne s'est passé" après
+    "Appliquer et réanalyser". return_diagnostics=True fait retourner
+    (bytes, diagnostics) au lieu de bytes seul — diagnostics =
+    {"applied": int, "skipped": [{"sheet","excel_row","column_name","reason"}]}.
+    Défaut à False pour ne rien changer aux appelants existants (ex.
+    "Générer le fichier corrigé", qui n'a pas besoin de ce détail).
     """
     src    = zipfile.ZipFile(io.BytesIO(original_bytes), "r")
     shared = _shared_strings(src)
@@ -192,10 +202,14 @@ def apply_corrections(original_bytes: bytes, corrections: list[dict]) -> bytes:
         by_sheet.setdefault(corr["sheet"], []).append(corr)
 
     modified_bytes: dict[str, bytes] = {}
+    _diag_applied = 0
+    _diag_skipped: list[dict] = []
 
     for sheet_name, corr_list in by_sheet.items():
         sheet_path = _sheet_xml_path(src, sheet_name)
         if not sheet_path or sheet_path not in src.namelist():
+            for corr in corr_list:
+                _diag_skipped.append({**corr, "reason": f"Onglet '{sheet_name}' introuvable dans le fichier."})
             continue
 
         raw_bytes = src.read(sheet_path)
@@ -208,17 +222,20 @@ def apply_corrections(original_bytes: bytes, corrections: list[dict]) -> bytes:
         for corr in corr_list:
             col_letter = header_map.get(corr["column_name"])
             if not col_letter:
+                _diag_skipped.append({**corr, "reason": f"Colonne '{corr['column_name']}' introuvable dans l'en-tête réel de l'onglet."})
                 continue
 
             cell_ref = f"{col_letter}{corr['excel_row']}"
             span = _find_row_span(xml_text, corr["excel_row"])
             if not span:
+                _diag_skipped.append({**corr, "reason": f"Ligne {corr['excel_row']} introuvable dans l'onglet."})
                 continue
 
             start, end  = span
             row_xml     = xml_text[start:end]
             new_row_xml = _replace_cell_in_row(row_xml, cell_ref, str(corr["new_value"]))
             xml_text    = xml_text[:start] + new_row_xml + xml_text[end:]
+            _diag_applied += 1
 
         modified_bytes[sheet_path] = xml_text.encode("utf-8")
 
@@ -252,7 +269,10 @@ def apply_corrections(original_bytes: bytes, corrections: list[dict]) -> bytes:
             dst.writestr(item, data)
 
     src.close()
-    return out_buf.getvalue()
+    _result_bytes = out_buf.getvalue()
+    if return_diagnostics:
+        return _result_bytes, {"applied": _diag_applied, "skipped": _diag_skipped}
+    return _result_bytes
 
 
 _ID_COLUMN_PREFIX = "ID "  # colonnes de résolution interne BC (SystemId) — non portables entre sociétés

@@ -1005,7 +1005,7 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
                 else:
                     try:
                         with st.spinner("Application des corrections..."):
-                            _new_working_bytes = apply_corrections(_working_bytes, _corrections_ra)
+                            _new_working_bytes, _apply_diag = apply_corrections(_working_bytes, _corrections_ra, return_diagnostics=True)
                         # Ré-emballe les octets bruts dans un objet compatible
                         # avec parse_uploaded_file (attend un fichier uploadé,
                         # pas des bytes nus — voir file_parser.py).
@@ -1028,9 +1028,20 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
                             st.session_state.config["major"] = sum(1 for a in _real_ra if a.get("Sévérité") == "Majeure")
                             st.session_state.config["minor"] = sum(1 for a in _real_ra if a.get("Sévérité") == "Mineure")
                             st.session_state.config["lines"] = _new_axe_a.get("lines_analyzed", 0)
+                            # RÉVISÉ (01/09/2026) — demande Rami : rendre visible
+                            # combien de corrections ont RÉELLEMENT été
+                            # appliquées (vs. ignorées silencieusement avant ce
+                            # fix — colonne/ligne introuvable dans le fichier
+                            # réel) — sans ça, impossible de savoir si le
+                            # compteur qui ne bouge pas vient d'une correction
+                            # qui n'a jamais pris, ou d'autre chose.
+                            _msg = f"✅ {_apply_diag['applied']}/{len(_corrections_ra)} correction(s) réellement appliquée(s) — {len(_real_ra)} anomalie(s) restante(s)."
+                            if _apply_diag["skipped"]:
+                                _first_skip = _apply_diag["skipped"][0]
+                                _msg += f" ⚠️ {len(_apply_diag['skipped'])} ignorée(s), ex. : {_first_skip['reason']}"
                             st.session_state[f"_reanalyze_feedback_{sn}"] = (
-                                "success",
-                                f"✅ {len(_corrections_ra)} correction(s) appliquée(s) — {len(_real_ra)} anomalie(s) restante(s)."
+                                "success" if not _apply_diag["skipped"] else "info",
+                                _msg,
                             )
                             st.rerun()
                     except Exception as _ra_exc:
