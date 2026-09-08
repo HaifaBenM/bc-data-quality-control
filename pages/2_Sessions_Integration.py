@@ -449,7 +449,7 @@ def _filter_resolved_prereqs(all_anomalies: list, resolved_by_table: dict | None
     return kept, resolved_count
 
 
-def run_quality_analysis(pr: dict, cfg: dict, early_cache: dict | None = None) -> tuple[dict, dict, dict]:
+def run_quality_analysis(pr: dict, cfg: dict, early_cache: dict | None = None, include_ai: bool = True) -> tuple[dict, dict, dict]:
     """
     AJOUTÉ (01/09/2026) — demande Rami : cycle complet "corriger un lot →
     réanalyser → voir le compteur baisser", pour travailler par type
@@ -498,13 +498,32 @@ def run_quality_analysis(pr: dict, cfg: dict, early_cache: dict | None = None) -
             )
 
     axe_c = {"available": False, "total_suggestions": 0, "auto_corrected": 0, "by_sheet": {}}
-    if api_key:
+    # RÉVISÉ (01/09/2026) — demande Rami : ne plus jamais relancer l'IA
+    # (consomme le quota Gemini pour rien) à chaque cycle "Appliquer et
+    # réanalyser" — uniquement au premier lancement ("Lancer l'analyse
+    # qualité"). Les anomalies déjà trouvées par l'IA lors de ce premier
+    # lancement restent visibles (elles font partie de `merged`, recalculé
+    # normalement par Axe A/B à chaque réanalyse) ; seules de NOUVELLES
+    # suggestions IA ne sont plus recherchées entre chaque lot corrigé.
+    if api_key and include_ai:
         with st.spinner("🤖 Suggestions IA en cours..."):
             axe_c = validate_file_axe_c(axe_a, axe_b, pr, api_key=api_key)
 
     merged = merge_results(axe_a, axe_b, axe_c, parse_result=pr)
 
-    if api_key:
+    # AJOUTÉ (01/09/2026) — réinjecte les suggestions IA du tout premier
+    # lancement à chaque réanalyse (include_ai=False), sans jamais
+    # rappeler l'IA — demande explicite de Rami : les garder visibles
+    # plutôt que les voir disparaître dès la première correction.
+    if not include_ai:
+        _cached_coherence = st.session_state.get("_cached_coherence_by_sheet") or {}
+        for _sn, _coh_anomalies in _cached_coherence.items():
+            if not _coh_anomalies:
+                continue
+            merged["all_anomalies"].extend(_coh_anomalies)
+            merged["by_sheet"].setdefault(_sn, []).extend(_coh_anomalies)
+
+    if api_key and include_ai:
         try:
             from app.core.coherence_detector import get_eligible_fields, detect_rare_pairs
             _diag_lines = []
@@ -533,6 +552,16 @@ def run_quality_analysis(pr: dict, cfg: dict, early_cache: dict | None = None) -
                     continue
                 merged["all_anomalies"].extend(_coh_anomalies)
                 merged["by_sheet"].setdefault(_sn, []).extend(_coh_anomalies)
+
+            # AJOUTÉ (01/09/2026) — demande Rami : les suggestions IA
+            # trouvées ici (premier lancement uniquement) doivent survivre
+            # aux réanalyses suivantes, où l'IA n'est plus rappelée —
+            # sauvegardées telles quelles, réinjectées sans modification à
+            # chaque cycle "Appliquer et réanalyser" (voir plus bas,
+            # bloc `else`). Choix assumé de Rami : pas de revérification
+            # de leur pertinence après correction, juste une persistance
+            # simple.
+            st.session_state["_cached_coherence_by_sheet"] = _coherence.get("by_sheet", {})
 
             from app.core.validator_axe_c import LAST_GEMINI_ERROR
             _diag_lines.append(f"Total incohérences détectées par l'IA : {_coherence.get('total_flagged', 0)}")
@@ -988,7 +1017,7 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
                         if not _new_pr.get("success"):
                             st.error("❌ Le fichier de travail n'est plus lisible après correction — " + "; ".join(_new_pr.get("errors", [])))
                         else:
-                            _new_merged, _new_axe_c, _new_axe_a = run_quality_analysis(_new_pr, cfg, early_cache=None)
+                            _new_merged, _new_axe_c, _new_axe_a = run_quality_analysis(_new_pr, cfg, early_cache=None, include_ai=False)
                             st.session_state["working_file_bytes"] = _new_working_bytes
                             st.session_state.parse_result  = _new_pr
                             st.session_state.merged_result = _new_merged
