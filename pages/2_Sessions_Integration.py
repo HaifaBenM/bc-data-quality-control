@@ -384,9 +384,16 @@ def merge_results(axe_a: dict, axe_b: dict, axe_c: dict, parse_result: dict = No
                     clean["explication_ia"] = ia["explication"]
                     clean["auto_corrige"]   = ia["auto"]
                     if ia["auto"]:
-                        clean["Correction suggérée"] = f"⚡ {ia['suggestion']}"
+                        # RÉVISÉ (01/09/2026) — bug réel signalé par Rami :
+                        # l'icône "⚡" (à l'origine décorative, pour l'ancien
+                        # affichage "Correction suggérée" retiré depuis)
+                        # se retrouvait insérée DANS la valeur elle-même,
+                        # qui sert aussi à préremplir "Nouvelle valeur" —
+                        # un champ censé rester une valeur propre, éditable
+                        # telle quelle. Valeur nettoyée, sans icône.
+                        clean["Correction suggérée"] = ia["suggestion"]
                     elif not clean.get("Correction suggérée"):
-                        clean["Correction suggérée"] = f"🤖 {ia['suggestion']} ({ia['confiance']}%)"
+                        clean["Correction suggérée"] = ia["suggestion"]
                 sheet_anomalies.append(clean)
         merged["by_sheet"][sn]      = sheet_anomalies
         merged["all_anomalies"].extend(sheet_anomalies)
