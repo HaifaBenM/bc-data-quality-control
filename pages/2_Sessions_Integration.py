@@ -31,6 +31,7 @@ from app.db.profiles_db import get_profile_by_code
 from app.core.bc_api import (
     get_access_token, get_companies, get_packages_qc, get_gl_account_fields_live,
     diagnose_standard_api_account, run_bc_import_check, apply_configuration_package,
+    create_configuration_package,
 )
 from app.db.sessions_db import (
     save_session, update_session, delete_session,
@@ -1576,7 +1577,22 @@ with tab_main:
             sel_pkg_code = active_pkg_code
             sel_pkg_name = active_pkg_name
 
+            # AJOUTÉ (01/09/2026) — chantier 6 post-démo : session sans
+            # package BC pré-créé. Si coché, l'outil créera lui-même un
+            # package (via l'API déjà construite pour le point 2) au
+            # moment de l'analyse — le reste du flux (Axe B, roadmap,
+            # mémoire inter-sessions) fonctionne alors à l'identique, sans
+            # que le client ait besoin de créer quoi que ce soit dans BC
+            # en amont.
+            _no_package_mode = False
             if not active_pkg_code and sel_company_id:
+                _no_package_mode = st.checkbox(
+                    "Je n'ai pas de package BC — l'outil en créera un automatiquement",
+                    key="ses_no_package_mode",
+                    help="Le nom de la session sera alors basé sur le nom du fichier déposé plutôt que sur un nom de package.",
+                )
+
+            if not active_pkg_code and sel_company_id and not _no_package_mode:
                 st.markdown("**📦 Package BC**")
                 _pkgs_available = _load_pkgs_ses(active_client, sel_company_id, not is_consultant())
                 if _pkgs_available:
@@ -1675,9 +1691,14 @@ with tab_main:
                 st.rerun()
         with col_btn:
             if st.button("Suivant →", type="primary", use_container_width=True):
-                if not session_name.strip():
+                # RÉVISÉ (01/09/2026) — chantier 6 : en mode "sans package",
+                # ni le nom de session ni un package ne sont exigés à ce
+                # stade — le nom de session sera dérivé du fichier déposé
+                # à l'Étape 2, et le package sera créé automatiquement au
+                # moment de l'analyse.
+                if not _no_package_mode and not session_name.strip():
                     st.error("Nom de session obligatoire.")
-                elif not sel_pkg_code:
+                elif not _no_package_mode and not sel_pkg_code:
                     st.error("Sélectionnez un package.")
                 else:
                     st.session_state.config = {
@@ -1691,6 +1712,7 @@ with tab_main:
                         "file_name":    "",
                         "company_id":   sel_company_id,
                         "company_name": sel_company_name,
+                        "no_package_mode": _no_package_mode,
                     }
                     st.session_state.step = 2
                     st.rerun()
@@ -1699,11 +1721,21 @@ with tab_main:
     elif st.session_state.step == 2:
         cfg = st.session_state.config
         st.markdown('<div class="step-header">Étape 2 — Upload du fichier client</div>', unsafe_allow_html=True)
-        st.caption(f"Session : **{cfg['session_name']}** · Client : **{cfg['client_name']}**")
+        # RÉVISÉ (01/09/2026) — chantier 6 : en mode "sans package", le nom
+        # de session n'est pas encore connu à ce stade (dérivé du fichier
+        # une fois déposé, voir plus bas) — affichage adapté en attendant.
+        _session_name_display = cfg.get("session_name") or "(nom dérivé du fichier une fois déposé)"
+        st.caption(f"Session : **{_session_name_display}** · Client : **{cfg['client_name']}**")
         st.info("Format : export **Package de Configuration BC** (.xlsx)")
         uploaded = st.file_uploader("Glissez-déposez ou cliquez", type=["xlsx", "xls"], key="upl_s")
         if uploaded:
             st.session_state.config["file_name"] = uploaded.name
+            # AJOUTÉ (01/09/2026) — chantier 6 : mode "sans package", nom de
+            # session dérivé du nom du fichier déposé (demande explicite de
+            # Rami), puisqu'il n'y a pas de nom de package à utiliser.
+            if cfg.get("no_package_mode") and not cfg.get("session_name", "").strip():
+                _base_name = uploaded.name.rsplit(".", 1)[0]
+                st.session_state.config["session_name"] = f"{_base_name} — {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}"
             # Conservé en mémoire (pas encore en base) pour la génération du
             # fichier corrigé à l'étape 4 — édition XML directe sur les
             # octets d'origine, cf. correction_generator.py.
@@ -1725,6 +1757,38 @@ with tab_main:
                         reset_session()
                         st.rerun()
             else:
+                # AJOUTÉ (01/09/2026) — chantier 6 : mode "sans package",
+                # crée réellement le package dans BC maintenant (avant
+                # d'aller plus loin) — réutilise l'infrastructure déjà
+                # construite pour le point 2 (create_configuration_package).
+                # Une fois créé, le reste du flux (Axe B, roadmap) fonctionne
+                # exactement comme si un package existait depuis le début.
+                if cfg.get("no_package_mode") and not cfg.get("pkg_code", "").strip():
+                    with st.spinner("Création du package dans BC..."):
+                        try:
+                            _p_auto = get_profile_by_code(cfg.get("client_code", ""))
+                            _tid_auto = (_p_auto.get("bc_tenant_id") or "").strip()
+                            _cid_auto = (_p_auto.get("bc_client_id") or "").strip()
+                            _cs_auto  = (_p_auto.get("bc_client_secret") or "").strip()
+                            _env_auto = (_p_auto.get("bc_environment") or "Production").strip()
+                            if not all([_tid_auto, _cid_auto, _cs_auto, _env_auto, cfg.get("company_id")]):
+                                st.error("❌ Credentials BC incomplets pour ce profil — impossible de créer le package automatiquement.")
+                                st.stop()
+                            _tok_auto = get_access_token(_tid_auto, _cid_auto, _cs_auto)
+                            _auto_pkg_code = f"QC-{cfg['session_name']}"[:20]
+                            _auto_pkg_name = cfg["session_name"][:50]
+                            _created_pkg = create_configuration_package(
+                                _tid_auto, _env_auto, cfg["company_id"], _tok_auto,
+                                _auto_pkg_code, _auto_pkg_name,
+                            )
+                            st.session_state.config["pkg_code"] = _created_pkg.get("code", _auto_pkg_code)
+                            st.session_state.config["pkg_name"] = _auto_pkg_name
+                            cfg = st.session_state.config
+                            st.success(f"✅ Package **{cfg['pkg_code']}** créé automatiquement dans BC.")
+                        except Exception as _auto_pkg_exc:
+                            st.error(f"❌ Échec de la création automatique du package : {_auto_pkg_exc}")
+                            st.stop()
+
                 s = get_file_summary(pr)
                 st.success(f"✅ **{uploaded.name}**")
                 c1, c2, c3 = st.columns(3)
