@@ -635,6 +635,14 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
     info = [a for a in all_anomalies if a.get("Ligne", 0) == 0]
 
     if not real and not info:
+        # RÉVISÉ (01/09/2026, 2e passe) — MÊME BUG que celui déjà corrigé
+        # plus bas dans cette fonction (voir "_no_anomalies") : ce
+        # deuxième point de sortie anticipée, plus tôt dans la fonction,
+        # avait été manqué au premier passage. Ne retourne plus — laisse
+        # le code continuer jusqu'à Générer/Télécharger/Intégrer, qui
+        # doivent rester accessibles même quand il n'y a plus aucune
+        # anomalie (le cas normal en fin de cycle "Appliquer et
+        # réanalyser").
         if _resolved_count:
             st.success(
                 f"🎉 **Aucune anomalie active !** ({_resolved_count} prérequis BC "
@@ -643,7 +651,6 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
         else:
             st.success("🎉 **Aucune anomalie détectée !** Les données sont conformes.")
         st.session_state["prerequisites_report"] = []
-        return
 
     if _resolved_count:
         st.caption(
@@ -982,7 +989,7 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
             # baisser, changer de filtre, recommencer, jusqu'à 0 anomalie.
             # Distinct de "Générer le fichier corrigé" (l'étape FINALE) : celui-
             # ci s'utilise autant de fois que nécessaire pendant le travail.
-            _reanalyze_col, _ = st.columns([2, 3])
+            _reanalyze_col, _ = st.columns([1, 3])
             with _reanalyze_col:
                 reanalyze_clicked = st.button(
                     "🔄 Appliquer ce lot et réanalyser", use_container_width=True, key=f"reanalyze_{sn}",
