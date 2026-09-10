@@ -1775,16 +1775,53 @@ with tab_main:
                                 st.error("❌ Credentials BC incomplets pour ce profil — impossible de créer le package automatiquement.")
                                 st.stop()
                             _tok_auto = get_access_token(_tid_auto, _cid_auto, _cs_auto)
-                            _auto_pkg_code = f"QC-{cfg['session_name']}"[:20]
-                            _auto_pkg_name = cfg["session_name"][:50]
-                            _created_pkg = create_configuration_package(
-                                _tid_auto, _env_auto, cfg["company_id"], _tok_auto,
-                                _auto_pkg_code, _auto_pkg_name,
+                            # RÉVISÉ (01/09/2026) — bug réel découvert :
+                            # ImportExcel (côté AL) cible le package d'après
+                            # le code EMBARQUÉ en A1 de chaque onglet du
+                            # fichier — jamais celui qu'on lui passe en
+                            # paramètre. Créer un code arbitraire ("QC-...")
+                            # aurait laissé ImportExcel cibler silencieusement
+                            # le VRAI package dont le code est dans le
+                            # fichier (potentiellement un autre, déjà rempli
+                            # de vraies données — cause du blocage
+                            # "Application_CallbackNotAllowed" rencontré).
+                            # Le package auto-créé doit donc porter EXACTEMENT
+                            # ce même code, extrait ici directement du fichier
+                            # déposé.
+                            from app.core.bc_excel_processor import extract_sheets_info
+                            _sheets_info_auto = extract_sheets_info(uploaded.getvalue())
+                            _embedded_pkg_code = next(
+                                (s["pkg_code"] for s in _sheets_info_auto if s.get("pkg_code")), ""
                             )
-                            st.session_state.config["pkg_code"] = _created_pkg.get("code", _auto_pkg_code)
-                            st.session_state.config["pkg_name"] = _auto_pkg_name
-                            cfg = st.session_state.config
-                            st.success(f"✅ Package **{cfg['pkg_code']}** créé automatiquement dans BC.")
+                            if not _embedded_pkg_code:
+                                st.error("❌ Impossible de trouver le code package embarqué dans le fichier (cellule A1) — le fichier est-il bien un export Config. Package BC ?")
+                                st.stop()
+                            _auto_pkg_code = _embedded_pkg_code[:20]
+                            _auto_pkg_name = cfg["session_name"][:50]
+                            # AJOUTÉ (01/09/2026) — le code embarqué est
+                            # souvent réutilisé d'un test précédent (très
+                            # probable puisqu'il vient du fichier lui-même,
+                            # pas généré à la volée) — vérifie d'abord s'il
+                            # existe déjà dans BC, le réutilise si oui plutôt
+                            # que d'échouer sur un conflit de création.
+                            from app.core.bc_api import get_configuration_package_status
+                            _existing_pkg = get_configuration_package_status(
+                                _tid_auto, _env_auto, cfg["company_id"], _tok_auto, _auto_pkg_code,
+                            )
+                            if _existing_pkg:
+                                st.session_state.config["pkg_code"] = _existing_pkg.get("code", _auto_pkg_code)
+                                st.session_state.config["pkg_name"] = _existing_pkg.get("packageName", _auto_pkg_name)
+                                cfg = st.session_state.config
+                                st.success(f"✅ Package **{cfg['pkg_code']}** déjà existant dans BC — réutilisé (code repris du fichier).")
+                            else:
+                                _created_pkg = create_configuration_package(
+                                    _tid_auto, _env_auto, cfg["company_id"], _tok_auto,
+                                    _auto_pkg_code, _auto_pkg_name,
+                                )
+                                st.session_state.config["pkg_code"] = _created_pkg.get("code", _auto_pkg_code)
+                                st.session_state.config["pkg_name"] = _auto_pkg_name
+                                cfg = st.session_state.config
+                                st.success(f"✅ Package **{cfg['pkg_code']}** créé automatiquement dans BC (code repris du fichier).")
                         except Exception as _auto_pkg_exc:
                             st.error(f"❌ Échec de la création automatique du package : {_auto_pkg_exc}")
                             st.stop()

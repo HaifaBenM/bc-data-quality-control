@@ -99,6 +99,17 @@ def extract_sheets_info(excel_bytes: bytes) -> list[dict]:
             "sheet_name": ws.title,
             "table_id":   table_id,
             "table_name": table_name,
+            # AJOUTÉ (01/09/2026) — chantier 6 : le code package RÉEL est
+            # celui embarqué en A1 de chaque onglet (déjà lu ci-dessus,
+            # jamais conservé jusqu'ici). Découverte cette semaine :
+            # ImportExcel (côté AL) cible le package d'après CE code,
+            # jamais celui qu'on lui passe en paramètre — indispensable
+            # pour qu'un package auto-créé en mode "sans package" porte
+            # bien le MÊME code que celui attendu par le fichier, sinon
+            # l'import cible silencieusement un autre package (potentiellement
+            # déjà rempli de vraies données, avec le risque de confirmation
+            # d'écrasement qu'on a rencontré).
+            "pkg_code":   str(row1[0]) if row1[0] else "",
             "headers":    headers,
         })
     return sheets_info
