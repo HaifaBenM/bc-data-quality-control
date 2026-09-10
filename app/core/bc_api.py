@@ -1172,6 +1172,7 @@ def run_bc_import_check(
         result["package_id"] = package_id
         result["status"]     = status
         result["upload_readback"] = LAST_UPLOAD_READBACK
+        result["import_status_debug"] = _al_import.get("import_status_debug", "")
     except requests.HTTPError as e:
         result["error"] = f"Erreur BC API {e.response.status_code} : {e.response.text[:300]} [code={package_code!r} id={package_id!r}] [json_package={_pkg_raw_json!r}] [readback={LAST_UPLOAD_READBACK}]"
     except Exception as e:
@@ -1261,8 +1262,13 @@ def import_excel_via_al_endpoint(
         if not _get_resp.ok:
             return {"success": False, "error": f"Erreur BC API {_get_resp.status_code} (relecture résultat) : {_get_resp.text[:500]}"}
         data = _get_resp.json()
+        # AJOUTÉ (01/09/2026) — remonte le vrai statut d'import (tel que BC
+        # le voit après notre tentative de le fixer explicitement),
+        # visible directement dans l'outil, plus besoin d'aller vérifier
+        # manuellement dans l'interface BC à chaque test.
+        _import_status_debug = data.get("importStatusDebug", "")
         if not data.get("success"):
-            return {"success": False, "error": data.get("errorMessage") or "Échec sans message d'erreur fourni par AL."}
-        return {"success": True, "error": ""}
+            return {"success": False, "error": (data.get("errorMessage") or "Échec sans message d'erreur fourni par AL.") + f" [importStatusDebug={_import_status_debug!r}]"}
+        return {"success": True, "error": "", "import_status_debug": _import_status_debug}
     except Exception as e:
         return {"success": False, "error": f"{type(e).__name__} : {e}"}

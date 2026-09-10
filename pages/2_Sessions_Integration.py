@@ -1239,6 +1239,7 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
                                     # dépôt, comparé octet pour octet à ce
                                     # qu'on lui a envoyé.
                                     "upload_readback": _res.get("upload_readback", ""),
+                                    "import_status_debug": _res.get("import_status_debug", ""),
                                 }
                                 # AJOUTÉ (27/08/2026) — demande Rami : un
                                 # indicateur clair de fin de vérification —
@@ -1274,6 +1275,12 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
             # peu importe le mécanisme d'import utilisé.
             if _nb_err_integ == 0:
                 st.markdown('<div class="card-ref">✅ 0 erreur — le fichier peut être appliqué dans BC.</div>', unsafe_allow_html=True)
+                # AJOUTÉ (01/09/2026) — affiche systématiquement le vrai
+                # statut d'import tel que BC le voit, sans avoir besoin
+                # d'aller vérifier manuellement dans l'interface BC — visible
+                # AVANT même de cliquer sur "Appliquer", pour savoir à
+                # l'avance si ça a des chances de fonctionner.
+                st.caption(f"🔬 Statut import (diagnostic) : {_integ.get('import_status_debug', '(non disponible)')}")
                 st.warning("⚠️ L'étape suivante écrit réellement les données dans Business Central — action irréversible.")
                 _confirm = st.checkbox("Je confirme vouloir intégrer ces données dans Business Central", key=f"confirm_apply_{sn}")
                 _btn2_clicked = False
