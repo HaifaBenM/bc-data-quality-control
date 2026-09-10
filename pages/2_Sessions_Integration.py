@@ -947,10 +947,14 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
                 _new_overrides = dict(_propagate_overrides)
                 for _k, _vals in _by_key.items():
                     _most_common_val, _count = Counter(_vals).most_common(1)[0]
-                    # Ne propage que si au moins 2 lignes partagent déjà cette
-                    # valeur — sinon rien de significatif à "rendre cohérent"
-                    # (une seule ligne renseignée, pas de majorité à étendre).
-                    if _count >= 2:
+                    # RÉVISÉ (01/09/2026) — demande Rami : règle simplifiée,
+                    # plus intuitive — une seule ligne renseignée dans le
+                    # groupe suffit pour propager sa valeur aux autres
+                    # (au lieu d'exiger 2 lignes déjà d'accord). Clique sur
+                    # Propager étant déjà un geste volontaire de la part de
+                    # l'utilisateur, pas besoin d'une majorité pour
+                    # confirmer l'intention.
+                    if _count >= 1:
                         _new_overrides[_k] = _most_common_val
 
                 _propagated = 0
