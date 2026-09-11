@@ -526,26 +526,6 @@ def run_quality_analysis(pr: dict, cfg: dict, early_cache: dict | None = None, i
 
     if api_key and include_ai:
         try:
-            from app.core.coherence_detector import get_eligible_fields, detect_rare_pairs
-            _diag_lines = []
-            for _sn_diag in pr.get("data_tables", []):
-                _df_diag = pr.get("sheets", {}).get(_sn_diag)
-                _meta_diag = pr.get("metadata", {}).get(_sn_diag, {})
-                _tid_diag = _meta_diag.get("table_id", "")
-                if _df_diag is None or _df_diag.empty or not _tid_diag:
-                    continue
-                try:
-                    _elig = [f for f in get_eligible_fields(_exec_plan, int(_tid_diag)) if f in _df_diag.columns]
-                except (ValueError, TypeError):
-                    _elig = []
-                _cands = detect_rare_pairs(_df_diag, _elig, max_pair_ratio=0.12) if len(_elig) >= 2 else []
-                _diag_lines.append(
-                    f"{_sn_diag} (table {_tid_diag}) : {len(_elig)} champ(s) éligible(s) {_elig[:6]}, "
-                    f"{len(_cands)} candidat(s) avant IA"
-                )
-                for _c in _cands[:5]:
-                    _diag_lines.append(f"    -> {_c}")
-
             with st.spinner("🧠 Détection des incohérences en cours..."):
                 _coherence = validate_coherence_axe_c(pr, _exec_plan, api_key)
             for _sn, _coh_anomalies in _coherence.get("by_sheet", {}).items():
@@ -554,24 +534,14 @@ def run_quality_analysis(pr: dict, cfg: dict, early_cache: dict | None = None, i
                 merged["all_anomalies"].extend(_coh_anomalies)
                 merged["by_sheet"].setdefault(_sn, []).extend(_coh_anomalies)
 
-            # AJOUTÉ (01/09/2026) — demande Rami : les suggestions IA
-            # trouvées ici (premier lancement uniquement) doivent survivre
-            # aux réanalyses suivantes, où l'IA n'est plus rappelée —
-            # sauvegardées telles quelles, réinjectées sans modification à
-            # chaque cycle "Appliquer et réanalyser" (voir plus bas,
-            # bloc `else`). Choix assumé de Rami : pas de revérification
-            # de leur pertinence après correction, juste une persistance
-            # simple.
+            # Les suggestions IA trouvées ici (premier lancement uniquement)
+            # doivent survivre aux réanalyses suivantes, où l'IA n'est plus
+            # rappelée — sauvegardées telles quelles, réinjectées sans
+            # modification à chaque cycle "Appliquer et réanalyser" (voir
+            # plus bas, bloc `else`).
             st.session_state["_cached_coherence_by_sheet"] = _coherence.get("by_sheet", {})
-
-            from app.core.validator_axe_c import LAST_GEMINI_ERROR
-            _diag_lines.append(f"Total incohérences détectées par l'IA : {_coherence.get('total_flagged', 0)}")
-            _diag_lines.append(f"Dernière erreur Gemini (vide = aucune) : {LAST_GEMINI_ERROR or '(aucune)'}")
-            st.session_state["_ia_diag_text"]  = "\n".join(_diag_lines)
-            st.session_state["_ia_diag_error"] = LAST_GEMINI_ERROR
-        except Exception as _coh_exc:
-            st.session_state["_ia_diag_text"]  = f"Exception : {_coh_exc}"
-            st.session_state["_ia_diag_error"] = str(_coh_exc)
+        except Exception:
+            pass
 
     return merged, axe_c, axe_a
 
@@ -591,28 +561,6 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
     ⚠️ Le fichier généré n'a pas été validé par un import BC réel — à tester
     avant de le présenter comme "100% intégrable" en démo.
     """
-    # AJOUTÉ (27/08/2026, jour de la démo) — demande Rami : le diagnostic IA
-    # ne s'affichait que pendant l'exécution du clic "Lancer l'analyse
-    # qualité" et disparaissait au rerun suivant, impossible à copier à
-    # temps. Persisté en session_state (voir le bloc qui le calcule), lu et
-    # réaffiché ici en permanence — présent à chaque rendu de l'Étape 4,
-    # peu importe ce qui a déclenché le rerun. Message clair et présentable
-    # en plus du détail technique brut, spécifiquement quand le quota
-    # gratuit Gemini est épuisé (429 / RESOURCE_EXHAUSTED) — utile à
-    # montrer tel quel en démo plutôt qu'un message d'erreur brut.
-    _ia_err = st.session_state.get("_ia_diag_error", "")
-    if _ia_err and ("429" in _ia_err or "RESOURCE_EXHAUSTED" in _ia_err or "quota" in _ia_err.lower()):
-        st.warning(
-            "⚠️ **Quota gratuit de l'IA momentanément épuisé** — la détection "
-            "d'incohérences fonctionne normalement, mais le service Google "
-            "Gemini limite le nombre de requêtes gratuites par période. "
-            "Ce n'est pas un défaut de l'outil, juste une limite temporaire "
-            "du service tiers utilisé."
-        )
-    if st.session_state.get("_ia_diag_text") and is_consultant():
-        with st.expander("🔬 Diagnostic cohérence IA (clique l'icône en haut à droite du bloc pour copier)"):
-            st.code(st.session_state["_ia_diag_text"], language="text")
-
     all_anomalies = merged.get("all_anomalies", [])
 
     # AJOUTÉ (23/08/2026) ; RÉVISÉ (26/08/2026, règle globale hide_all_prereqs)
@@ -1187,31 +1135,6 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
         with _integ_btn_col1:
             _btn1_clicked = st.button("1️⃣ Vérifier avant intégration", key=f"btn_integ_check_{sn}", use_container_width=True)
         if _btn1_clicked:
-            # AJOUTÉ (27/08/2026) — diagnostic réel : inspecte le
-            # contenu binaire du fichier RÉELLEMENT envoyé à BC,
-            # entrée par entrée, pour savoir avec certitude si le
-            # fix ZIP_DEFLATED est bien effectif sur CE fichier
-            # précis — au lieu de deviner encore si c'est un fichier
-            # périmé en mémoire ou un vrai bug résiduel.
-            if is_consultant():
-                try:
-                    import zipfile as _zf_diag, io as _io_diag
-                    _diag_zip = _zf_diag.ZipFile(_io_diag.BytesIO(_integration_source_bytes))
-                    _non_standard = [
-                        f"{info.filename} (méthode {info.compress_type})"
-                        for info in _diag_zip.infolist()
-                        if info.compress_type != _zf_diag.ZIP_DEFLATED and info.compress_type != _zf_diag.ZIP_STORED
-                    ]
-                    with st.expander("🔬 Diagnostic compression fichier (consultant)", expanded=bool(_non_standard)):
-                        st.caption(f"{len(_diag_zip.infolist())} entrée(s) au total dans le fichier envoyé.")
-                        if _non_standard:
-                            st.error("Entrée(s) avec une méthode de compression NON standard :")
-                            for _ns in _non_standard:
-                                st.code(_ns)
-                        else:
-                            st.success("Toutes les entrées sont en DEFLATE (8) ou STORED (0) — standard, aucune anomalie de compression détectée sur ce fichier.")
-                except Exception as _diag_zip_e:
-                    st.warning(f"Diagnostic compression impossible : {_diag_zip_e}")
 
             with st.spinner("Vérification BC en cours..."):
                 try:
@@ -1247,12 +1170,6 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
                                 "package_code": _pkg_code_integ,
                                 "status": _res.get("status"),
                                 "creds": (_tid, _env, cfg["company_id"], _tok),
-                                # AJOUTÉ (27/08/2026) — nouveau diagnostic :
-                                # ce que BC a réellement stocké après le
-                                # dépôt, comparé octet pour octet à ce
-                                # qu'on lui a envoyé.
-                                "upload_readback": _res.get("upload_readback", ""),
-                                "import_status_debug": _res.get("import_status_debug", ""),
                             }
                             # AJOUTÉ (27/08/2026) — demande Rami : un
                             # indicateur clair de fin de vérification —
@@ -1288,12 +1205,6 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
         # peu importe le mécanisme d'import utilisé.
         if _nb_err_integ == 0:
             st.markdown('<div class="card-ref">✅ 0 erreur — le fichier peut être appliqué dans BC.</div>', unsafe_allow_html=True)
-            # AJOUTÉ (01/09/2026) — affiche systématiquement le vrai
-            # statut d'import tel que BC le voit, sans avoir besoin
-            # d'aller vérifier manuellement dans l'interface BC — visible
-            # AVANT même de cliquer sur "Appliquer", pour savoir à
-            # l'avance si ça a des chances de fonctionner.
-            st.caption(f"🔬 Statut import (diagnostic) : {_integ.get('import_status_debug', '(non disponible)')}")
             st.warning("⚠️ L'étape suivante écrit réellement les données dans Business Central — action irréversible.")
             _confirm = st.checkbox("Je confirme vouloir intégrer ces données dans Business Central", key=f"confirm_apply_{sn}")
             _btn2_clicked = False

@@ -14,12 +14,6 @@ import time
 import requests
 from urllib.parse import quote
 
-# AJOUTÉ (27/08/2026) — même principe que LAST_GEMINI_ERROR dans
-# validator_axe_c.py : diagnostic simple pour savoir si le contenu relu
-# après dépôt correspond bien à ce qui a été envoyé (voir
-# upload_configuration_package_file).
-LAST_UPLOAD_READBACK: str = ""
-
 
 # ── Authentification ──────────────────────────────────────────────────────────
 
@@ -969,33 +963,6 @@ def upload_configuration_package_file(
         raise Exception(f"Erreur BC API {resp.status_code} (dépôt fichier) : {resp.text[:500]}")
     resp.raise_for_status()
 
-    # AJOUTÉ (27/08/2026, 11e passe) — nouveau diagnostic demandé par Rami :
-    # au lieu de continuer à deviner sur les en-têtes de la requête, on
-    # relit directement ce que BC a RÉELLEMENT stocké juste après le dépôt,
-    # et on le compare octet pour octet à ce qu'on vient d'envoyer. Si ça
-    # diffère (taille différente, débuts différents), ça prouve que BC
-    # transforme/corrompt les données pendant le stockage lui-même — un
-    # angle qu'on n'a encore jamais vérifié directement.
-    try:
-        _readback = requests.get(url, headers=_headers(token), timeout=30)
-        if _readback.ok:
-            _stored = _readback.content
-            if _stored == file_bytes:
-                _readback_note = f"IDENTIQUE — {len(_stored)} octets, contenu relu correspond exactement à l'envoi."
-            else:
-                _readback_note = (
-                    f"DIFFÉRENT — envoyé {len(file_bytes)} octets (débute par {file_bytes[:8]!r}), "
-                    f"relu {len(_stored)} octets (débute par {_stored[:8]!r})"
-                )
-        else:
-            _readback_note = f"Relecture impossible : HTTP {_readback.status_code} — {_readback.text[:200]}"
-    except Exception as _rb_exc:
-        _readback_note = f"Relecture impossible : {_rb_exc}"
-    # Rendu disponible à l'appelant (run_bc_import_check) via une variable
-    # de module simple, même principe que LAST_GEMINI_ERROR dans
-    # validator_axe_c.py — pas de refactor de signature à ce stade.
-    global LAST_UPLOAD_READBACK
-    LAST_UPLOAD_READBACK = _readback_note
 
 
 def import_configuration_package(
@@ -1171,12 +1138,10 @@ def run_bc_import_check(
         result["success"]    = True
         result["package_id"] = package_id
         result["status"]     = status
-        result["upload_readback"] = LAST_UPLOAD_READBACK
-        result["import_status_debug"] = _al_import.get("import_status_debug", "")
     except requests.HTTPError as e:
-        result["error"] = f"Erreur BC API {e.response.status_code} : {e.response.text[:300]} [code={package_code!r} id={package_id!r}] [json_package={_pkg_raw_json!r}] [readback={LAST_UPLOAD_READBACK}]"
+        result["error"] = f"Erreur BC API {e.response.status_code} : {e.response.text[:300]}"
     except Exception as e:
-        result["error"] = f"{type(e).__name__} : {e} [code={package_code!r} id={package_id!r}] [json_package={_pkg_raw_json!r}] [readback={LAST_UPLOAD_READBACK}]"
+        result["error"] = f"{type(e).__name__} : {e}"
     return result
 
 
@@ -1262,13 +1227,8 @@ def import_excel_via_al_endpoint(
         if not _get_resp.ok:
             return {"success": False, "error": f"Erreur BC API {_get_resp.status_code} (relecture résultat) : {_get_resp.text[:500]}"}
         data = _get_resp.json()
-        # AJOUTÉ (01/09/2026) — remonte le vrai statut d'import (tel que BC
-        # le voit après notre tentative de le fixer explicitement),
-        # visible directement dans l'outil, plus besoin d'aller vérifier
-        # manuellement dans l'interface BC à chaque test.
-        _import_status_debug = data.get("importStatusDebug", "")
         if not data.get("success"):
-            return {"success": False, "error": (data.get("errorMessage") or "Échec sans message d'erreur fourni par AL.") + f" [importStatusDebug={_import_status_debug!r}]"}
-        return {"success": True, "error": "", "import_status_debug": _import_status_debug}
+            return {"success": False, "error": data.get("errorMessage") or "Échec sans message d'erreur fourni par AL."}
+        return {"success": True, "error": ""}
     except Exception as e:
         return {"success": False, "error": f"{type(e).__name__} : {e}"}
