@@ -1154,187 +1154,199 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
                 use_container_width=True,
             )
 
-        # AJOUTÉ (27/08/2026) — demande Rami, point 2 des chantiers
-        # post-démo : intégration directe du fichier corrigé dans BC,
-        # pour que le client puisse le faire sans dépendre du
-        # consultant. Réutilise run_bc_import_check (créer le package
-        # si besoin, déposer le fichier CORRIGÉ, importer sans écrire —
-        # "Valider"). L'étape "Appliquer" (écriture réelle, irréversible
-        # côté BC) est volontairement séparée et exige une confirmation
-        # explicite avant de se déclencher.
-        st.markdown("---")
-        st.markdown('<div class="step-header">🚀 Intégrer directement dans BC</div>', unsafe_allow_html=True)
+    # AJOUTÉ (27/08/2026) — demande Rami, point 2 des chantiers
+    # post-démo : intégration directe du fichier corrigé dans BC,
+    # pour que le client puisse le faire sans dépendre du
+    # consultant. Réutilise run_bc_import_check (créer le package
+    # si besoin, déposer le fichier CORRIGÉ, importer sans écrire —
+    # "Valider"). L'étape "Appliquer" (écriture réelle, irréversible
+    # côté BC) est volontairement séparée et exige une confirmation
+    # explicite avant de se déclencher.
+    # RÉVISÉ (01/09/2026) — demande Rami : cette section doit être
+    # TOUJOURS visible, même sans avoir cliqué "Générer le fichier
+    # corrigé" au préalable (ex. fichier sans aucune anomalie — inutile
+    # d'exiger une génération avant de pouvoir intégrer). Utilise le
+    # meilleur fichier disponible : le fichier généré explicitement s'il
+    # existe, sinon le fichier de travail (corrections déjà accumulées
+    # via "Appliquer et réanalyser"), sinon le fichier original tel quel.
+    _integration_source_bytes = (
+        st.session_state.get("generated_file_bytes")
+        or st.session_state.get("working_file_bytes")
+        or st.session_state.get("original_file_bytes")
+    )
+    st.markdown("---")
+    st.markdown('<div class="step-header">🚀 Intégrer directement dans BC</div>', unsafe_allow_html=True)
 
-        _integ_key = f"bc_integration_{sn}"
-        if _integ_key not in st.session_state:
-            st.session_state[_integ_key] = {"stage": "idle"}
-        _integ = st.session_state[_integ_key]
+    _integ_key = f"bc_integration_{sn}"
+    if _integ_key not in st.session_state:
+        st.session_state[_integ_key] = {"stage": "idle"}
+    _integ = st.session_state[_integ_key]
 
-        if _integ["stage"] in ("idle", "imported"):
-            _integ_btn_col1, _ = st.columns([1, 3])
-            with _integ_btn_col1:
-                _btn1_clicked = st.button("1️⃣ Vérifier avant intégration", key=f"btn_integ_check_{sn}", use_container_width=True)
-            if _btn1_clicked:
-                # AJOUTÉ (27/08/2026) — diagnostic réel : inspecte le
-                # contenu binaire du fichier RÉELLEMENT envoyé à BC,
-                # entrée par entrée, pour savoir avec certitude si le
-                # fix ZIP_DEFLATED est bien effectif sur CE fichier
-                # précis — au lieu de deviner encore si c'est un fichier
-                # périmé en mémoire ou un vrai bug résiduel.
-                if is_consultant():
-                    try:
-                        import zipfile as _zf_diag, io as _io_diag
-                        _diag_zip = _zf_diag.ZipFile(_io_diag.BytesIO(st.session_state["generated_file_bytes"]))
-                        _non_standard = [
-                            f"{info.filename} (méthode {info.compress_type})"
-                            for info in _diag_zip.infolist()
-                            if info.compress_type != _zf_diag.ZIP_DEFLATED and info.compress_type != _zf_diag.ZIP_STORED
-                        ]
-                        with st.expander("🔬 Diagnostic compression fichier (consultant)", expanded=bool(_non_standard)):
-                            st.caption(f"{len(_diag_zip.infolist())} entrée(s) au total dans le fichier envoyé.")
-                            if _non_standard:
-                                st.error("Entrée(s) avec une méthode de compression NON standard :")
-                                for _ns in _non_standard:
-                                    st.code(_ns)
-                            else:
-                                st.success("Toutes les entrées sont en DEFLATE (8) ou STORED (0) — standard, aucune anomalie de compression détectée sur ce fichier.")
-                    except Exception as _diag_zip_e:
-                        st.warning(f"Diagnostic compression impossible : {_diag_zip_e}")
-
-                with st.spinner("Vérification BC en cours..."):
-                    try:
-                        _p = get_profile_by_code(cfg.get("client_code", ""))
-                        _tid = (_p.get("bc_tenant_id") or "").strip()
-                        _cid = (_p.get("bc_client_id") or "").strip()
-                        _cs  = (_p.get("bc_client_secret") or "").strip()
-                        _env = (_p.get("bc_environment") or "").strip()
-                        if not all([_tid, _cid, _cs, _env, cfg.get("company_id")]):
-                            st.session_state[_integ_key] = {"stage": "idle", "error": "Credentials BC incomplets pour ce profil."}
+    if _integ["stage"] in ("idle", "imported"):
+        _integ_btn_col1, _ = st.columns([1, 3])
+        with _integ_btn_col1:
+            _btn1_clicked = st.button("1️⃣ Vérifier avant intégration", key=f"btn_integ_check_{sn}", use_container_width=True)
+        if _btn1_clicked:
+            # AJOUTÉ (27/08/2026) — diagnostic réel : inspecte le
+            # contenu binaire du fichier RÉELLEMENT envoyé à BC,
+            # entrée par entrée, pour savoir avec certitude si le
+            # fix ZIP_DEFLATED est bien effectif sur CE fichier
+            # précis — au lieu de deviner encore si c'est un fichier
+            # périmé en mémoire ou un vrai bug résiduel.
+            if is_consultant():
+                try:
+                    import zipfile as _zf_diag, io as _io_diag
+                    _diag_zip = _zf_diag.ZipFile(_io_diag.BytesIO(_integration_source_bytes))
+                    _non_standard = [
+                        f"{info.filename} (méthode {info.compress_type})"
+                        for info in _diag_zip.infolist()
+                        if info.compress_type != _zf_diag.ZIP_DEFLATED and info.compress_type != _zf_diag.ZIP_STORED
+                    ]
+                    with st.expander("🔬 Diagnostic compression fichier (consultant)", expanded=bool(_non_standard)):
+                        st.caption(f"{len(_diag_zip.infolist())} entrée(s) au total dans le fichier envoyé.")
+                        if _non_standard:
+                            st.error("Entrée(s) avec une méthode de compression NON standard :")
+                            for _ns in _non_standard:
+                                st.code(_ns)
                         else:
-                            _tok = get_access_token(_tid, _cid, _cs)
-                            # RÉVISÉ (27/08/2026) — bug réel signalé par Rami :
-                            # créait TOUJOURS un nouveau package vide dans BC,
-                            # même quand la session partait déjà d'un package
-                            # BC EXISTANT (choisi à l'Étape 1) — logiquement
-                            # incohérent, et le package vide généré n'avait
-                            # aucune table configurée. Réutilise maintenant le
-                            # code package de la session si disponible ; ne
-                            # génère un nouveau code que si la session n'a
-                            # vraiment aucun package associé (futur mode
-                            # "session sans package" — pas encore construit).
-                            _pkg_code_integ = cfg.get("pkg_code") or f"QC-{cfg.get('session_name', 'temp')}"[:20]
-                            _res = run_bc_import_check(
-                                _tid, _env, cfg["company_id"], _tok,
-                                _pkg_code_integ, f"Intégration QC — {cfg.get('session_name', '')}",
-                                st.session_state["generated_file_bytes"],
-                            )
-                            if _res.get("success"):
-                                st.session_state[_integ_key] = {
-                                    "stage": "imported",
-                                    "package_id": _res["package_id"],
-                                    "package_code": _pkg_code_integ,
-                                    "status": _res.get("status"),
-                                    "creds": (_tid, _env, cfg["company_id"], _tok),
-                                    # AJOUTÉ (27/08/2026) — nouveau diagnostic :
-                                    # ce que BC a réellement stocké après le
-                                    # dépôt, comparé octet pour octet à ce
-                                    # qu'on lui a envoyé.
-                                    "upload_readback": _res.get("upload_readback", ""),
-                                    "import_status_debug": _res.get("import_status_debug", ""),
-                                }
-                                # AJOUTÉ (27/08/2026) — demande Rami : un
-                                # indicateur clair de fin de vérification —
-                                # le sondage BC peut prendre jusqu'à 20s,
-                                # un simple retour de spinner ne suffisait
-                                # pas à signaler "c'est fini".
-                                st.toast("✅ Vérification BC terminée.")
-                            else:
-                                st.session_state[_integ_key] = {"stage": "idle", "error": _res.get("error", "")}
-                                st.toast("⚠️ Vérification BC terminée — erreur détectée.")
-                    except Exception as _integ_exc:
-                        st.session_state[_integ_key] = {"stage": "idle", "error": f"{type(_integ_exc).__name__} : {_integ_exc}"}
-                        st.toast("⚠️ Vérification BC terminée — erreur technique.")
+                            st.success("Toutes les entrées sont en DEFLATE (8) ou STORED (0) — standard, aucune anomalie de compression détectée sur ce fichier.")
+                except Exception as _diag_zip_e:
+                    st.warning(f"Diagnostic compression impossible : {_diag_zip_e}")
 
-        _integ = st.session_state[_integ_key]
-        if _integ.get("error"):
-            st.markdown(f'<div class="card-major">🔴 {_integ["error"]}</div>', unsafe_allow_html=True)
+            with st.spinner("Vérification BC en cours..."):
+                try:
+                    _p = get_profile_by_code(cfg.get("client_code", ""))
+                    _tid = (_p.get("bc_tenant_id") or "").strip()
+                    _cid = (_p.get("bc_client_id") or "").strip()
+                    _cs  = (_p.get("bc_client_secret") or "").strip()
+                    _env = (_p.get("bc_environment") or "").strip()
+                    if not all([_tid, _cid, _cs, _env, cfg.get("company_id")]):
+                        st.session_state[_integ_key] = {"stage": "idle", "error": "Credentials BC incomplets pour ce profil."}
+                    else:
+                        _tok = get_access_token(_tid, _cid, _cs)
+                        # RÉVISÉ (27/08/2026) — bug réel signalé par Rami :
+                        # créait TOUJOURS un nouveau package vide dans BC,
+                        # même quand la session partait déjà d'un package
+                        # BC EXISTANT (choisi à l'Étape 1) — logiquement
+                        # incohérent, et le package vide généré n'avait
+                        # aucune table configurée. Réutilise maintenant le
+                        # code package de la session si disponible ; ne
+                        # génère un nouveau code que si la session n'a
+                        # vraiment aucun package associé (futur mode
+                        # "session sans package" — pas encore construit).
+                        _pkg_code_integ = cfg.get("pkg_code") or f"QC-{cfg.get('session_name', 'temp')}"[:20]
+                        _res = run_bc_import_check(
+                            _tid, _env, cfg["company_id"], _tok,
+                            _pkg_code_integ, f"Intégration QC — {cfg.get('session_name', '')}",
+                            _integration_source_bytes,
+                        )
+                        if _res.get("success"):
+                            st.session_state[_integ_key] = {
+                                "stage": "imported",
+                                "package_id": _res["package_id"],
+                                "package_code": _pkg_code_integ,
+                                "status": _res.get("status"),
+                                "creds": (_tid, _env, cfg["company_id"], _tok),
+                                # AJOUTÉ (27/08/2026) — nouveau diagnostic :
+                                # ce que BC a réellement stocké après le
+                                # dépôt, comparé octet pour octet à ce
+                                # qu'on lui a envoyé.
+                                "upload_readback": _res.get("upload_readback", ""),
+                                "import_status_debug": _res.get("import_status_debug", ""),
+                            }
+                            # AJOUTÉ (27/08/2026) — demande Rami : un
+                            # indicateur clair de fin de vérification —
+                            # le sondage BC peut prendre jusqu'à 20s,
+                            # un simple retour de spinner ne suffisait
+                            # pas à signaler "c'est fini".
+                            st.toast("✅ Vérification BC terminée.")
+                        else:
+                            st.session_state[_integ_key] = {"stage": "idle", "error": _res.get("error", "")}
+                            st.toast("⚠️ Vérification BC terminée — erreur détectée.")
+                except Exception as _integ_exc:
+                    st.session_state[_integ_key] = {"stage": "idle", "error": f"{type(_integ_exc).__name__} : {_integ_exc}"}
+                    st.toast("⚠️ Vérification BC terminée — erreur technique.")
 
-        if _integ["stage"] == "imported":
-            _integ_status = _integ.get("status") or {}
-            _nb_err_integ = _integ_status.get("numberOfErrors", "?")
-            # RÉVISÉ (31/08/2026) — bug réel trouvé : depuis le passage
-            # au nouvel endpoint AL custom (qui appelle ImportExcel
-            # directement, contournant l'action standard Microsoft.NAV.
-            # import), les champs "importStatus"/"importError" du
-            # package ne sont PLUS jamais mis à jour par notre import —
-            # ce sont des champs propres au mécanisme standard qu'on
-            # ne déclenche plus. Résultat : l'écran affichait un vieux
-            # statut "Error" figé depuis les tout premiers essais
-            # (avant tous ces fixes), jamais nettoyé depuis. Repose
-            # maintenant uniquement sur "numberOfErrors", recalculé à
-            # chaque lecture à partir des vraies données du package,
-            # peu importe le mécanisme d'import utilisé.
-            if _nb_err_integ == 0:
-                st.markdown('<div class="card-ref">✅ 0 erreur — le fichier peut être appliqué dans BC.</div>', unsafe_allow_html=True)
-                # AJOUTÉ (01/09/2026) — affiche systématiquement le vrai
-                # statut d'import tel que BC le voit, sans avoir besoin
-                # d'aller vérifier manuellement dans l'interface BC — visible
-                # AVANT même de cliquer sur "Appliquer", pour savoir à
-                # l'avance si ça a des chances de fonctionner.
-                st.caption(f"🔬 Statut import (diagnostic) : {_integ.get('import_status_debug', '(non disponible)')}")
-                st.warning("⚠️ L'étape suivante écrit réellement les données dans Business Central — action irréversible.")
-                _confirm = st.checkbox("Je confirme vouloir intégrer ces données dans Business Central", key=f"confirm_apply_{sn}")
-                _btn2_clicked = False
-                if _confirm:
-                    _integ_btn_col2, _ = st.columns([1, 3])
-                    with _integ_btn_col2:
-                        _btn2_clicked = st.button("2️⃣ Appliquer dans BC", type="primary", key=f"btn_integ_apply_{sn}", use_container_width=True)
-                if _btn2_clicked:
-                    with st.spinner("Intégration dans BC en cours..."):
-                        try:
-                            _tid, _env, _company_id, _tok = _integ["creds"]
-                            apply_configuration_package(_tid, _env, _company_id, _tok, _integ["package_id"])
+    _integ = st.session_state[_integ_key]
+    if _integ.get("error"):
+        st.markdown(f'<div class="card-major">🔴 {_integ["error"]}</div>', unsafe_allow_html=True)
 
-                            # AJOUTÉ (27/08/2026) — après une intégration réussie :
-                            # marque automatiquement la session comme "Terminée"
-                            # (confirmé par Rami) et met à jour la mémoire
-                            # inter-sessions pour la table concernée si c'est
-                            # une session fille (même règle que la sauvegarde
-                            # complète — voir plus bas dans ce fichier).
-                            _sid = st.session_state.get("resumed_session_id") or st.session_state.get("saved_session_id")
-                            if _sid:
-                                try:
-                                    update_session(_sid, {"status": "Terminée"})
-                                except Exception:
-                                    pass
-                            _tid_mem = cfg.get("table_id")
-                            if _tid_mem:
-                                try:
-                                    from app.core.bc_excel_processor import extract_key_values_by_table
-                                    from app.db.metadata_db import save_pending_codes
-                                    _codes_all = extract_key_values_by_table(st.session_state["generated_file_bytes"])
-                                    _codes_scoped = {k: v for k, v in _codes_all.items() if k == _tid_mem}
-                                    if _codes_scoped and _sid:
-                                        save_pending_codes(
-                                            session_id=_sid, profile_code=cfg.get("client_code", ""),
-                                            company_id=cfg.get("company_id", ""), codes_by_table=_codes_scoped,
-                                        )
-                                except Exception:
-                                    pass
+    if _integ["stage"] == "imported":
+        _integ_status = _integ.get("status") or {}
+        _nb_err_integ = _integ_status.get("numberOfErrors", "?")
+        # RÉVISÉ (31/08/2026) — bug réel trouvé : depuis le passage
+        # au nouvel endpoint AL custom (qui appelle ImportExcel
+        # directement, contournant l'action standard Microsoft.NAV.
+        # import), les champs "importStatus"/"importError" du
+        # package ne sont PLUS jamais mis à jour par notre import —
+        # ce sont des champs propres au mécanisme standard qu'on
+        # ne déclenche plus. Résultat : l'écran affichait un vieux
+        # statut "Error" figé depuis les tout premiers essais
+        # (avant tous ces fixes), jamais nettoyé depuis. Repose
+        # maintenant uniquement sur "numberOfErrors", recalculé à
+        # chaque lecture à partir des vraies données du package,
+        # peu importe le mécanisme d'import utilisé.
+        if _nb_err_integ == 0:
+            st.markdown('<div class="card-ref">✅ 0 erreur — le fichier peut être appliqué dans BC.</div>', unsafe_allow_html=True)
+            # AJOUTÉ (01/09/2026) — affiche systématiquement le vrai
+            # statut d'import tel que BC le voit, sans avoir besoin
+            # d'aller vérifier manuellement dans l'interface BC — visible
+            # AVANT même de cliquer sur "Appliquer", pour savoir à
+            # l'avance si ça a des chances de fonctionner.
+            st.caption(f"🔬 Statut import (diagnostic) : {_integ.get('import_status_debug', '(non disponible)')}")
+            st.warning("⚠️ L'étape suivante écrit réellement les données dans Business Central — action irréversible.")
+            _confirm = st.checkbox("Je confirme vouloir intégrer ces données dans Business Central", key=f"confirm_apply_{sn}")
+            _btn2_clicked = False
+            if _confirm:
+                _integ_btn_col2, _ = st.columns([1, 3])
+                with _integ_btn_col2:
+                    _btn2_clicked = st.button("2️⃣ Appliquer dans BC", type="primary", key=f"btn_integ_apply_{sn}", use_container_width=True)
+            if _btn2_clicked:
+                with st.spinner("Intégration dans BC en cours..."):
+                    try:
+                        _tid, _env, _company_id, _tok = _integ["creds"]
+                        apply_configuration_package(_tid, _env, _company_id, _tok, _integ["package_id"])
 
-                            st.session_state[_integ_key] = {"stage": "applied"}
-                            st.success("✅ Données intégrées dans Business Central avec succès. Session marquée « Terminée ».")
-                        except Exception as _apply_exc:
-                            st.error(f"❌ Échec de l'intégration : {_apply_exc}")
-            else:
-                st.markdown(
-                    f'<div class="card-major">🔴 {_nb_err_integ} erreur(s) détectée(s) par BC sur le fichier corrigé — '
-                    f'corrige-les avant de pouvoir intégrer.</div>',
-                    unsafe_allow_html=True,
-                )
+                        # AJOUTÉ (27/08/2026) — après une intégration réussie :
+                        # marque automatiquement la session comme "Terminée"
+                        # (confirmé par Rami) et met à jour la mémoire
+                        # inter-sessions pour la table concernée si c'est
+                        # une session fille (même règle que la sauvegarde
+                        # complète — voir plus bas dans ce fichier).
+                        _sid = st.session_state.get("resumed_session_id") or st.session_state.get("saved_session_id")
+                        if _sid:
+                            try:
+                                update_session(_sid, {"status": "Terminée"})
+                            except Exception:
+                                pass
+                        _tid_mem = cfg.get("table_id")
+                        if _tid_mem:
+                            try:
+                                from app.core.bc_excel_processor import extract_key_values_by_table
+                                from app.db.metadata_db import save_pending_codes
+                                _codes_all = extract_key_values_by_table(_integration_source_bytes)
+                                _codes_scoped = {k: v for k, v in _codes_all.items() if k == _tid_mem}
+                                if _codes_scoped and _sid:
+                                    save_pending_codes(
+                                        session_id=_sid, profile_code=cfg.get("client_code", ""),
+                                        company_id=cfg.get("company_id", ""), codes_by_table=_codes_scoped,
+                                    )
+                            except Exception:
+                                pass
 
-        if _integ["stage"] == "applied":
-            st.markdown('<div class="card-ref">✅ Intégration terminée.</div>', unsafe_allow_html=True)
+                        st.session_state[_integ_key] = {"stage": "applied"}
+                        st.success("✅ Données intégrées dans Business Central avec succès. Session marquée « Terminée ».")
+                    except Exception as _apply_exc:
+                        st.error(f"❌ Échec de l'intégration : {_apply_exc}")
+        else:
+            st.markdown(
+                f'<div class="card-major">🔴 {_nb_err_integ} erreur(s) détectée(s) par BC sur le fichier corrigé — '
+                f'corrige-les avant de pouvoir intégrer.</div>',
+                unsafe_allow_html=True,
+            )
+
+    if _integ["stage"] == "applied":
+        st.markdown('<div class="card-ref">✅ Intégration terminée.</div>', unsafe_allow_html=True)
 
     if info_anomalies:
         st.markdown("---")
