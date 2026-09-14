@@ -1749,6 +1749,29 @@ with tab_main:
                             st.error(f"❌ Échec de la création automatique du package : {_auto_pkg_exc}")
                             st.stop()
 
+                    # AJOUTÉ (01/09/2026) — CORRECTIF IMPORTANT : un package
+                    # tout juste créé est VIDE (aucune table/champ configuré)
+                    # tant qu'on n'y a jamais déposé de fichier. Sans cette
+                    # étape, la vérification des références (Axe B) et la
+                    # roadmap de l'Étape 3 n'auraient RIEN à interroger — pas
+                    # parce que le fichier est propre, mais parce que la
+                    # structure du package serait encore vide. Reproduit ici
+                    # ce que ferait un consultant en cliquant "Importer
+                    # d'Excel" manuellement dans BC avant d'utiliser l'outil —
+                    # peuple la structure du package dès maintenant, pas
+                    # seulement au moment de l'intégration finale (Étape 4).
+                    with st.spinner("Préparation de la structure du package dans BC..."):
+                        try:
+                            from app.core.bc_api import import_excel_via_al_endpoint
+                            _struct_result = import_excel_via_al_endpoint(
+                                _tid_auto, _env_auto, cfg["company_id"], _tok_auto,
+                                cfg["pkg_code"], uploaded.getvalue(),
+                            )
+                            if not _struct_result.get("success"):
+                                st.warning(f"⚠️ Structure du package non initialisée : {_struct_result.get('error', '')} — la roadmap et les vérifications de référence risquent d'être incomplètes.")
+                        except Exception as _struct_exc:
+                            st.warning(f"⚠️ Structure du package non initialisée : {_struct_exc} — la roadmap et les vérifications de référence risquent d'être incomplètes.")
+
                 s = get_file_summary(pr)
                 st.success(f"✅ **{uploaded.name}**")
                 c1, c2, c3 = st.columns(3)
