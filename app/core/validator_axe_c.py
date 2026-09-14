@@ -1,5 +1,5 @@
 """
-Validation Axe C — Suggestions de correction par IA (Google Gemini).
+Validation Axe C — Suggestions de correction par IA.
 Pour chaque anomalie Axe A + B, suggère une correction avec un score de confiance.
 Auto-correction si score ≥ seuil défini (défaut : 90%).
 """
@@ -10,24 +10,21 @@ import streamlit as st
 
 
 # ── Configuration ─────────────────────────────────────────────────────────────
-# RÉVISÉ (26/08/2026, jour J) — FIX CRITIQUE, cause racine de tout un
-# historique de "0 suggestion IA" toute la semaine, jamais visible faute
-# de remontée d'erreur (voir LAST_GEMINI_ERROR ci-dessous, ajouté pour ce
-# diagnostic) : gemini-1.5-flash est DÉFINITIVEMENT retiré par Google —
-# toute requête vers ce modèle renvoie une erreur 404, silencieusement
-# avalée par _call_gemini jusqu'à aujourd'hui. Remplacé par gemini-2.5-flash
-# (stable, disponible en production à ce jour, date de retrait annoncée
-# mi-octobre 2026 — largement après la démo). Écosystème Gemini en
-# renouvellement rapide cette année : si ce modèle devait à son tour être
-# retiré, LAST_GEMINI_ERROR affichera désormais l'erreur réelle au lieu
-# de disparaître silencieusement comme avant.
-# RÉVISÉ (26/08/2026, jour J, 3e passe) — gemini-2.5-flash retiré à son tour
-# ("no longer available to new users") — confirmé par l'erreur HTTP 404
-# elle-même, qui indique EXPLICITEMENT le modèle de remplacement recommandé
-# par Google : gemini-3.6-flash. Plus fiable qu'une supposition : c'est
-# l'API elle-même qui le dit. Diagnostic LAST_GEMINI_ERROR (voir plus haut)
-# ayant enfin permis de voir le message d'erreur réel au lieu d'un échec
-# silencieux comme toute la semaine.
+# RÉVISÉ (01/09/2026) — bascule de Google Gemini vers Groq comme fournisseur
+# PRINCIPAL, à la demande de Rami : le niveau gratuit Gemini plafonne à
+# ~20 requêtes/jour sans facturation activée (carte bancaire refusée), ce
+# qui a bloqué l'outil en plein test plusieurs fois cette semaine. Groq
+# offre un niveau gratuit sans carte bancaire nettement plus généreux (30
+# requêtes/minute, 14 400/jour).
+# RÉVISÉ (01/09/2026, 2e passe) — demande Rami : bascule automatique vers
+# Gemini en repli si Groq échoue (quota, panne...), et vice versa —
+# Gemini restauré comme second fournisseur plutôt que remplacé. Les DEUX
+# clés API (GROQ_API_KEY et GEMINI_API_KEY) peuvent être configurées en
+# parallèle ; l'outil essaie Groq en premier (quota plus généreux), puis
+# Gemini automatiquement si le premier essai échoue, sans intervention
+# manuelle. Fonctionne aussi avec une seule des deux clés configurée.
+GROQ_URL   = "https://api.groq.com/openai/v1/chat/completions"
+GROQ_MODEL = "llama-3.3-70b-versatile"
 GEMINI_URL = (
     "https://generativelanguage.googleapis.com/v1beta/"
     "models/gemini-3.6-flash:generateContent"
@@ -36,33 +33,78 @@ AUTO_CORRECT_THRESHOLD = 90  # % de confiance minimum pour auto-correction
 MAX_ANOMALIES_PER_BATCH = 15 # Nb max d'anomalies par appel API
 
 
-def get_gemini_api_key() -> str:
-    """Récupère la clé API Gemini depuis les secrets ou variables d'environnement."""
-    key = os.environ.get("GEMINI_API_KEY", "")
+def _get_secret(name: str) -> str:
+    """Lit une clé API depuis les variables d'environnement ou les secrets Streamlit."""
+    key = os.environ.get(name, "")
     if not key:
         try:
-            key = st.secrets.get("GEMINI_API_KEY", "")
+            key = st.secrets.get(name, "")
         except Exception:
             pass
     return key
 
 
+def get_gemini_api_key() -> str:
+    """
+    RÉVISÉ (01/09/2026) — nom de fonction conservé pour ne rien casser côté
+    appelants (2_Sessions_Integration.py notamment) : sert maintenant de
+    simple test de disponibilité — retourne la première clé configurée
+    parmi Groq (priorité) et Gemini, peu importe laquelle _call_gemini
+    utilisera réellement (elle regarde les deux elle-même, voir plus bas).
+    """
+    return _get_secret("GROQ_API_KEY") or _get_secret("GEMINI_API_KEY")
+
+
 def is_gemini_available() -> bool:
-    """Vérifie si la clé API Gemini est configurée."""
+    """Vérifie qu'au moins un des deux fournisseurs IA est configuré."""
     return bool(get_gemini_api_key())
 
 
-# AJOUTÉ (26/08/2026, jour J) — diagnostic : aucune suggestion IA n'est
-# jamais remontée depuis le début de la semaine, sans le moindre message
-# d'erreur — _call_gemini avalait systématiquement l'échec (mauvaise clé,
-# quota, modèle retiré, erreur réseau...). Ce module-level ne change AUCUN
-# comportement existant (le retour reste None en cas d'échec, identique
-# partout ailleurs) — il garde juste une trace de la dernière erreur réelle,
-# consultable côté page pour enfin voir ce qui se passe.
+# Nom conservé pour ne rien casser côté appelants qui l'importent déjà
+# pour le diagnostic.
 LAST_GEMINI_ERROR: str = ""
 
 
-def _call_gemini(prompt: str, api_key: str) -> dict | None:
+def _call_groq(prompt: str, api_key: str) -> dict | None:
+    """Appel à l'API Groq (format OpenAI-compatible). Retourne le JSON parsé ou None."""
+    global LAST_GEMINI_ERROR
+    try:
+        resp = requests.post(
+            GROQ_URL,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": GROQ_MODEL,
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.1,
+                "max_tokens": 4096,
+                "response_format": {"type": "json_object"},
+            },
+            timeout=45,
+        )
+        if resp.status_code != 200:
+            LAST_GEMINI_ERROR = f"[Groq] HTTP {resp.status_code} : {resp.text[:500]}"
+            return None
+
+        data    = resp.json()
+        content = (
+            data.get("choices", [{}])[0]
+                .get("message", {})
+                .get("content", "")
+        )
+        if not content:
+            LAST_GEMINI_ERROR = f"[Groq] Réponse sans contenu exploitable : {str(data)[:500]}"
+            return None
+
+        return _parse_json_response(content, provider="Groq")
+    except Exception as e:
+        LAST_GEMINI_ERROR = f"[Groq] {type(e).__name__} : {e}"
+        return None
+
+
+def _call_gemini_native(prompt: str, api_key: str) -> dict | None:
     """Appel direct à l'API Gemini. Retourne le JSON parsé ou None."""
     global LAST_GEMINI_ERROR
     try:
@@ -73,25 +115,14 @@ def _call_gemini(prompt: str, api_key: str) -> dict | None:
                 "contents": [{"parts": [{"text": prompt}]}],
                 "generationConfig": {
                     "temperature":      0.1,
-                    # RÉVISÉ (27/08/2026, jour de la démo, 2e passe) — 8192
-                    # évitait la troncature mais rendait la génération trop
-                    # lente (ReadTimeout). Redescendu à 4096 maintenant que
-                    # le prompt impose des justifications courtes (15 mots
-                    # max) — largement suffisant, plus rapide.
                     "maxOutputTokens":  4096,
                     "responseMimeType": "application/json",
                 },
             },
-            # RÉVISÉ (27/08/2026, jour de la démo) — 30s trop court une fois
-            # maxOutputTokens relevé (Gemini met plus de temps à générer
-            # une réponse plus longue) — provoquait un ReadTimeout au lieu
-            # d'une vraie réponse. Relevé à 45s, compromis raisonnable pour
-            # une démo (on ne veut pas non plus qu'un blocage réseau bloque
-            # l'écran une minute entière).
             timeout=45,
         )
         if resp.status_code != 200:
-            LAST_GEMINI_ERROR = f"HTTP {resp.status_code} : {resp.text[:500]}"
+            LAST_GEMINI_ERROR = f"[Gemini] HTTP {resp.status_code} : {resp.text[:500]}"
             return None
 
         data    = resp.json()
@@ -102,41 +133,79 @@ def _call_gemini(prompt: str, api_key: str) -> dict | None:
                 .get("text", "")
         )
         if not content:
-            LAST_GEMINI_ERROR = f"Réponse Gemini sans contenu exploitable : {str(data)[:500]}"
+            LAST_GEMINI_ERROR = f"[Gemini] Réponse sans contenu exploitable : {str(data)[:500]}"
             return None
 
-        # Nettoyer les balises markdown si présentes
-        clean = content.strip()
-        for tag in ["```json", "```"]:
-            clean = clean.replace(tag, "")
-        clean = clean.strip()
-        try:
-            result = json.loads(clean)
-            LAST_GEMINI_ERROR = ""
-            return result
-        except json.JSONDecodeError:
-            # AJOUTÉ (27/08/2026, jour de la démo) — filet de sécurité :
-            # même avec maxOutputTokens relevé, une réponse peut encore
-            # être coupée en plein milieu (variabilité du modèle). Plutôt
-            # que de tout perdre, on récupère les objets JSON déjà complets
-            # dans un tableau tronqué (cas le plus fréquent : "[{...},
-            # {...}, {..." sans fermeture) — mieux vaut quelques
-            # suggestions que zéro.
-            if clean.startswith("["):
-                _last_complete = clean.rfind("},")
-                if _last_complete != -1:
-                    _repaired = clean[:_last_complete + 1] + "]"
-                    try:
-                        result = json.loads(_repaired)
-                        LAST_GEMINI_ERROR = f"Réponse tronquée par Gemini — {len(result)} candidat(s) récupéré(s) sur une réponse incomplète."
-                        return result
-                    except json.JSONDecodeError:
-                        pass
-            raise
-
+        return _parse_json_response(content, provider="Gemini")
     except Exception as e:
-        LAST_GEMINI_ERROR = f"{type(e).__name__} : {e}"
+        LAST_GEMINI_ERROR = f"[Gemini] {type(e).__name__} : {e}"
         return None
+
+
+def _parse_json_response(content: str, provider: str) -> dict | None:
+    """
+    Nettoyage et parsing JSON communs aux deux fournisseurs (extrait dans sa
+    propre fonction lors de l'ajout du repli automatique Groq/Gemini, pour
+    éviter de dupliquer cette logique deux fois).
+    """
+    global LAST_GEMINI_ERROR
+    clean = content.strip()
+    for tag in ["```json", "```"]:
+        clean = clean.replace(tag, "")
+    clean = clean.strip()
+    try:
+        result = json.loads(clean)
+        LAST_GEMINI_ERROR = ""
+        return result
+    except json.JSONDecodeError:
+        # AJOUTÉ (27/08/2026, jour de la démo) — filet de sécurité : même
+        # avec maxOutputTokens relevé, une réponse peut encore être coupée
+        # en plein milieu (variabilité du modèle). Plutôt que de tout
+        # perdre, on récupère les objets JSON déjà complets dans un
+        # tableau tronqué (cas le plus fréquent : "[{...}, {...}, {..."
+        # sans fermeture) — mieux vaut quelques suggestions que zéro.
+        if clean.startswith("["):
+            _last_complete = clean.rfind("},")
+            if _last_complete != -1:
+                _repaired = clean[:_last_complete + 1] + "]"
+                try:
+                    result = json.loads(_repaired)
+                    LAST_GEMINI_ERROR = f"[{provider}] Réponse tronquée — {len(result)} candidat(s) récupéré(s) sur une réponse incomplète."
+                    return result
+                except json.JSONDecodeError:
+                    pass
+        LAST_GEMINI_ERROR = f"[{provider}] Réponse JSON invalide et non réparable."
+        return None
+
+
+def _call_gemini(prompt: str, api_key: str) -> dict | None:
+    """
+    AJOUTÉ (01/09/2026) — répartiteur : essaie Groq en premier (quota plus
+    généreux), bascule automatiquement sur Gemini si Groq échoue (quota,
+    panne réseau, clé absente...), et inversement si seul Gemini est
+    configuré. Nom de fonction conservé pour ne rien casser côté
+    appelants existants (enrich_coherence_with_ai, validate_file_axe_c).
+    Le paramètre `api_key` reçu n'est plus utilisé directement — chaque
+    fournisseur va chercher sa propre clé, puisque les deux peuvent être
+    configurés en parallèle.
+    """
+    _groq_key   = _get_secret("GROQ_API_KEY")
+    _gemini_key = _get_secret("GEMINI_API_KEY")
+
+    if _groq_key:
+        result = _call_groq(prompt, _groq_key)
+        if result is not None:
+            return result
+        # Échec Groq (quota ou autre) — bascule sur Gemini si disponible.
+        if _gemini_key:
+            return _call_gemini_native(prompt, _gemini_key)
+        return None
+
+    if _gemini_key:
+        return _call_gemini_native(prompt, _gemini_key)
+
+    LAST_GEMINI_ERROR = "Aucune clé API configurée (ni GROQ_API_KEY, ni GEMINI_API_KEY)."
+    return None
 
 
 def _build_prompt(anomalies: list, table_label: str) -> str:
