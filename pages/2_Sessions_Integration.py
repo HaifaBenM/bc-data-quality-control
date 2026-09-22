@@ -525,7 +525,7 @@ def run_quality_analysis(pr: dict, cfg: dict, early_cache: dict | None = None, i
         # une démo.
         if is_consultant():
             with st.expander("🤖 Éligibilité IA par onglet (diagnostic consultant)", expanded=False):
-                for _sn_diag in pr.get("data_tables", []):
+                for _sn_diag in pr.get("data_tables", []) + pr.get("ref_tables", []):
                     _a_before = axe_a.get("by_sheet", {}).get(_sn_diag, [])
                     _b_before = axe_b.get("by_sheet", {}).get(_sn_diag, [])
                     _total_diag = len(_a_before) + len(_b_before)

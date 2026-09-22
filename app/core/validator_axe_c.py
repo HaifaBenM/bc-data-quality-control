@@ -392,8 +392,20 @@ def validate_file_axe_c(
         return result
 
     metadata    = parse_result.get("metadata", {})
-    data_tables = parse_result.get("data_tables", [])
-    print(f"[QC-DIAG] validate_file_axe_c : api_key présente (len={len(api_key)}), data_tables={data_tables}")
+    # RÉVISÉ (01/09/2026) — BUG RÉEL TROUVÉ ET CONFIRMÉ, cause exacte du
+    # "0 suggestion IA" sur le fichier Devise (et tout fichier composé
+    # UNIQUEMENT de tables de référence) : validator_axe_a.py traite
+    # data_tables + ref_tables ensemble (ligne "tables_to_validate =
+    # sort_sheets_by_bc_order(data_tables + ref_tables, ...)"), mais cette
+    # fonction ne parcourait QUE data_tables — toute table classée
+    # "référence" (ex. Devise, table 4 — voir master_data_config.py) était
+    # silencieusement exclue de l'enrichissement IA, alors que ses
+    # anomalies structurelles (Axe A/B) étaient bien détectées et
+    # affichées normalement. D'où l'incohérence observée : anomalies
+    # visibles, mais suggestions IA jamais déclenchées, sans aucune erreur
+    # ni exception à aucun niveau (le code ne "cassait" nulle part — il
+    # ignorait simplement cet onglet dès le départ).
+    data_tables = parse_result.get("data_tables", []) + parse_result.get("ref_tables", [])
 
     for sheet_name in data_tables:
         meta        = metadata.get(sheet_name, {})
@@ -497,7 +509,10 @@ def validate_coherence_axe_c(parse_result: dict, execution_plan, api_key: str,
     if not api_key:
         return result
 
-    for sheet_name in parse_result.get("data_tables", []):
+    # RÉVISÉ (01/09/2026) — même bug que validate_file_axe_c ci-dessus :
+    # ne parcourait que data_tables, excluant silencieusement les tables
+    # de référence (ex. Devise) de la détection de cohérence aussi.
+    for sheet_name in parse_result.get("data_tables", []) + parse_result.get("ref_tables", []):
         df = parse_result.get("sheets", {}).get(sheet_name)
         meta = parse_result.get("metadata", {}).get(sheet_name, {})
         table_id = meta.get("table_id", "")
