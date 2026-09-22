@@ -194,6 +194,17 @@ def _parse_json_response(content: str, provider: str) -> dict | None:
             list_values = [v for v in result.values() if isinstance(v, list)]
             if len(list_values) == 1:
                 result = list_values[0]
+            elif "id" in result:
+                # AJOUTÉ (01/09/2026) — 2e cas confirmé par test réel isolé
+                # (script test_groq.py) : avec un lot d'UNE SEULE anomalie,
+                # Groq renvoie l'objet suggestion directement (ex. {"id":
+                # 1, "valeur_suggeree": "Nearest", ...}), sans même
+                # l'envelopper dans un tableau à un élément — ni dans une
+                # clé de type liste (le cas déjà couvert juste au-dessus).
+                # Reconnu ici via la présence de la clé "id" (présente sur
+                # tout objet suggestion attendu par les deux prompts de ce
+                # fichier), et remballé en tableau à un élément.
+                result = [result]
         LAST_GEMINI_ERROR = ""
         return result
     except json.JSONDecodeError:
@@ -220,34 +231,31 @@ def _parse_json_response(content: str, provider: str) -> dict | None:
 def _call_gemini(prompt: str, api_key: str) -> dict | None:
     """
     RÉVISÉ (01/09/2026, 3e passe, veille de démo) — répartiteur : essaie
-    désormais GEMINI en premier (fournisseur éprouvé sur ce projet depuis
-    des semaines), bascule automatiquement sur Groq si Gemini échoue
-    (quota, panne réseau), et inversement si seul Groq est configuré.
-    Ordre inversé par rapport à la version précédente (Groq en premier) —
-    Groq utilise désormais un modèle de raisonnement (openai/gpt-oss-120b,
-    remplaçant officiel après le retrait de llama-3.3-70b-versatile le 16
-    août 2026) avec un risque documenté de contenu vide selon l'effort de
-    raisonnement — la fiabilité prime sur le quota à la veille d'une démo.
-    Nom de fonction conservé pour ne rien casser côté appelants existants
-    (enrich_coherence_with_ai, validate_file_axe_c). Le paramètre
-    `api_key` reçu n'est plus utilisé directement — chaque fournisseur va
-    chercher sa propre clé, puisque les deux peuvent être configurés en
-    parallèle.
+    RÉVISÉ (01/09/2026, 4e passe, test ce soir) — remis Groq en premier,
+    à la demande de Rami, pour vérifier si le fix du déballage (objet nu
+    -> tableau à un élément, confirmé sur un cas à une seule anomalie via
+    test_groq.py) tient aussi sur des lots plus grands (fichier Devise
+    complet, plusieurs lots de 15 anomalies). Bascule automatique sur
+    Gemini en repli si Groq échoue malgré tout — rien à changer côté
+    appelants existants (enrich_coherence_with_ai, validate_file_axe_c).
+    Le paramètre `api_key` reçu n'est plus utilisé directement — chaque
+    fournisseur va chercher sa propre clé, puisque les deux peuvent être
+    configurés en parallèle.
     """
     _groq_key   = _get_secret("GROQ_API_KEY")
     _gemini_key = _get_secret("GEMINI_API_KEY")
 
-    if _gemini_key:
-        result = _call_gemini_native(prompt, _gemini_key)
+    if _groq_key:
+        result = _call_groq(prompt, _groq_key)
         if result is not None:
             return result
-        # Échec Gemini (quota ou autre) — bascule sur Groq si disponible.
-        if _groq_key:
-            return _call_groq(prompt, _groq_key)
+        # Échec Groq (quota ou autre) — bascule sur Gemini si disponible.
+        if _gemini_key:
+            return _call_gemini_native(prompt, _gemini_key)
         return None
 
-    if _groq_key:
-        return _call_groq(prompt, _groq_key)
+    if _gemini_key:
+        return _call_gemini_native(prompt, _gemini_key)
 
     LAST_GEMINI_ERROR = "Aucune clé API configurée (ni GROQ_API_KEY, ni GEMINI_API_KEY)."
     return None
