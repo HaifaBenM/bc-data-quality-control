@@ -471,6 +471,14 @@ def run_quality_analysis(pr: dict, cfg: dict, early_cache: dict | None = None, i
     lignes du fichier), utilisé par les deux appelants pour l'affichage.
     """
     api_key     = get_gemini_api_key()
+    print(f"[QC-DIAG] run_quality_analysis : get_gemini_api_key() -> {'PRÉSENTE (len='+str(len(api_key))+')' if api_key else 'VIDE'}")
+    try:
+        import os as _os_diag
+        print(f"[QC-DIAG] os.environ GROQ_API_KEY présent : {'GROQ_API_KEY' in _os_diag.environ}, GEMINI_API_KEY présent : {'GEMINI_API_KEY' in _os_diag.environ}")
+        print(f"[QC-DIAG] st.secrets contient GROQ_API_KEY : {'GROQ_API_KEY' in st.secrets}, GEMINI_API_KEY : {'GEMINI_API_KEY' in st.secrets}")
+        print(f"[QC-DIAG] st.secrets clés top-niveau disponibles : {list(st.secrets.keys())}")
+    except Exception as _diag_exc:
+        print(f"[QC-DIAG] Exception en inspectant st.secrets : {type(_diag_exc).__name__} : {_diag_exc}")
     client_code = cfg.get("client_code", "")
 
     if early_cache:
