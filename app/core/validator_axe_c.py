@@ -5,6 +5,7 @@ Auto-correction si score ≥ seuil défini (défaut : 90%).
 """
 import os
 import json
+import time
 import requests
 import streamlit as st
 
@@ -325,7 +326,15 @@ def enrich_anomalies_with_ai(
     ]
 
     # Traiter par lots
-    for batch_start in range(0, len(candidates), MAX_ANOMALIES_PER_BATCH):
+    for _batch_idx, batch_start in enumerate(range(0, len(candidates), MAX_ANOMALIES_PER_BATCH)):
+        # AJOUTÉ (01/09/2026) — pause entre les lots (pas avant le tout
+        # premier) pour rester sous la limite de 30 requêtes/minute de
+        # Groq — avec des fichiers volumineux (18 lots sur Devise, par
+        # exemple), des appels trop rapprochés pouvaient déclencher des
+        # échecs silencieusement absorbés par le repli Gemini, lui-même
+        # vite épuisé (quota gratuit 20/jour).
+        if _batch_idx > 0:
+            time.sleep(1.5)
         batch = candidates[batch_start : batch_start + MAX_ANOMALIES_PER_BATCH]
         batch_anomalies = [a for _, a in batch]
 
