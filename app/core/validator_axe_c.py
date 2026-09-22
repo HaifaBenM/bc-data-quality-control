@@ -155,6 +155,23 @@ def _parse_json_response(content: str, provider: str) -> dict | None:
     clean = clean.strip()
     try:
         result = json.loads(clean)
+        # RÉVISÉ (01/09/2026) — bug réel trouvé et confirmé (comportement
+        # documenté du mode JSON forcé de Groq/OpenAI) : quand le prompt
+        # demande un tableau JSON en racine mais que le mode json_object
+        # est actif, le modèle a tendance à envelopper le tableau dans un
+        # objet (ex. {"resultats": [...]}) au lieu de le renvoyer tel
+        # quel — même si le prompt demande explicitement un tableau. Le
+        # JSON est valide, donc json.loads() réussit sans erreur, mais la
+        # forme n'est pas celle attendue par le code appelant (qui
+        # vérifie isinstance(response, list)) — résultat : la réponse
+        # était silencieusement ignorée, sans la moindre erreur visible.
+        # N'existait pas avec l'ancien mode Gemini (responseMimeType),
+        # plus permissif sur les tableaux en racine. Si le résultat est
+        # un objet contenant une seule liste, on la déballe automatiquement.
+        if isinstance(result, dict):
+            list_values = [v for v in result.values() if isinstance(v, list)]
+            if len(list_values) == 1:
+                result = list_values[0]
         LAST_GEMINI_ERROR = ""
         return result
     except json.JSONDecodeError:
