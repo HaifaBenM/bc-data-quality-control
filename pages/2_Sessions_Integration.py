@@ -7,7 +7,6 @@ from app.core.structure_validator import validate_file_structure
 from app.core.validator_axe_a import validate_file_axe_a
 from app.core.validator_axe_b import validate_file_axe_b
 from app.core.validator_axe_c import validate_file_axe_c, get_gemini_api_key, is_gemini_available, validate_coherence_axe_c
-from app.core import validator_axe_c as _validator_axe_c_module
 from app.core.auth import require_role, is_consultant, get_display_name
 from app.core.execution_planner import get_execution_plan, build_plan_from_bc
 from app.core.integration_levels import (
@@ -511,53 +510,6 @@ def run_quality_analysis(pr: dict, cfg: dict, early_cache: dict | None = None, i
         with st.spinner("🤖 Suggestions IA en cours..."):
             axe_c = validate_file_axe_c(axe_a, axe_b, pr, api_key=api_key)
 
-        # AJOUTÉ (01/09/2026) — demande Rami : panneau permanent (pas un
-        # diagnostic ponctuel à retirer) expliquant les VRAIES conditions
-        # d'éligibilité à l'IA — pas "la clé est bonne ou non" (déjà
-        # confirmé), mais "combien d'anomalies existent, combien sont
-        # réellement envoyées à l'IA, et pourquoi les autres ne le sont
-        # pas". Règle d'éligibilité exacte (voir enrich_anomalies_with_ai,
-        # validator_axe_c.py) : une anomalie n'est envoyée à l'IA QUE si
-        # son champ "Valeur" est non vide ET sa "Ligne" est un vrai numéro
-        # de ligne (>0) — les anomalies de type "prérequis BC" (Ligne=0)
-        # ou sans valeur source exploitable en sont exclues d'office.
-        # Réservé au consultant : jamais affiché à un client, jamais dans
-        # une démo.
-        # RÉVISÉ (01/09/2026, 2e passe) — bug trouvé : ce panneau,
-        # affiché ICI (dans run_quality_analysis, appelée depuis le clic
-        # du bouton), disparaissait instantanément — le clic déclenche un
-        # st.rerun() juste après (voir l'appelant), qui efface tout
-        # rendu de CE run avant que l'utilisateur ait le temps de le
-        # lire. Contenu calculé ici, mais PERSISTÉ en session_state et
-        # RÉAFFICHÉ depuis display_merged_analysis (qui s'exécute à
-        # chaque rendu de page, contrairement à ce bloc) — même principe
-        # que les messages de feedback Propager/Réanalyser déjà en place.
-        _ia_diag_lines = []
-        for _sn_diag in pr.get("data_tables", []) + pr.get("ref_tables", []):
-            _a_before = axe_a.get("by_sheet", {}).get(_sn_diag, [])
-            _b_before = axe_b.get("by_sheet", {}).get(_sn_diag, [])
-            _total_diag = len(_a_before) + len(_b_before)
-            _eligible_diag = sum(
-                1 for _a in (_a_before + _b_before)
-                if str(_a.get("Valeur", "")).strip() and _a.get("Ligne", 0) > 0
-            )
-            _enriched_diag = axe_c.get("by_sheet", {}).get(_sn_diag, [])
-            _with_suggestion_diag = sum(1 for _a in _enriched_diag if _a.get("suggestion_ia"))
-            if _total_diag == 0:
-                continue
-            _line = (
-                f"**{_sn_diag}** — {_total_diag} anomalie(s) au total, "
-                f"{_eligible_diag} éligible(s) à l'IA (valeur source non vide + ligne réelle), "
-                f"{_with_suggestion_diag} suggestion(s) IA obtenue(s)."
-            )
-            if _eligible_diag > _with_suggestion_diag:
-                _line += (
-                    f"  \n⚠️ {_eligible_diag - _with_suggestion_diag} anomalie(s) éligible(s) n'ont "
-                    f"pas reçu de suggestion — dernière erreur IA : {_validator_axe_c_module.LAST_GEMINI_ERROR or '(aucune erreur signalée)'}"
-                )
-            _ia_diag_lines.append(_line)
-        st.session_state["_ia_eligibility_diag"] = _ia_diag_lines
-
     merged = merge_results(axe_a, axe_b, axe_c, parse_result=pr)
 
     # AJOUTÉ (01/09/2026) — réinjecte les suggestions IA du tout premier
@@ -610,19 +562,6 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
     avant de le présenter comme "100% intégrable" en démo.
     """
     all_anomalies = merged.get("all_anomalies", [])
-
-    # AJOUTÉ (01/09/2026, 2e passe) — affichage persistant du panneau
-    # d'éligibilité IA (calculé dans run_quality_analysis, stocké en
-    # session_state car ce point-ci, contrairement au bloc du bouton,
-    # s'exécute à CHAQUE rendu de page — donc reste visible après le
-    # rerun qui suit le clic sur "Lancer l'analyse qualité"). Réservé au
-    # consultant : jamais affiché à un client, jamais en démo.
-    if is_consultant():
-        _ia_diag_lines = st.session_state.get("_ia_eligibility_diag")
-        if _ia_diag_lines:
-            with st.expander("🤖 Éligibilité IA par onglet (diagnostic consultant)", expanded=False):
-                for _line in _ia_diag_lines:
-                    st.markdown(_line)
 
     # AJOUTÉ (23/08/2026) ; RÉVISÉ (26/08/2026, règle globale hide_all_prereqs)
     # — une anomalie "Prérequis BC requis" reste affichée tant que son code
