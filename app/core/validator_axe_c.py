@@ -385,6 +385,7 @@ def validate_file_axe_c(
 
     if not api_key:
         result["error"] = "Clé API Gemini non configurée."
+        print(f"[QC-DIAG] validate_file_axe_c : api_key vide, arrêt immédiat.")
         return result
 
     if not api_key:
@@ -392,6 +393,7 @@ def validate_file_axe_c(
 
     metadata    = parse_result.get("metadata", {})
     data_tables = parse_result.get("data_tables", [])
+    print(f"[QC-DIAG] validate_file_axe_c : api_key présente (len={len(api_key)}), data_tables={data_tables}")
 
     for sheet_name in data_tables:
         meta        = metadata.get(sheet_name, {})
@@ -401,17 +403,26 @@ def validate_file_axe_c(
         a_anomalies = axe_a_result.get("by_sheet", {}).get(sheet_name, [])
         b_anomalies = axe_b_result.get("by_sheet", {}).get(sheet_name, [])
         all_anomalies = a_anomalies + b_anomalies
+        print(f"[QC-DIAG] Onglet {sheet_name!r} : {len(a_anomalies)} anomalie(s) Axe A, {len(b_anomalies)} Axe B")
 
         if not all_anomalies:
             result["by_sheet"][sheet_name] = []
             continue
 
         # Enrichir avec l'IA
-        enriched = enrich_anomalies_with_ai(
-            anomalies=all_anomalies,
-            table_label=table_label,
-            api_key=api_key,
-        )
+        try:
+            enriched = enrich_anomalies_with_ai(
+                anomalies=all_anomalies,
+                table_label=table_label,
+                api_key=api_key,
+            )
+        except Exception as _exc:
+            print(f"[QC-DIAG] EXCEPTION dans enrich_anomalies_with_ai pour {sheet_name!r} : {type(_exc).__name__} : {_exc}")
+            import traceback
+            traceback.print_exc()
+            enriched = all_anomalies
+        nb_avec_suggestion = sum(1 for a in enriched if a.get("suggestion_ia"))
+        print(f"[QC-DIAG] Onglet {sheet_name!r} : {nb_avec_suggestion}/{len(enriched)} anomalie(s) avec suggestion_ia après enrichissement. LAST_GEMINI_ERROR={LAST_GEMINI_ERROR!r}")
 
         result["by_sheet"][sheet_name] = enriched
 
