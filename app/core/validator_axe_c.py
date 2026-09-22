@@ -87,7 +87,21 @@ def _call_groq(prompt: str, api_key: str) -> dict | None:
                 "model": GROQ_MODEL,
                 "messages": [{"role": "user", "content": prompt}],
                 "temperature": 0.1,
-                "max_tokens": 4096,
+                # RÉVISÉ (01/09/2026, 3e passe) — CAUSE RÉELLE probable du
+                # "0 suggestion IA" persistant même après correction du nom
+                # de modèle : openai/gpt-oss-120b est un modèle de
+                # RAISONNEMENT — il consomme une partie du budget de
+                # tokens pour son raisonnement interne (champ "reasoning",
+                # séparé de "content"), avec un bug documenté côté Groq où
+                # le contenu final revient VIDE si le raisonnement épuise
+                # tout le budget avant de produire la réponse finale.
+                # "max_tokens" (ancien paramètre) est en plus le mauvais
+                # nom pour ces modèles précis — "max_completion_tokens"
+                # est le paramètre correct. reasoning_effort=low réduit le
+                # risque en minimisant le raisonnement interne, laissant
+                # plus de place au contenu final recherché.
+                "max_completion_tokens": 8192,
+                "reasoning_effort": "low",
                 "response_format": {"type": "json_object"},
             },
             timeout=45,
@@ -205,29 +219,35 @@ def _parse_json_response(content: str, provider: str) -> dict | None:
 
 def _call_gemini(prompt: str, api_key: str) -> dict | None:
     """
-    AJOUTÉ (01/09/2026) — répartiteur : essaie Groq en premier (quota plus
-    généreux), bascule automatiquement sur Gemini si Groq échoue (quota,
-    panne réseau, clé absente...), et inversement si seul Gemini est
-    configuré. Nom de fonction conservé pour ne rien casser côté
-    appelants existants (enrich_coherence_with_ai, validate_file_axe_c).
-    Le paramètre `api_key` reçu n'est plus utilisé directement — chaque
-    fournisseur va chercher sa propre clé, puisque les deux peuvent être
-    configurés en parallèle.
+    RÉVISÉ (01/09/2026, 3e passe, veille de démo) — répartiteur : essaie
+    désormais GEMINI en premier (fournisseur éprouvé sur ce projet depuis
+    des semaines), bascule automatiquement sur Groq si Gemini échoue
+    (quota, panne réseau), et inversement si seul Groq est configuré.
+    Ordre inversé par rapport à la version précédente (Groq en premier) —
+    Groq utilise désormais un modèle de raisonnement (openai/gpt-oss-120b,
+    remplaçant officiel après le retrait de llama-3.3-70b-versatile le 16
+    août 2026) avec un risque documenté de contenu vide selon l'effort de
+    raisonnement — la fiabilité prime sur le quota à la veille d'une démo.
+    Nom de fonction conservé pour ne rien casser côté appelants existants
+    (enrich_coherence_with_ai, validate_file_axe_c). Le paramètre
+    `api_key` reçu n'est plus utilisé directement — chaque fournisseur va
+    chercher sa propre clé, puisque les deux peuvent être configurés en
+    parallèle.
     """
     _groq_key   = _get_secret("GROQ_API_KEY")
     _gemini_key = _get_secret("GEMINI_API_KEY")
 
-    if _groq_key:
-        result = _call_groq(prompt, _groq_key)
+    if _gemini_key:
+        result = _call_gemini_native(prompt, _gemini_key)
         if result is not None:
             return result
-        # Échec Groq (quota ou autre) — bascule sur Gemini si disponible.
-        if _gemini_key:
-            return _call_gemini_native(prompt, _gemini_key)
+        # Échec Gemini (quota ou autre) — bascule sur Groq si disponible.
+        if _groq_key:
+            return _call_groq(prompt, _groq_key)
         return None
 
-    if _gemini_key:
-        return _call_gemini_native(prompt, _gemini_key)
+    if _groq_key:
+        return _call_groq(prompt, _groq_key)
 
     LAST_GEMINI_ERROR = "Aucune clé API configurée (ni GROQ_API_KEY, ni GEMINI_API_KEY)."
     return None
