@@ -38,7 +38,11 @@ GEMINI_URL = (
     "models/gemini-3.6-flash:generateContent"
 )
 AUTO_CORRECT_THRESHOLD = 90  # % de confiance minimum pour auto-correction
-MAX_ANOMALIES_PER_BATCH = 15 # Nb max d'anomalies par appel API
+MAX_ANOMALIES_PER_BATCH = 8  # RÉVISÉ (01/09/2026) — réduit de 15 à 8 : un lot plus
+                              # petit laisse plus de marge à un modèle de raisonnement
+                              # (openai/gpt-oss-120b) pour répondre complètement sans
+                              # tronquer avant la fin, en plus du fix d'association par
+                              # "id" plutôt que par position (voir enrich_anomalies_with_ai).
 
 
 def _get_secret(name: str) -> str:
@@ -331,11 +335,31 @@ def enrich_anomalies_with_ai(
         if not response or not isinstance(response, list):
             continue
 
-        # Associer les suggestions aux anomalies
-        for j, suggestion in enumerate(response):
-            if j >= len(batch):
-                break
-            orig_idx, _ = batch[j]
+        # RÉVISÉ (01/09/2026) — BUG RÉEL TROUVÉ ET CONFIRMÉ (144 anomalies
+        # envoyées, seulement 69 suggestions obtenues — un taux d'environ
+        # 50%, trop régulier pour être du hasard) : les suggestions
+        # étaient associées par POSITION dans la réponse (1ère suggestion
+        # -> 1ère anomalie du lot, etc.). Si l'IA renvoie MOINS d'objets
+        # que demandé pour un lot de 15 (comportement documenté des
+        # modèles de raisonnement comme openai/gpt-oss-120b — budget de
+        # tokens partiellement consommé par le raisonnement interne avant
+        # la réponse finale), tout le reste du lot était perdu même si la
+        # réponse elle-même était valide et exploitable. Associe
+        # désormais par "id" (déjà demandé explicitement dans le prompt,
+        # 1-indexé au sein du lot) — fonctionne quel que soit le nombre
+        # ou l'ordre réel des suggestions renvoyées.
+        suggestions_by_id = {}
+        for suggestion in response:
+            try:
+                _sid = int(suggestion.get("id"))
+                suggestions_by_id[_sid] = suggestion
+            except (TypeError, ValueError):
+                continue
+
+        for j, (orig_idx, _) in enumerate(batch, start=1):
+            suggestion = suggestions_by_id.get(j)
+            if suggestion is None:
+                continue
 
             suggested = str(suggestion.get("valeur_suggeree", "")).strip()
             confidence = int(suggestion.get("confiance", 0))
