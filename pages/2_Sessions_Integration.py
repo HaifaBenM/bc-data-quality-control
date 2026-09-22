@@ -7,6 +7,7 @@ from app.core.structure_validator import validate_file_structure
 from app.core.validator_axe_a import validate_file_axe_a
 from app.core.validator_axe_b import validate_file_axe_b
 from app.core.validator_axe_c import validate_file_axe_c, get_gemini_api_key, is_gemini_available, validate_coherence_axe_c
+from app.core import validator_axe_c as _validator_axe_c_module
 from app.core.auth import require_role, is_consultant, get_display_name
 from app.core.execution_planner import get_execution_plan, build_plan_from_bc
 from app.core.integration_levels import (
@@ -471,22 +472,6 @@ def run_quality_analysis(pr: dict, cfg: dict, early_cache: dict | None = None, i
     lignes du fichier), utilisé par les deux appelants pour l'affichage.
     """
     api_key     = get_gemini_api_key()
-    try:
-        import os as _os_diag
-        _env_groq   = "GROQ_API_KEY" in _os_diag.environ
-        _env_gemini = "GEMINI_API_KEY" in _os_diag.environ
-        _sec_groq   = "GROQ_API_KEY" in st.secrets
-        _sec_gemini = "GEMINI_API_KEY" in st.secrets
-        _sec_keys   = list(st.secrets.keys())
-        st.warning(
-            f"🔬 DIAGNOSTIC TEMPORAIRE (à retirer après ce test) — "
-            f"api_key finale : {'PRÉSENTE len='+str(len(api_key)) if api_key else 'VIDE'} | "
-            f"environ GROQ={_env_groq} GEMINI={_env_gemini} | "
-            f"st.secrets GROQ={_sec_groq} GEMINI={_sec_gemini} | "
-            f"clés top-niveau de st.secrets : {_sec_keys}"
-        )
-    except Exception as _diag_exc:
-        st.warning(f"🔬 DIAGNOSTIC TEMPORAIRE — Exception en inspectant st.secrets : {type(_diag_exc).__name__} : {_diag_exc}")
     client_code = cfg.get("client_code", "")
 
     if early_cache:
@@ -525,6 +510,45 @@ def run_quality_analysis(pr: dict, cfg: dict, early_cache: dict | None = None, i
     if api_key and include_ai:
         with st.spinner("🤖 Suggestions IA en cours..."):
             axe_c = validate_file_axe_c(axe_a, axe_b, pr, api_key=api_key)
+
+        # AJOUTÉ (01/09/2026) — demande Rami : panneau permanent (pas un
+        # diagnostic ponctuel à retirer) expliquant les VRAIES conditions
+        # d'éligibilité à l'IA — pas "la clé est bonne ou non" (déjà
+        # confirmé), mais "combien d'anomalies existent, combien sont
+        # réellement envoyées à l'IA, et pourquoi les autres ne le sont
+        # pas". Règle d'éligibilité exacte (voir enrich_anomalies_with_ai,
+        # validator_axe_c.py) : une anomalie n'est envoyée à l'IA QUE si
+        # son champ "Valeur" est non vide ET sa "Ligne" est un vrai numéro
+        # de ligne (>0) — les anomalies de type "prérequis BC" (Ligne=0)
+        # ou sans valeur source exploitable en sont exclues d'office.
+        # Réservé au consultant : jamais affiché à un client, jamais dans
+        # une démo.
+        if is_consultant():
+            with st.expander("🤖 Éligibilité IA par onglet (diagnostic consultant)", expanded=False):
+                for _sn_diag in pr.get("data_tables", []):
+                    _a_before = axe_a.get("by_sheet", {}).get(_sn_diag, [])
+                    _b_before = axe_b.get("by_sheet", {}).get(_sn_diag, [])
+                    _total_diag = len(_a_before) + len(_b_before)
+                    _eligible_diag = sum(
+                        1 for _a in (_a_before + _b_before)
+                        if str(_a.get("Valeur", "")).strip() and _a.get("Ligne", 0) > 0
+                    )
+                    _enriched_diag = axe_c.get("by_sheet", {}).get(_sn_diag, [])
+                    _with_suggestion_diag = sum(1 for _a in _enriched_diag if _a.get("suggestion_ia"))
+                    if _total_diag == 0:
+                        continue
+                    st.write(
+                        f"**{_sn_diag}** — {_total_diag} anomalie(s) au total, "
+                        f"{_eligible_diag} éligible(s) à l'IA (valeur source non vide + ligne réelle), "
+                        f"{_with_suggestion_diag} suggestion(s) IA obtenue(s)."
+                    )
+                    if _eligible_diag > _with_suggestion_diag:
+                        st.caption(
+                            f"⚠️ {_eligible_diag - _with_suggestion_diag} anomalie(s) éligible(s) n'ont "
+                            f"pas reçu de suggestion — dernière erreur IA : {_validator_axe_c_module.LAST_GEMINI_ERROR or '(aucune erreur signalée)'}"
+                        )
+        elif not api_key:
+            pass  # pas de panneau si l'IA n'est pas configurée du tout — rien à diagnostiquer ici
 
     merged = merge_results(axe_a, axe_b, axe_c, parse_result=pr)
 

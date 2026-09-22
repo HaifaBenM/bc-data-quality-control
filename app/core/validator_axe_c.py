@@ -411,21 +411,20 @@ def validate_file_axe_c(
 
         # Enrichir avec l'IA
         try:
-            import streamlit as _st_diag
-            _st_diag.info(f"🔬 DIAG : onglet {sheet_name!r}, {len(all_anomalies)} anomalie(s) à enrichir, en {(len(all_anomalies)+14)//15} lot(s)...")
             enriched = enrich_anomalies_with_ai(
                 anomalies=all_anomalies,
                 table_label=table_label,
                 api_key=api_key,
             )
         except Exception as _exc:
-            import traceback, streamlit as _st_diag
-            _st_diag.error(f"🔬 DIAGNOSTIC — EXCEPTION dans enrich_anomalies_with_ai pour {sheet_name!r} : {type(_exc).__name__} : {_exc}")
-            _st_diag.code(traceback.format_exc())
+            # RÉVISÉ (01/09/2026) — plus de message affiché ici directement
+            # (ni print, ni st.error) : une exception éventuelle reste
+            # silencieuse à ce niveau, mais LAST_GEMINI_ERROR est mis à
+            # jour pour rester visible via le panneau permanent "Éligibilité
+            # IA par onglet" (réservé au consultant, côté page).
+            global LAST_GEMINI_ERROR
+            LAST_GEMINI_ERROR = f"Exception dans enrich_anomalies_with_ai pour {sheet_name!r} : {type(_exc).__name__} : {_exc}"
             enriched = all_anomalies
-        nb_avec_suggestion = sum(1 for a in enriched if a.get("suggestion_ia"))
-        import streamlit as _st_diag
-        _st_diag.info(f"🔬 DIAG : onglet {sheet_name!r} -> {nb_avec_suggestion}/{len(enriched)} anomalie(s) avec suggestion_ia. LAST_GEMINI_ERROR={LAST_GEMINI_ERROR!r}")
 
         result["by_sheet"][sheet_name] = enriched
 
