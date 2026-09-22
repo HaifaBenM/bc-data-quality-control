@@ -471,14 +471,22 @@ def run_quality_analysis(pr: dict, cfg: dict, early_cache: dict | None = None, i
     lignes du fichier), utilisé par les deux appelants pour l'affichage.
     """
     api_key     = get_gemini_api_key()
-    print(f"[QC-DIAG] run_quality_analysis : get_gemini_api_key() -> {'PRÉSENTE (len='+str(len(api_key))+')' if api_key else 'VIDE'}")
     try:
         import os as _os_diag
-        print(f"[QC-DIAG] os.environ GROQ_API_KEY présent : {'GROQ_API_KEY' in _os_diag.environ}, GEMINI_API_KEY présent : {'GEMINI_API_KEY' in _os_diag.environ}")
-        print(f"[QC-DIAG] st.secrets contient GROQ_API_KEY : {'GROQ_API_KEY' in st.secrets}, GEMINI_API_KEY : {'GEMINI_API_KEY' in st.secrets}")
-        print(f"[QC-DIAG] st.secrets clés top-niveau disponibles : {list(st.secrets.keys())}")
+        _env_groq   = "GROQ_API_KEY" in _os_diag.environ
+        _env_gemini = "GEMINI_API_KEY" in _os_diag.environ
+        _sec_groq   = "GROQ_API_KEY" in st.secrets
+        _sec_gemini = "GEMINI_API_KEY" in st.secrets
+        _sec_keys   = list(st.secrets.keys())
+        st.warning(
+            f"🔬 DIAGNOSTIC TEMPORAIRE (à retirer après ce test) — "
+            f"api_key finale : {'PRÉSENTE len='+str(len(api_key)) if api_key else 'VIDE'} | "
+            f"environ GROQ={_env_groq} GEMINI={_env_gemini} | "
+            f"st.secrets GROQ={_sec_groq} GEMINI={_sec_gemini} | "
+            f"clés top-niveau de st.secrets : {_sec_keys}"
+        )
     except Exception as _diag_exc:
-        print(f"[QC-DIAG] Exception en inspectant st.secrets : {type(_diag_exc).__name__} : {_diag_exc}")
+        st.warning(f"🔬 DIAGNOSTIC TEMPORAIRE — Exception en inspectant st.secrets : {type(_diag_exc).__name__} : {_diag_exc}")
     client_code = cfg.get("client_code", "")
 
     if early_cache:
