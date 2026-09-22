@@ -24,7 +24,15 @@ import streamlit as st
 # Gemini automatiquement si le premier essai échoue, sans intervention
 # manuelle. Fonctionne aussi avec une seule des deux clés configurée.
 GROQ_URL   = "https://api.groq.com/openai/v1/chat/completions"
-GROQ_MODEL = "llama-3.3-70b-versatile"
+# RÉVISÉ (01/09/2026, 2e passe) — CAUSE RÉELLE du "0 suggestion IA" malgré
+# clés API confirmées présentes : llama-3.3-70b-versatile a été
+# officiellement retiré par Groq le 16 août 2026 (plus d'un mois avant
+# cette bascule) — chaque appel échouait silencieusement en 404 "modèle
+# introuvable" depuis le tout premier jour. Remplacé par openai/gpt-oss-
+# 120b, le remplacement officiellement recommandé par Groq — confirme
+# aussi le support du mode JSON structuré (plus robuste que l'ancien
+# modèle sur ce point précis).
+GROQ_MODEL = "openai/gpt-oss-120b"
 GEMINI_URL = (
     "https://generativelanguage.googleapis.com/v1beta/"
     "models/gemini-3.6-flash:generateContent"
