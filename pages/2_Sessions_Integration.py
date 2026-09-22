@@ -523,32 +523,40 @@ def run_quality_analysis(pr: dict, cfg: dict, early_cache: dict | None = None, i
         # ou sans valeur source exploitable en sont exclues d'office.
         # Réservé au consultant : jamais affiché à un client, jamais dans
         # une démo.
-        if is_consultant():
-            with st.expander("🤖 Éligibilité IA par onglet (diagnostic consultant)", expanded=False):
-                for _sn_diag in pr.get("data_tables", []) + pr.get("ref_tables", []):
-                    _a_before = axe_a.get("by_sheet", {}).get(_sn_diag, [])
-                    _b_before = axe_b.get("by_sheet", {}).get(_sn_diag, [])
-                    _total_diag = len(_a_before) + len(_b_before)
-                    _eligible_diag = sum(
-                        1 for _a in (_a_before + _b_before)
-                        if str(_a.get("Valeur", "")).strip() and _a.get("Ligne", 0) > 0
-                    )
-                    _enriched_diag = axe_c.get("by_sheet", {}).get(_sn_diag, [])
-                    _with_suggestion_diag = sum(1 for _a in _enriched_diag if _a.get("suggestion_ia"))
-                    if _total_diag == 0:
-                        continue
-                    st.write(
-                        f"**{_sn_diag}** — {_total_diag} anomalie(s) au total, "
-                        f"{_eligible_diag} éligible(s) à l'IA (valeur source non vide + ligne réelle), "
-                        f"{_with_suggestion_diag} suggestion(s) IA obtenue(s)."
-                    )
-                    if _eligible_diag > _with_suggestion_diag:
-                        st.caption(
-                            f"⚠️ {_eligible_diag - _with_suggestion_diag} anomalie(s) éligible(s) n'ont "
-                            f"pas reçu de suggestion — dernière erreur IA : {_validator_axe_c_module.LAST_GEMINI_ERROR or '(aucune erreur signalée)'}"
-                        )
-        elif not api_key:
-            pass  # pas de panneau si l'IA n'est pas configurée du tout — rien à diagnostiquer ici
+        # RÉVISÉ (01/09/2026, 2e passe) — bug trouvé : ce panneau,
+        # affiché ICI (dans run_quality_analysis, appelée depuis le clic
+        # du bouton), disparaissait instantanément — le clic déclenche un
+        # st.rerun() juste après (voir l'appelant), qui efface tout
+        # rendu de CE run avant que l'utilisateur ait le temps de le
+        # lire. Contenu calculé ici, mais PERSISTÉ en session_state et
+        # RÉAFFICHÉ depuis display_merged_analysis (qui s'exécute à
+        # chaque rendu de page, contrairement à ce bloc) — même principe
+        # que les messages de feedback Propager/Réanalyser déjà en place.
+        _ia_diag_lines = []
+        for _sn_diag in pr.get("data_tables", []) + pr.get("ref_tables", []):
+            _a_before = axe_a.get("by_sheet", {}).get(_sn_diag, [])
+            _b_before = axe_b.get("by_sheet", {}).get(_sn_diag, [])
+            _total_diag = len(_a_before) + len(_b_before)
+            _eligible_diag = sum(
+                1 for _a in (_a_before + _b_before)
+                if str(_a.get("Valeur", "")).strip() and _a.get("Ligne", 0) > 0
+            )
+            _enriched_diag = axe_c.get("by_sheet", {}).get(_sn_diag, [])
+            _with_suggestion_diag = sum(1 for _a in _enriched_diag if _a.get("suggestion_ia"))
+            if _total_diag == 0:
+                continue
+            _line = (
+                f"**{_sn_diag}** — {_total_diag} anomalie(s) au total, "
+                f"{_eligible_diag} éligible(s) à l'IA (valeur source non vide + ligne réelle), "
+                f"{_with_suggestion_diag} suggestion(s) IA obtenue(s)."
+            )
+            if _eligible_diag > _with_suggestion_diag:
+                _line += (
+                    f"  \n⚠️ {_eligible_diag - _with_suggestion_diag} anomalie(s) éligible(s) n'ont "
+                    f"pas reçu de suggestion — dernière erreur IA : {_validator_axe_c_module.LAST_GEMINI_ERROR or '(aucune erreur signalée)'}"
+                )
+            _ia_diag_lines.append(_line)
+        st.session_state["_ia_eligibility_diag"] = _ia_diag_lines
 
     merged = merge_results(axe_a, axe_b, axe_c, parse_result=pr)
 
@@ -602,6 +610,19 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
     avant de le présenter comme "100% intégrable" en démo.
     """
     all_anomalies = merged.get("all_anomalies", [])
+
+    # AJOUTÉ (01/09/2026, 2e passe) — affichage persistant du panneau
+    # d'éligibilité IA (calculé dans run_quality_analysis, stocké en
+    # session_state car ce point-ci, contrairement au bloc du bouton,
+    # s'exécute à CHAQUE rendu de page — donc reste visible après le
+    # rerun qui suit le clic sur "Lancer l'analyse qualité"). Réservé au
+    # consultant : jamais affiché à un client, jamais en démo.
+    if is_consultant():
+        _ia_diag_lines = st.session_state.get("_ia_eligibility_diag")
+        if _ia_diag_lines:
+            with st.expander("🤖 Éligibilité IA par onglet (diagnostic consultant)", expanded=False):
+                for _line in _ia_diag_lines:
+                    st.markdown(_line)
 
     # AJOUTÉ (23/08/2026) ; RÉVISÉ (26/08/2026, règle globale hide_all_prereqs)
     # — une anomalie "Prérequis BC requis" reste affichée tant que son code
