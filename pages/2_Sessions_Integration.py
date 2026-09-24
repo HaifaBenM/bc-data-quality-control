@@ -1546,21 +1546,33 @@ with tab_main:
             # boucle, y compris après une édition manuelle. Granularité
             # heure:minute:seconde pour éviter les doublons de nom si deux
             # sessions sont créées le même jour sur le même package.
-            _name_sig    = f"{sel_pkg_code}|{date_controle.isoformat()}"
-            _sig_changed = st.session_state.get("_ses_name_sig") != _name_sig
-            if _sig_changed:
-                st.session_state["_ses_name_sig"] = _name_sig
-                st.session_state["_ses_name_ts"]  = datetime.now()
-            _ts = st.session_state.get("_ses_name_ts", datetime.now())
-            if _sig_changed or "ses_name_input" not in st.session_state:
-                st.session_state["ses_name_input"] = (
-                    f"{sel_pkg_name} — {_ts.strftime('%d/%m/%Y %H:%M:%S')}" if sel_pkg_name else ""
+            # RÉVISÉ (01/09/2026, 1h avant la démo) — chantier 6 : en mode
+            # "sans package", ce champ restait affiché avec un astérisque
+            # (donnant l'impression d'être obligatoire) alors qu'il est
+            # censé être entièrement automatique (dérivé du nom du fichier
+            # à l'Étape 2, jamais saisi à la main) — un client aurait tapé
+            # quelque chose ici sans savoir que c'était inutile. Le champ
+            # est maintenant complètement masqué dans ce mode, remplacé par
+            # un simple message explicatif.
+            if _no_package_mode:
+                session_name = ""
+                st.caption("ℹ️ Le nom de la session sera automatiquement basé sur le nom du fichier déposé à l'étape suivante.")
+            else:
+                _name_sig    = f"{sel_pkg_code}|{date_controle.isoformat()}"
+                _sig_changed = st.session_state.get("_ses_name_sig") != _name_sig
+                if _sig_changed:
+                    st.session_state["_ses_name_sig"] = _name_sig
+                    st.session_state["_ses_name_ts"]  = datetime.now()
+                _ts = st.session_state.get("_ses_name_ts", datetime.now())
+                if _sig_changed or "ses_name_input" not in st.session_state:
+                    st.session_state["ses_name_input"] = (
+                        f"{sel_pkg_name} — {_ts.strftime('%d/%m/%Y %H:%M:%S')}" if sel_pkg_name else ""
+                    )
+                session_name = st.text_input(
+                    "Nom de la session *",
+                    key="ses_name_input",
+                    placeholder="MDD Vente — Juin 2026",
                 )
-            session_name = st.text_input(
-                "Nom de la session *",
-                key="ses_name_input",
-                placeholder="MDD Vente — Juin 2026",
-            )
 
         with col2:
             notes     = st.text_area("Notes", height=68, key=f"step1_notes_{active_client}")
