@@ -263,20 +263,27 @@ def build_roadmap(
     table_id), puis les entrées "Non classé" à la fin (ordre stable par
     table_id, elles ne dépendent d'aucun ordre).
 
-    IMPORTANT : les tables de Niveau 0 (ex. G/L Account) sont TOUJOURS
-    incluses, que la détection par jointures les ait trouvées ou non.
-    C'est une règle métier absolue ("le plan comptable est toujours
-    vérifié en premier") — elle ne peut pas dépendre du succès d'une
-    traversée dynamique, qui s'arrête souvent avant d'atteindre le plan
-    comptable (rarement référencé directement par les tables du package,
-    plutôt à 2+ sauts via un groupe comptable). La faire dépendre de la
-    détection reviendrait à violer la règle dans la majorité des cas réels.
+    RÉVISÉ (08/10/2026) — demande Rami, analyse fonctionnelle BC : le
+    Niveau 0 (G/L Account) N'EST PLUS forcé inconditionnellement. Avant
+    cette révision, toute table classée Niveau 0 dans level_config était
+    injectée dans la roadmap même sans aucune dépendance réelle détectée
+    dans le fichier courant (ex. un fichier Devise, sans aucun lien avec
+    le plan comptable, faisait quand même apparaître "Plan comptable" —
+    confirmé non conforme : le plan comptable n'est un prérequis BC que
+    lorsque le fichier contient effectivement une donnée qui y résout
+    (onglet Compte général, groupes comptables 92/93/94, ou lignes
+    journal/document de type G/L Account) — jamais de façon universelle.
+    Le Niveau 0 suit désormais EXACTEMENT la même règle que tous les
+    autres niveaux : une table n'apparaît que si `discovered` (traversée
+    de jointures réelle) ou le mécanisme dédié de détection (voir
+    check_gl_account_prerequisites / build_prerequisites_report, qui
+    produit déjà des entrées "Table référencée BC": "15" sur anomalie
+    réelle) l'a réellement trouvée. Rien n'est perdu pour les vrais cas
+    client : ces mécanismes couvrent déjà le plan comptable, ce qui
+    manquait ici était seulement le forçage aveugle.
     """
     roadmap: list[RoadmapEntry] = []
     _all_ids = dict(discovered)
-    for _tid, _info in level_config.items():
-        if _info.level == 0 and not _info.ignored and _tid not in _all_ids:
-            _all_ids[_tid] = DiscoveredTable(table_id=_tid, chain_resolved=True)
 
     for table_id, disc in _all_ids.items():
         info = level_config.get(table_id)
@@ -328,9 +335,13 @@ def build_roadmap_from_prereqs(
     donc la notion de "chaîne non résolue" ne s'applique pas — inutile
     d'afficher un champ package_code pour ces entrées.
 
-    Le plan comptable (Niveau 0) reste forcé, pour la même raison que
-    build_roadmap() : ce n'est pas Axe B qui décide de son caractère
-    obligatoire, c'est une règle métier absolue.
+    RÉVISÉ (08/10/2026) — demande Rami, analyse fonctionnelle BC : le plan
+    comptable (Niveau 0) n'est PLUS forcé inconditionnellement (voir
+    build_roadmap() pour la justification complète). Il suit désormais la
+    même règle que les autres niveaux : il n'apparaît que si `prereqs`
+    contient une vraie anomalie Axe B le concernant (check_gl_account_
+    prerequisites produit déjà "Table référencée BC": "15" dans ce cas) ou
+    s'il était déjà affiché dans la session (previous_table_ids).
 
     GÉNÉRALISÉ (27/07/2026) : chaque entrée de la roadmap reçoit maintenant
     son propre sous-détail (entry.sub_anomalies) — les lignes de `prereqs`
@@ -425,9 +436,11 @@ def build_roadmap_from_prereqs(
     # ailleurs, remplissent déjà ce critère — jamais pour décider si une
     # table apparaît.
 
-    for _tid, _info in level_config.items():
-        if _info.level == 0 and not _info.ignored:
-            table_ids.add(_tid)
+    # RÉVISÉ (08/10/2026) — SUPPRIMÉ : le forçage inconditionnel de toute
+    # table Niveau 0 (ex. G/L Account) ici violait le critère d'inclusion
+    # énoncé juste au-dessus ("anomalie Axe B réelle OU déjà vue avant" —
+    # jamais la seule structure théorique). Le Niveau 0 suit maintenant ce
+    # même critère, comme tous les autres niveaux — voir docstring.
 
     _ignored_ids = {tid for tid, info in level_config.items() if info.ignored}
     table_ids -= _ignored_ids

@@ -718,10 +718,14 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
             st.session_state[_all_sel_key] = False
         _toggle_label = "⬜ Désélectionner" if st.session_state[_all_sel_key] else "✅ Sélectionner"
 
-        # RÉVISÉ (27/08/2026, 9e passe) — demande Rami : Propager n'est PAS
-        # réservé au consultant — corrigible par le client aussi, retiré de la
-        # restriction is_consultant().
-        _rowsel1, _rowsel2, _row_spacer, _rowsel3 = st.columns([1, 1, 4, 2])
+        # RÉVISÉ (08/10/2026) — demande Rami, retour post-démo : les anomalies
+        # identiques sont désormais regroupées en une seule ligne (voir plus
+        # bas), donc le bouton "Propager" (qui recopiait une correction sur
+        # les autres lignes partageant la même valeur source) n'a plus de
+        # raison d'être — corriger la ligne groupée corrige déjà toutes les
+        # occurrences. Retiré, avec son état de session associé, pour réduire
+        # le nombre de boutons à l'écran.
+        _rowsel1, _row_spacer, _rowsel3 = st.columns([1, 5, 2])
 
         with _rowsel1:
             if st.button(_toggle_label, key=f"btn_toggle_select_{sn}", use_container_width=True):
@@ -730,15 +734,6 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
                 st.session_state[_editor_gen_key] += 1
                 st.rerun()
         _select_override = st.session_state.pop(f"_merged_select_override_{sn}", None)
-        _propagate_overrides: dict = st.session_state.get(f"_propagate_overrides_{sn}", {})
-
-        _propagate_clicked = False
-        if _rowsel2 is not None:
-            with _rowsel2:
-                _propagate_clicked = st.button(
-                    "🔁 Propager", key=f"btn_propagate_{sn}", use_container_width=True,
-                    help="Applique chaque correction saisie à toutes les autres lignes ayant la même valeur source dans le même champ",
-                )
 
         with _rowsel3:
             # RÉVISÉ (27/08/2026, 4e/5e/6e passes) — voir historique complet du
@@ -778,72 +773,91 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
             st.info("Aucune ligne ne correspond aux filtres sélectionnés.")
         else:
             _sev_icon = {"Majeure": "🔴 Majeure", "Mineure": "🟠 Mineure"}
-            _has_ia_col = any(a.get("suggestion_ia") for a in filtered)
 
-
-            # AJOUTÉ (26/08/2026, 2e passe) ; RÉVISÉ (27/08/2026, retrait Copier) —
-            # affichage du message persisté posé par "🔁 Propager" lors du run
-            # précédent, juste avant son propre st.rerun() — voir commentaire sur
-            # le piège "message avant rerun jamais visible" plus bas.
-            _propagate_fb = st.session_state.pop(f"_propagate_feedback_{sn}", None)
-            if _propagate_fb:
-                (st.success if _propagate_fb[0] == "success" else st.info)(_propagate_fb[1])
-
-            # AJOUTÉ (01/09/2026) — même piège, même fix, pour le nouveau
-            # cycle "Appliquer et réanalyser".
+            # AJOUTÉ (01/09/2026) — piège trouvé : un st.success/st.info juste
+            # avant st.rerun() ne s'affiche jamais (le rerun efface le rendu
+            # avant qu'il atteigne l'écran) — persisté en session_state,
+            # affiché au prochain rendu à la place.
             _reanalyze_fb = st.session_state.pop(f"_reanalyze_feedback_{sn}", None)
             if _reanalyze_fb:
                 (st.success if _reanalyze_fb[0] == "success" else st.info)(_reanalyze_fb[1])
 
-            def _row(a: dict) -> dict:
-                _key = (a.get("Champ", ""), str(a.get("Valeur", "")).strip())
-                _is_corrigible = a.get("Classification") in ("VALEUR_CORRIGIBLE", "SUGGESTION_IA")
-                _suggestion = a.get("Correction suggérée", "")
-                # RÉVISÉ (26/08/2026, jour J) — demande Rami : une anomalie
-                # d'incohérence IA n'a pas de "Correction suggérée" classique
-                # (désormais dans sa propre colonne "🤖 Suggestion IA", voir
-                # coherence_detector.py) — sans repli, "Nouvelle valeur"
-                # resterait vide et impossible à appliquer directement. Repli
-                # sur suggestion_ia uniquement quand Correction suggérée est
-                # vide, pour que la ligne reste éditable/applicable de bout en
-                # bout comme les autres.
-                if not _suggestion:
-                    _suggestion = a.get("suggestion_ia", "")
-                _nouvelle = _propagate_overrides.get(_key, _suggestion)
+            # RÉVISÉ (08/10/2026) — demande Rami, retour post-démo : regroupe
+            # les anomalies identiques en UNE SEULE ligne affichée/corrigible,
+            # au lieu d'une ligne par ligne Excel ("une erreur répétée 100
+            # fois" ne doit être corrigée, et vue, qu'une fois). Clé de
+            # regroupement : (Onglet, Champ, Type d'anomalie, Valeur source) —
+            # volontairement PAS juste (Champ, Valeur) : une même valeur
+            # fautive peut apparaître dans deux onglets différents ou pour
+            # deux types d'erreur différents, sans que la bonne correction
+            # soit forcément la même dans les deux cas. Remplace l'ancien
+            # bouton "Propager" : corriger la ligne groupée (cocher + saisir
+            # "Nouvelle valeur" une fois) s'applique déjà à toutes les
+            # occurrences du groupe au moment de l'application réelle (voir
+            # plus bas, expansion de `groups`).
+            from collections import Counter as _Counter
+
+            def _group_key(a: dict) -> tuple:
+                return (
+                    a.get("Onglet", ""), a.get("Champ", ""),
+                    a.get("Type d'anomalie", ""), str(a.get("Valeur", "")).strip(),
+                )
+
+            _groups_map: dict[tuple, list[dict]] = {}
+            _groups_order: list[tuple] = []
+            for a in filtered:
+                k = _group_key(a)
+                if k not in _groups_map:
+                    _groups_map[k] = []
+                    _groups_order.append(k)
+                _groups_map[k].append(a)
+            groups: list[list[dict]] = [_groups_map[k] for k in _groups_order]
+
+            def _group_row(members: list[dict]) -> dict:
+                first = members[0]
+                _is_corrigible = first.get("Classification") in ("VALEUR_CORRIGIBLE", "SUGGESTION_IA")
+
+                # Suggestion la plus fréquente dans le groupe — l'IA n'est
+                # pas forcément identique d'une occurrence à l'autre.
+                _sugg_candidates = []
+                for m in members:
+                    _s = str(m.get("Correction suggérée") or m.get("suggestion_ia") or "").strip()
+                    if _s:
+                        _sugg_candidates.append(_s)
+                _nouvelle = _Counter(_sugg_candidates).most_common(1)[0][0] if _sugg_candidates else ""
+
                 _appliquer = (
                     _select_override if _select_override is not None
-                    else (_is_corrigible and bool(str(_nouvelle).strip()))
+                    else (_is_corrigible and bool(_nouvelle))
                 )
-                # RÉVISÉ (27/08/2026, jour de la démo) — demande Rami : retirer
-                # "Correction suggérée" de l'affichage, la remplacer à sa place
-                # par "🤖 Suggestion IA" — une seule colonne de suggestion
-                # visible, quelle que soit son origine (similarité de texte ou
-                # IA). Rien ne change en interne : "Correction suggérée" (a.get
-                # ci-dessus, via _suggestion) continue de servir au pré-
-                # remplissage de "Nouvelle valeur" — seule la colonne AFFICHÉE
-                # change.
+
                 _ia_display = ""
-                if a.get("suggestion_ia"):
-                    _ia_display = f"{a['suggestion_ia']} ({a.get('confiance_ia', 0)}%)"
-                elif a.get("Correction suggérée"):
-                    _ia_display = a["Correction suggérée"]
-                out = {
+                if first.get("suggestion_ia"):
+                    _ia_display = f"{first['suggestion_ia']} ({first.get('confiance_ia', 0)}%)"
+                elif first.get("Correction suggérée"):
+                    _ia_display = first["Correction suggérée"]
+
+                _lignes = sorted(int(m.get("Ligne", 0)) for m in members)
+                _lignes_display = ", ".join(str(l) for l in _lignes[:5])
+                if len(_lignes) > 5:
+                    _lignes_display += f" … +{len(_lignes) - 5}"
+
+                return {
                     "Appliquer":          _appliquer,
-                    "Onglet":             a.get("Onglet", ""),
-                    "Ligne":              a.get("Ligne", ""),
-                    "Identifiant métier": a.get("Identifiant métier", ""),
-                    "Champ":              a.get("Champ", ""),
-                    "Type d'anomalie":    a.get("Type d'anomalie", ""),
-                    "Sévérité":           _sev_icon.get(a.get("Sévérité", ""), a.get("Sévérité", "")),
-                    "Classification":     _cls_label.get(a.get("Classification", ""), ""),
-                    "Message":            a.get("Message", ""),
-                    "Valeur source":      a.get("Valeur", ""),
+                    "Onglet":             first.get("Onglet", ""),
+                    "Occurrences":        len(members),
+                    "Lignes":             _lignes_display,
+                    "Champ":              first.get("Champ", ""),
+                    "Type d'anomalie":    first.get("Type d'anomalie", ""),
+                    "Sévérité":           _sev_icon.get(first.get("Sévérité", ""), first.get("Sévérité", "")),
+                    "Classification":     _cls_label.get(first.get("Classification", ""), ""),
+                    "Message":            first.get("Message", ""),
+                    "Valeur source":      first.get("Valeur", ""),
                     "🤖 Suggestion IA":    _ia_display,
                     "Nouvelle valeur":    _nouvelle,
                 }
-                return out
 
-            edit_rows = [_row(a) for a in filtered]
+            edit_rows = [_group_row(g) for g in groups]
 
             # RÉVISÉ (26/08/2026) — même plafond que l'ancien tableau de
             # correction (perf/stabilité WebSocket, voir historique) — appliqué
@@ -861,8 +875,9 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
             edit_rows_display = edit_rows
 
             _column_config = {
-                "Appliquer": st.column_config.CheckboxColumn(help="Cocher pour inclure cette ligne dans le fichier généré"),
-                "Nouvelle valeur": st.column_config.TextColumn(help="Modifiable — tapez la valeur correcte pour cette cellule"),
+                "Appliquer": st.column_config.CheckboxColumn(help="Cocher pour inclure TOUTES les occurrences de cette ligne dans le fichier généré"),
+                "Occurrences": st.column_config.NumberColumn(help="Nombre de fois où cette anomalie se répète"),
+                "Nouvelle valeur": st.column_config.TextColumn(help="Modifiable — s'applique à toutes les occurrences de cette ligne"),
             }
             edited = st.data_editor(
                 pd.DataFrame(edit_rows_display),
@@ -870,67 +885,12 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
                 hide_index=True,
                 height=min(450, 50 + len(edit_rows_display) * 35),
                 disabled=[
-                    "Onglet", "Ligne", "Identifiant métier", "Champ", "Type d'anomalie",
+                    "Onglet", "Occurrences", "Lignes", "Champ", "Type d'anomalie",
                     "Sévérité", "Classification", "Message", "Valeur source", "🤖 Suggestion IA",
                 ],
                 column_config=_column_config,
                 key=f"merged_editor_{sn}_{st.session_state[_editor_gen_key]}",
             )
-
-            if _propagate_clicked:
-                # RÉVISÉ (01/09/2026) — bug de conception trouvé : l'ancienne
-                # logique exigeait de détecter un CHANGEMENT par rapport à la
-                # valeur par défaut de CHAQUE ligne individuellement — si une
-                # ligne avait déjà la bonne valeur pré-remplie (ex. suggestion
-                # IA automatique) et qu'on la ressaisissait à l'identique, rien
-                # n'était détecté comme "modifié", donc rien ne se propageait
-                # vers les lignes réellement vides du même groupe (Champ +
-                # Valeur source identiques). Nouvelle approche, plus robuste :
-                # pour chaque groupe (Champ, Valeur source), on prend la valeur
-                # non vide la plus fréquente déjà présente dans "Nouvelle
-                # valeur" sur ce groupe, et on l'applique à toutes les lignes
-                # du groupe qui ne l'ont pas encore (vides ou différentes) —
-                # un vrai "rendre cohérent", pas juste "recopier un changement
-                # détecté".
-                from collections import Counter
-                _by_key: dict[tuple, list[str]] = {}
-                for _, row in edited.iterrows():
-                    _k = (row["Champ"], str(row["Valeur source"]).strip())
-                    _v = str(row["Nouvelle valeur"]).strip()
-                    if _v:
-                        _by_key.setdefault(_k, []).append(_v)
-
-                _new_overrides = dict(_propagate_overrides)
-                for _k, _vals in _by_key.items():
-                    _most_common_val, _count = Counter(_vals).most_common(1)[0]
-                    # RÉVISÉ (01/09/2026) — demande Rami : règle simplifiée,
-                    # plus intuitive — une seule ligne renseignée dans le
-                    # groupe suffit pour propager sa valeur aux autres
-                    # (au lieu d'exiger 2 lignes déjà d'accord). Clique sur
-                    # Propager étant déjà un geste volontaire de la part de
-                    # l'utilisateur, pas besoin d'une majorité pour
-                    # confirmer l'intention.
-                    if _count >= 1:
-                        _new_overrides[_k] = _most_common_val
-
-                _propagated = 0
-                for r in edit_rows:
-                    _key = (r["Champ"], str(r["Valeur source"]).strip())
-                    if _key in _new_overrides and str(r["Nouvelle valeur"]).strip() != _new_overrides[_key]:
-                        _propagated += 1
-                st.session_state[f"_propagate_overrides_{sn}"] = _new_overrides
-                st.session_state[_editor_gen_key] += 1
-                # RÉVISÉ (26/08/2026, 2e passe) — bug trouvé : st.success/
-                # st.info juste avant st.rerun() ne s'affichaient jamais (le
-                # rerun efface le rendu en cours avant qu'il atteigne
-                # l'écran — même piège déjà rencontré cette semaine).
-                # Message persisté en session_state, affiché au prochain
-                # rendu à la place.
-                if _propagated:
-                    st.session_state[f"_propagate_feedback_{sn}"] = ("success", f"✅ {_propagated} ligne(s) mise(s) à jour avec la même correction.")
-                else:
-                    st.session_state[f"_propagate_feedback_{sn}"] = ("info", "ℹ️ Rien à propager — soit aucune autre ligne ne partage la même valeur source dans ce champ, soit toutes l'ont déjà.")
-                st.rerun()
 
             # AJOUTÉ (01/09/2026) — demande Rami : cycle complet pour travailler
             # un gros socle par type d'erreur — corriger un lot (filtré),
@@ -949,14 +909,25 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
                 if not _working_bytes:
                     st.error("❌ Fichier introuvable en mémoire — remontez à l'étape 2.")
                 else:
-                    _selected_ra = edited[
-                        (edited["Appliquer"] == True)
-                        & (edited["Nouvelle valeur"].astype(str).str.strip() != "")
-                    ]
-                    _corrections_ra = [
-                        {"sheet": row["Onglet"], "excel_row": int(row["Ligne"]), "column_name": row["Champ"], "new_value": row["Nouvelle valeur"]}
-                        for _, row in _selected_ra.iterrows()
-                    ]
+                    # RÉVISÉ (08/10/2026) — l'éditeur affiche une ligne par
+                    # GROUPE d'anomalies identiques (voir plus haut) : chaque
+                    # ligne cochée avec une "Nouvelle valeur" doit donc
+                    # générer UNE correction par occurrence réelle du groupe,
+                    # pas une seule — sinon seule une ligne Excel du groupe
+                    # serait corrigée au lieu de toutes.
+                    _corrections_ra = []
+                    for _idx_ra, _row_ra in edited.reset_index(drop=True).iterrows():
+                        if not _row_ra["Appliquer"] or not str(_row_ra["Nouvelle valeur"]).strip():
+                            continue
+                        if _idx_ra >= len(groups):
+                            continue
+                        for _m_ra in groups[_idx_ra]:
+                            _corrections_ra.append({
+                                "sheet": _m_ra.get("Onglet", ""),
+                                "excel_row": int(_m_ra.get("Ligne", 0)),
+                                "column_name": _m_ra.get("Champ", ""),
+                                "new_value": _row_ra["Nouvelle valeur"],
+                            })
                     _corrections_ra += [
                         {"sheet": r["Onglet"], "excel_row": int(r["Ligne"]), "column_name": r["Champ"], "new_value": r["Nouvelle valeur"]}
                         for r in _overflow_rows
@@ -1024,6 +995,7 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
         edited = _pd_fallback.DataFrame(columns=["Onglet", "Ligne", "Champ", "Nouvelle valeur", "Appliquer", "Valeur source"])
         _overflow_rows = []
         edit_rows = []
+        groups: list[list[dict]] = []
 
 
     cgen1, cgen2, cgen3 = st.columns([1, 1, 2])
@@ -1043,14 +1015,23 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
         if not original_bytes:
             st.error("❌ Fichier original introuvable en mémoire — remontez à l'étape 2.")
         else:
-            selected = edited[
-                (edited["Appliquer"] == True)
-                & (edited["Nouvelle valeur"].astype(str).str.strip() != "")
-            ]
-            corrections = [
-                {"sheet": row["Onglet"], "excel_row": int(row["Ligne"]), "column_name": row["Champ"], "new_value": row["Nouvelle valeur"]}
-                for _, row in selected.iterrows()
-            ]
+            # RÉVISÉ (08/10/2026) — même raison que pour "Appliquer ce lot et
+            # réanalyser" : une ligne de l'éditeur = un groupe d'anomalies
+            # identiques, pas une seule — expansion vers toutes les
+            # occurrences réelles avant application.
+            corrections = []
+            for _idx_gc, _row_gc in edited.reset_index(drop=True).iterrows():
+                if not _row_gc["Appliquer"] or not str(_row_gc["Nouvelle valeur"]).strip():
+                    continue
+                if _idx_gc >= len(groups):
+                    continue
+                for _m_gc in groups[_idx_gc]:
+                    corrections.append({
+                        "sheet": _m_gc.get("Onglet", ""),
+                        "excel_row": int(_m_gc.get("Ligne", 0)),
+                        "column_name": _m_gc.get("Champ", ""),
+                        "new_value": _row_gc["Nouvelle valeur"],
+                    })
             corrections += [
                 {"sheet": r["Onglet"], "excel_row": int(r["Ligne"]), "column_name": r["Champ"], "new_value": r["Nouvelle valeur"]}
                 for r in _overflow_rows
