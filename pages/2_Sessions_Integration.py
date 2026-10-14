@@ -1194,6 +1194,54 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
                 with _integ_btn_col2:
                     _btn2_clicked = st.button("2️⃣ Appliquer dans BC", type="primary", key=f"btn_integ_apply_{sn}", use_container_width=True)
             if _btn2_clicked:
+                # AJOUTÉ (14/10/2026) — demande du supérieur de Rami : bloquer
+                # l'intégration BC d'une table tant que ses niveaux prérequis
+                # (Plan comptable, Mode de règlement, etc.) ne sont pas
+                # validés dans la roadmap, avec un message explicite nommant
+                # la prochaine table à intégrer en premier — un seul message
+                # à la fois, qui se répète au clic suivant si une autre
+                # dépendance manque encore. Réutilise telle quelle la
+                # roadmap déjà calculée à l'Étape 3 (paramètre `roadmap` de
+                # cette fonction) et is_level_unlocked() — aucune nouvelle
+                # logique de dépendances, juste un contrôle au clic qui
+                # n'existait pas avant.
+                _target_level_info = None
+                _target_table_id = cfg.get("table_id")
+                if _target_table_id is not None:
+                    try:
+                        _target_level_info = st.session_state.get("level_config", {}).get(int(_target_table_id))
+                    except (TypeError, ValueError):
+                        _target_level_info = None
+
+                _blocked = False
+                if _target_level_info is not None and _target_level_info.level is not None and roadmap:
+                    if not is_level_unlocked(_target_level_info.level, roadmap):
+                        _blocker = next(
+                            (e for e in roadmap
+                             if e.level_info.level is not None
+                             and e.level_info.level < _target_level_info.level
+                             and e.status != "validated"),
+                            None,
+                        )
+                        if _blocker is not None:
+                            _target_label = _target_level_info.table_name
+                            _blocker_label = _blocker.level_info.table_name
+                            _blocked = True
+
+                            @st.dialog("Prérequis manquant")
+                            def _dialog_prereq_missing():
+                                st.warning(
+                                    f"Vous ne pouvez pas intégrer la table **{_target_label}**. "
+                                    f"Veuillez d'abord intégrer la table **{_blocker_label}**."
+                                )
+                                if st.button("Fermer", use_container_width=True, key=f"close_prereq_dialog_{sn}"):
+                                    st.rerun()
+
+                            _dialog_prereq_missing()
+
+                if _blocked:
+                    st.stop()
+
                 with st.spinner("Intégration dans BC en cours..."):
                     try:
                         _tid, _env, _company_id, _tok = _integ["creds"]
@@ -1227,7 +1275,27 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
                                 pass
 
                         st.session_state[_integ_key] = {"stage": "applied"}
-                        st.success("✅ Données intégrées dans Business Central avec succès. Session marquée « Terminée ».")
+
+                        # AJOUTÉ (14/10/2026) — demande du supérieur de Rami :
+                        # une case verte/un simple message inline ne suffit
+                        # pas comme confirmation de réussite — une fenêtre
+                        # explicite, à fermer volontairement, est plus sûre
+                        # pour ne jamais laisser croire qu'une intégration a
+                        # échoué (ou l'inverse). Le bandeau inline persistant
+                        # ("✅ Intégration terminée.", juste en dessous)
+                        # reste affiché aux reruns suivants.
+                        _success_label = _target_level_info.table_name if _target_level_info else cfg.get("file_name", "ce fichier")
+
+                        @st.dialog("Intégration réussie")
+                        def _dialog_integration_success():
+                            st.success(
+                                f"✅ La table **{_success_label}** a été intégrée avec succès dans Business Central. "
+                                f"Session marquée « Terminée »."
+                            )
+                            if st.button("Fermer", type="primary", use_container_width=True, key=f"close_success_dialog_{sn}"):
+                                st.rerun()
+
+                        _dialog_integration_success()
                     except Exception as _apply_exc:
                         st.error(f"❌ Échec de l'intégration : {_apply_exc}")
         else:
@@ -2395,6 +2463,52 @@ with tab_main:
             # level_config vide/non chargée : ne bloque pas l'analyse — à corriger si level_config
             # doit être rendue obligatoire (dépend de si tu veux imposer le seed avant tout usage).
 
+        def _advance_to_step4():
+            _early = st.session_state.get(_early_axeb_key)
+            merged, axe_c, axe_a = run_quality_analysis(pr, cfg, early_cache=_early)
+
+            # AJOUTÉ (01/09/2026) — initialise le fichier de travail du
+            # cycle "Appliquer et réanalyser" — démarre comme une copie de
+            # l'original, mis à jour à chaque lot de corrections appliqué
+            # depuis l'Étape 4.
+            st.session_state["working_file_bytes"] = st.session_state.get("original_file_bytes")
+
+            st.session_state.merged_result = merged
+            st.session_state.axe_c_result  = axe_c
+
+            all_r = merged.get("all_anomalies", [])
+            real  = [a for a in all_r if a.get("Ligne", 0) > 0]
+            st.session_state.config["total"] = len(real)
+            st.session_state.config["major"] = sum(1 for a in real if a.get("Sévérité") == "Majeure")
+            st.session_state.config["minor"] = sum(1 for a in real if a.get("Sévérité") == "Mineure")
+            st.session_state.config["lines"] = axe_a.get("lines_analyzed", 0)
+
+            st.session_state.saved_session_id     = None
+            st.session_state.generated_file_bytes = None
+            st.session_state.generated_file_name  = None
+            st.session_state.prerequisites_report = None
+            st.session_state.step = 4
+
+        # AJOUTÉ (14/10/2026) — demande Rami, simplification de l'interface
+        # ("trop d'étapes") : quand le fichier est conforme ET qu'il n'y a
+        # strictement rien à signaler (aucun niveau prérequis en attente),
+        # on passe directement à l'analyse qualité sans exiger un clic sur
+        # un écran qui ne ferait alors que confirmer "rien à voir ici".
+        # Dès qu'il y a quelque chose à signaler (structure invalide OU
+        # niveaux prérequis en attente), l'écran reste affiché comme avant —
+        # ce n'est pas une suppression de la vérification structurelle/
+        # roadmap, juste un saut automatique quand elle n'apporte rien. Ne
+        # se déclenche qu'UNE fois par fichier (flag en session_state) pour
+        # ne jamais empêcher un retour manuel volontaire ("← Étape
+        # précédente" depuis l'Étape 4) de rester sur cet écran.
+        _roadmap_for_skip = st.session_state.get(_roadmap_key) if val["is_valid"] else None
+        _n_pending_for_skip = sum(1 for e in _roadmap_for_skip if e.status != "validated") if _roadmap_for_skip else 0
+        _auto_advanced_key = f"_auto_advanced_step3_{_roadmap_key}"
+        if val["is_valid"] and _n_pending_for_skip == 0 and not st.session_state.get(_auto_advanced_key):
+            st.session_state[_auto_advanced_key] = True
+            _advance_to_step4()
+            st.rerun()
+
         st.markdown("---")
         # RÉVISÉ (27/08/2026, 5e passe) — demande Rami : le bouton central
         # "Lancer l'analyse qualité" dominait visuellement toute la largeur
@@ -2426,30 +2540,7 @@ with tab_main:
                     "🚀 Lancer l'analyse qualité →", type="primary", use_container_width=True,
                     disabled=not _levels_ok,
                 ):
-                    _early = st.session_state.get(_early_axeb_key)
-                    merged, axe_c, axe_a = run_quality_analysis(pr, cfg, early_cache=_early)
-
-                    # AJOUTÉ (01/09/2026) — initialise le fichier de travail
-                    # du cycle "Appliquer et réanalyser" — démarre comme
-                    # une copie de l'original, mis à jour à chaque lot de
-                    # corrections appliqué depuis l'Étape 4.
-                    st.session_state["working_file_bytes"] = st.session_state.get("original_file_bytes")
-
-                    st.session_state.merged_result = merged
-                    st.session_state.axe_c_result  = axe_c
-
-                    all_r = merged.get("all_anomalies", [])
-                    real  = [a for a in all_r if a.get("Ligne", 0) > 0]
-                    st.session_state.config["total"] = len(real)
-                    st.session_state.config["major"] = sum(1 for a in real if a.get("Sévérité") == "Majeure")
-                    st.session_state.config["minor"] = sum(1 for a in real if a.get("Sévérité") == "Mineure")
-                    st.session_state.config["lines"] = axe_a.get("lines_analyzed", 0)
-
-                    st.session_state.saved_session_id     = None
-                    st.session_state.generated_file_bytes = None
-                    st.session_state.generated_file_name  = None
-                    st.session_state.prerequisites_report = None
-                    st.session_state.step = 4
+                    _advance_to_step4()
                     st.rerun()
             else:
                 st.error("❌ Corrigez les erreurs structurelles.")
