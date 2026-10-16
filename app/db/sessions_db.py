@@ -54,7 +54,16 @@ _SESSION_LIST_COLUMNS = (
     "id,name,profile_code,file_name,status,iteration,total_anomalies,"
     "major_anomalies,minor_anomalies,notes,date_controle,company_id,"
     "company_name,generated_file_name,prerequisites_report,table_id,"
-    "parent_session_id,is_root,pkg_code,created_at,updated_at"
+    "parent_session_id,is_root,pkg_code,created_at,updated_at,"
+    # CORRIGÉ (14/10/2026) — created_by manquait ici depuis son ajout le
+    # 27/08/2026 : la liste/l'arbre font déjà s.get("created_by", "") pour
+    # l'afficher, mais la colonne n'étant jamais sélectionnée, le badge
+    # "👤 responsable" était silencieusement toujours vide. contributors
+    # ajouté en même temps (voir update_session) — traçabilité du
+    # chevauchement entre départements sur UNE même session (demande Rami
+    # 14/10/2026 : une session est créée par une personne mais peut être
+    # complétée par plusieurs, au fil du temps, jusqu'à sa clôture).
+    "created_by,contributors"
 )
 
 import uuid
@@ -140,6 +149,12 @@ def save_session(data: dict) -> tuple[bool, str]:
             # après création (voir update_session, volontairement absent
             # de la liste `editable`).
             "created_by":            data.get("created_by", ""),
+            # AJOUTÉ (14/10/2026) — historique append-only des intervenants
+            # (voir update_session). Initialisé avec le créateur lui-même,
+            # pour que "N intervenants" compte juste dès la création.
+            "contributors": (
+                [{"name": data["created_by"], "at": now}] if data.get("created_by") else []
+            ),
             "created_at":            now,
             "updated_at":            now,
         }
@@ -149,7 +164,7 @@ def save_session(data: dict) -> tuple[bool, str]:
         return False, f"Erreur : {str(e)}"
 
 
-def update_session(session_id: str, data: dict) -> tuple[bool, str]:
+def update_session(session_id: str, data: dict, actor: str = "", message: str = "") -> tuple[bool, str]:
     """
     Met à jour les champs modifiables d'une session.
 
@@ -163,6 +178,28 @@ def update_session(session_id: str, data: dict) -> tuple[bool, str]:
     notes). Voir l'appel dans 2_Sessions_Integration.py : si une session a
     été reprise (session_state.resumed_session_id), la sauvegarde appelle
     désormais update_session() sur CET id au lieu de save_session().
+
+    AJOUTÉ (14/10/2026) — paramètre `actor` : demande Rami, une session est
+    créée par UNE personne (created_by, immuable) mais peut être reprise
+    par plusieurs départements avant sa clôture (compta remplit le plan
+    comptable, un autre département un autre champ, etc.) — il faut
+    garder une trace de ce chevauchement. `contributors` (jsonb, append-
+    only, jamais réécrit/raccourci) journalise qui a touché la session et
+    quand. Passage obligé ici (update_session est le SEUL point d'écriture
+    pour toute modification post-création, cf. les 6 appels dans
+    2_Sessions_Integration.py) — aucun appelant n'a besoin de gérer
+    l'historique lui-même. Un appel sans `actor` (cas interne/technique)
+    laisse contributors inchangé plutôt que de l'effacer.
+
+    AJOUTÉ (14/10/2026, 2e passe) — paramètre `message` : message optionnel
+    d'un intervenant pour la personne suivante ("Plan comptable fait, il
+    manque les comptes de TVA réduite"). Rattaché à l'entrée contributors
+    de CET intervenant plutôt qu'au champ `notes` (qui est réécrit en
+    entier à chaque édition — un message y serait écrasé par le suivant).
+    Si le même intervenant enchaîne deux sauvegardes sans message, pas de
+    doublon (comportement inchangé) ; dès qu'un message est fourni, une
+    nouvelle entrée est toujours ajoutée pour ne jamais écraser un message
+    précédent.
     """
     try:
         client = get_supabase_client()
@@ -176,6 +213,30 @@ def update_session(session_id: str, data: dict) -> tuple[bool, str]:
         )
         payload = {k: v for k, v in data.items() if k in editable}
         payload["updated_at"] = _now()
+        if actor:
+            try:
+                _cur = (
+                    client.table("qc_sessions")
+                    .select("contributors").eq("id", session_id).execute()
+                )
+                _contributors = (_cur.data[0].get("contributors") or []) if _cur.data else []
+            except Exception:
+                _contributors = []
+            _msg = message.strip() if message else ""
+            _same_as_last = bool(_contributors) and _contributors[-1].get("name") == actor
+            # Pas de doublon consécutif pour une sauvegarde routinière sans
+            # message. Mais un message doit toujours être journalisé comme
+            # une nouvelle entrée — sinon le message d'une personne pourrait
+            # être perdu/fusionné silencieusement avec sa propre entrée
+            # précédente sans trace du moment où il a été laissé.
+            if _same_as_last and not _msg:
+                pass
+            else:
+                _entry = {"name": actor, "at": payload["updated_at"]}
+                if _msg:
+                    _entry["message"] = _msg
+                _contributors = _contributors + [_entry]
+            payload["contributors"] = _contributors
         client.table("qc_sessions").update(payload).eq("id", session_id).execute()
         return True, ""
     except Exception as e:

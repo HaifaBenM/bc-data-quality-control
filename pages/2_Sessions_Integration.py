@@ -1,4 +1,5 @@
 import base64
+import html as _html
 import streamlit as st
 import pandas as pd
 from datetime import datetime
@@ -1256,7 +1257,7 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
                         _sid = st.session_state.get("resumed_session_id") or st.session_state.get("saved_session_id")
                         if _sid:
                             try:
-                                update_session(_sid, {"status": "Terminée"})
+                                update_session(_sid, {"status": "Terminée"}, actor=get_display_name())
                             except Exception:
                                 pass
                         _tid_mem = cfg.get("table_id")
@@ -1417,7 +1418,7 @@ def _quick_save_session(cfg: dict, status: str = "Nouvelle") -> None:
         "created_by":          get_display_name(),
     }
     if _resumed_id:
-        ok, res = update_session(_resumed_id, {**_payload, "name": _payload["session_name"]})
+        ok, res = update_session(_resumed_id, {**_payload, "name": _payload["session_name"]}, actor=get_display_name())
         res = _resumed_id if ok else res
     else:
         ok, res = save_session(_payload)
@@ -2403,17 +2404,10 @@ with tab_main:
                                 for _m in _members:
                                     _render_level_card(_m, _show_sub_level_tag=False, _nested=True)
                         except Exception as _diag_e:
-                            # DIAGNOSTIC — laissé en place tant qu'on n'a pas une confirmation
-                            # de stabilité dans la durée. Sans impact visuel si tout va bien.
-                            # RÉVISÉ (23/08/2026) — simplification écran client (demande
-                            # Bilel) : la trace technique complète reste réservée au
-                            # consultant, le client voit un message neutre.
-                            if is_consultant():
-                                import traceback
-                                st.error("🔧 DIAGNOSTIC — erreur capturée dans la boucle d'affichage de la roadmap :")
-                                st.code(traceback.format_exc())
-                            else:
-                                st.warning("⚠️ Affichage des prérequis momentanément indisponible. Réessaie dans un instant.")
+                            # RETIRÉ (14/10/2026) — demande Rami : plus aucun panneau de
+                            # diagnostic visible dans l'app, même réservé au consultant.
+                            # Message neutre pour tout le monde désormais.
+                            st.warning("⚠️ Affichage des prérequis momentanément indisponible. Réessaie dans un instant.")
 
                     # AJOUTÉ (07/08/2026) : export consolidé de TOUS les niveaux en
                     # un seul fichier — jusqu'ici chaque niveau n'était téléchargeable
@@ -2734,7 +2728,7 @@ with tab_main:
                     # id au lieu d'en créer un nouveau.
                     _resumed_id = st.session_state.get("resumed_session_id")
                     if _resumed_id:
-                        _ok, _err = update_session(_resumed_id, {**_save_payload, "name": _save_payload["session_name"]})
+                        _ok, _err = update_session(_resumed_id, {**_save_payload, "name": _save_payload["session_name"]}, actor=get_display_name())
                         ok, res = _ok, (_resumed_id if _ok else _err)
                     else:
                         ok, res = save_session(_save_payload)
@@ -2901,6 +2895,47 @@ with tab_ses:
                         "📁 Racine du socle" if _is_root
                         else (f"{_tid} — {_lvl_cfg_view[_tid].table_name}" if _tid in _lvl_cfg_view else f"Table {_tid}")
                     )
+                    # AJOUTÉ (14/10/2026) — demande Rami (point 2 liste
+                    # manager) : "Module" = sub_level de level_config (déjà
+                    # utilisé pour le Niveau 3 — Ventes/Achats/Stock/
+                    # Ressources/Immobilisations), aucune nouvelle donnée.
+                    _module = (
+                        _lvl_cfg_view[_tid].sub_level
+                        if _tid in _lvl_cfg_view and getattr(_lvl_cfg_view[_tid], "sub_level", None)
+                        else ""
+                    )
+                    _module_html = f'<span class="pkg-pill">🗂️ {_module}</span>' if _module else ""
+                    # Intervenants = contributors (historique append-only,
+                    # voir update_session) — distinct de created_by (le
+                    # créateur, immuable) pour refléter le chevauchement
+                    # entre départements sur une même session au fil du temps.
+                    _contribs      = node.get("contributors") or []
+                    _contrib_names = []
+                    for _c in _contribs:
+                        _n = (_c.get("name") or "").strip() if isinstance(_c, dict) else ""
+                        if _n and _n not in _contrib_names:
+                            _contrib_names.append(_n)
+                    # Noms échappés (injectés en HTML brut ci-dessous) : ce
+                    # sont des display_name de comptes, pas une saisie libre
+                    # exposée au public, mais autant éviter tout souci si un
+                    # nom contient un caractère spécial.
+                    _contrib_names_esc = [_html.escape(n) for n in _contrib_names]
+                    _resp_html = (
+                        f'<span class="pkg-pill" title="{_html.escape(", ".join(_contrib_names))}">'
+                        f'👤 {_contrib_names_esc[0]}{" +" + str(len(_contrib_names_esc) - 1) if len(_contrib_names_esc) > 1 else ""}'
+                        f'</span>' if _contrib_names_esc else ""
+                    )
+                    # Dernier message laissé par un intervenant pour celui
+                    # qui reprend la session (voir update_session, param
+                    # `message`) — on ne montre que le plus récent pour ne
+                    # pas surcharger la carte ; rien si aucun message.
+                    _last_msg = ""
+                    _last_msg_by = ""
+                    for _c in reversed(_contribs):
+                        if isinstance(_c, dict) and (_c.get("message") or "").strip():
+                            _last_msg = _c["message"].strip()
+                            _last_msg_by = _c.get("name", "")
+                            break
                     # RÉVISÉ (23/08/2026) — refonte visuelle (demande Rami : la
                     # vue arbre en texte brut + "└─" n'était pas ergonomique).
                     # Carte cohérente avec le design déjà utilisé ailleurs
@@ -2912,11 +2947,13 @@ with tab_ses:
                         f'<div class="tree-card{" tree-card-root" if _is_root else ""}" '
                         f'style="margin-left:{depth*28}px;border-left-color:{_sc}">'
                         f'<div class="tree-card-title">{_connector}{node.get("name", "")}</div>'
-                        f'<div class="tree-card-meta">{_tname}{_pkg_html}'
+                        f'<div class="tree-card-meta">{_tname}{_module_html}{_pkg_html}{_resp_html}'
                         f'<span class="status-pill" style="background:{_sc}22;color:{_sc}">{_si} {_status}</span>'
                         f'</div></div>',
                         unsafe_allow_html=True,
                     )
+                    if _last_msg:
+                        st.caption(f"💬 *{_last_msg}* — {_last_msg_by}" if _last_msg_by else f"💬 *{_last_msg}*")
                     if not _is_root and _tid:
                         rc1, rc2 = st.columns([1, 1])
                         with rc1:
@@ -2956,7 +2993,7 @@ with tab_ses:
                             elif st.button("🔒 Clôturer", key=f"close_{_nid}", use_container_width=True):
                                 _ok, _reasons = can_close_session(_nid, _tree_sessions_view)
                                 if _ok:
-                                    _uok, _uerr = update_session(_nid, {"status": _CLOSED_STATUS_LABEL})
+                                    _uok, _uerr = update_session(_nid, {"status": _CLOSED_STATUS_LABEL}, actor=get_display_name())
                                     if _uok:
                                         st.success("Session clôturée.")
                                         st.rerun()
@@ -2985,7 +3022,7 @@ with tab_ses:
                             if _close_root_clicked:
                                 _ok, _reasons = can_close_session(_nid, _tree_sessions_view)
                                 if _ok:
-                                    _uok, _uerr = update_session(_nid, {"status": _CLOSED_STATUS_LABEL})
+                                    _uok, _uerr = update_session(_nid, {"status": _CLOSED_STATUS_LABEL}, actor=get_display_name())
                                     if _uok:
                                         st.success("Socle clôturé.")
                                         st.rerun()
@@ -3122,6 +3159,22 @@ with tab_ses:
                             st.session_state.bulk_select_ids.discard(sid)
                     with top_info:
                         _created_by = s.get("created_by", "")
+                        # AJOUTÉ (14/10/2026) — demande Rami : une session
+                        # peut être reprise par plusieurs départements avant
+                        # sa clôture (compta, autre responsable, etc.) —
+                        # contributors (voir update_session) journalise ce
+                        # chevauchement, distinct du créateur (created_by,
+                        # immuable). On affiche le créateur + un compteur
+                        # "+N" seulement si d'autres personnes sont passées
+                        # dessus, pour ne pas alourdir l'affichage quand
+                        # une seule personne a tout fait.
+                        _contribs = s.get("contributors") or []
+                        _contrib_names = []
+                        for _c in _contribs:
+                            _n = (_c.get("name") or "").strip() if isinstance(_c, dict) else ""
+                            if _n and _n not in _contrib_names:
+                                _contrib_names.append(_n)
+                        _others_n = len([n for n in _contrib_names if n != _created_by])
                         st.markdown(
                             f'<p class="session-name" style="margin-bottom:.2rem">{s.get("name", "")}</p>'
                             f'<p class="session-meta">Client : <b>{s.get("profile_code", "")}</b> · '
@@ -3136,9 +3189,22 @@ with tab_ses:
                             # dans la liste (utile si quelqu'un d'autre la
                             # reprend). Absent pour les sessions créées avant
                             # ce champ — n'affiche rien plutôt qu'un "N/A".
-                            f'{"  ·  👤 " + _created_by if _created_by else ""}</p>',
+                            f'{"  ·  👤 " + _created_by if _created_by else ""}'
+                            f'{"  ·  👥 +" + str(_others_n) + " intervenant(s)" if _others_n else ""}'
+                            f'</p>',
                             unsafe_allow_html=True
                         )
+                        # Dernier message laissé pour le prochain intervenant
+                        # (voir update_session, param `message`) — un seul,
+                        # le plus récent, pour rester compact.
+                        _last_msg, _last_msg_by = "", ""
+                        for _c in reversed(_contribs):
+                            if isinstance(_c, dict) and (_c.get("message") or "").strip():
+                                _last_msg = _c["message"].strip()
+                                _last_msg_by = _c.get("name", "")
+                                break
+                        if _last_msg:
+                            st.caption(f"💬 *{_last_msg}* — {_last_msg_by}" if _last_msg_by else f"💬 *{_last_msg}*")
                     with top_actions:
                         tr, te, td = st.columns(3)
                         with tr:
@@ -3261,10 +3327,27 @@ with tab_ses:
                             )
                         with e2:
                             no = st.text_area("Notes", value=s.get("notes", ""), height=100, key=f"eno_{sid}")
+                            # AJOUTÉ (14/10/2026) — demande Rami : message
+                            # laissé pour le prochain intervenant, distinct
+                            # de "Notes" (réécrit en entier à chaque édition
+                            # — un message y serait perdu dès que quelqu'un
+                            # d'autre modifie les notes). Rattaché à
+                            # contributors (append-only), jamais écrasé.
+                            # Champ volontairement vide à chaque ouverture —
+                            # ce n'est pas un champ qu'on relit/édite, mais
+                            # qu'on ajoute, un par un, au fil des reprises.
+                            hn = st.text_area(
+                                "💬 Message pour le prochain intervenant (optionnel)",
+                                value="", height=68, key=f"ehn_{sid}",
+                                placeholder="Ex : Plan comptable fait, il manque les comptes de TVA réduite",
+                            )
                         sv1, sv2 = st.columns(2)
                         with sv1:
                             if st.button("💾 Enregistrer", key=f"esv_{sid}", type="primary", use_container_width=True):
-                                ok, err = update_session(sid, {"name": nn.strip(), "status": ns, "notes": no.strip()})
+                                ok, err = update_session(
+                                    sid, {"name": nn.strip(), "status": ns, "notes": no.strip()},
+                                    actor=get_display_name(), message=hn.strip(),
+                                )
                                 if ok:
                                     st.success("✅ Mis à jour !")
                                     st.session_state.edit_session_id = None
