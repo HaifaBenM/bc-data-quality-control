@@ -480,6 +480,18 @@ with tab3:
             )
             if ok:
                 st.success(f"✅ Utilisateur **{new_username}** créé. Communiquez-lui ses identifiants.")
+                # AJOUTÉ (20/10/2026) — demande Rami : vider le formulaire après
+                # chaque création, pour en enchaîner plusieurs sans tout
+                # réeffacer à la main. Les widgets sont déjà instanciés plus
+                # haut dans CE run (valeurs encore utiles pour create_user()
+                # ci-dessus) — Streamlit interdit une réassignation directe de
+                # session_state[clé] sur une clé de widget déjà instanciée dans
+                # le run courant, mais autorise `del` (même pattern que
+                # reset_session() dans 2_Sessions_Integration.py) : le rerun
+                # qui suit réinstancie chaque widget sur sa valeur par défaut.
+                for k in ("u_username", "u_pwd", "u_pwd2", "u_display", "u_role", "u_profile"):
+                    if k in st.session_state:
+                        del st.session_state[k]
                 st.rerun()
             else:
                 st.error(f"❌ {err}")
