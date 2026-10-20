@@ -44,7 +44,9 @@ class TableMeta:
 # Source : tests empiriques + schéma BC standard
 _TABLE_RELATIONS: dict[str, dict[str, int]] = {
     "18": {   # Customer
-        "Groupe compta. client":        91,
+        # CORRIGÉ (20/10/2026) — pointait à tort sur 91 (table inexistante
+        # comme Customer Posting Group) au lieu de 92 ; voir metadata_db.py.
+        "Groupe compta. client":        92,
         "Groupe compta. marché":        15,
         "Code conditions paiement":      3,
         "Code conditions livraison":    10,
@@ -57,7 +59,9 @@ _TABLE_RELATIONS: dict[str, dict[str, int]] = {
         "Groupe compta. marché TVA":    74,
     },
     "23": {   # Vendor
-        "Groupe compta. fourn.":        92,
+        # CORRIGÉ (20/10/2026) — pointait à tort sur 92 (Customer Posting
+        # Group) au lieu de 93 (Vendor Posting Group) ; voir metadata_db.py.
+        "Groupe compta. fourn.":        93,
         "Groupe compta. marché":        15,
         "Code conditions paiement":      3,
         "Code conditions livraison":    10,

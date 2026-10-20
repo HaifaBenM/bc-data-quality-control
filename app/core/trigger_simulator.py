@@ -36,7 +36,9 @@ ONINSERT_RULES: dict[int, list[dict]] = {
     18: [
         {
             "field":         "Groupe compta. client",
-            "ref_table_id":  91,
+            # CORRIGÉ (20/10/2026) — 91 n'existe pas comme Customer Posting
+            # Group ; la vraie table est 92 (voir metadata_db.py).
+            "ref_table_id":  92,
             "description":   "Groupe compta. client obligatoire et doit exister",
             "severity":      "Majeure",
         },
@@ -53,7 +55,9 @@ ONINSERT_RULES: dict[int, list[dict]] = {
     23: [
         {
             "field":         "Groupe compta. fourn.",
-            "ref_table_id":  92,
+            # CORRIGÉ (20/10/2026) — 92 est Customer Posting Group, pas
+            # Vendor ; la vraie table Vendor Posting Group est 93.
+            "ref_table_id":  93,
             "description":   "Groupe compta. fournisseur obligatoire et doit exister",
             "severity":      "Majeure",
         },

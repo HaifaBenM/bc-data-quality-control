@@ -261,8 +261,13 @@ _REF_TABLE_CACHE_KEYS: dict[int, str] = {
     27:   "items",
     74:   "vatBusinessPostingGroups",
     76:   "resourceGroups",
-    91:   "customerPostingGroups",
-    92:   "vendorPostingGroups",
+    # CORRIGÉ (20/10/2026) — 92/93 étaient inversés depuis l'origine (91
+    # n'existe pas comme Customer Posting Group dans BC ; confirmé via
+    # catalogue de tables AL externe + cohérent avec level_config qui,
+    # lui, a toujours eu la bonne valeur) : 92 = Customer Posting Group,
+    # 93 = Vendor Posting Group (absent jusqu'ici, jamais interrogé).
+    92:   "customerPostingGroups",
+    93:   "vendorPostingGroups",
     94:   "inventoryPostingGroups",
     156:  "resources",
     204:  "unitsOfMeasure",
@@ -288,8 +293,10 @@ _TABLE_BC_ENTITY: dict[int, tuple[str, str]] = {
     23:   ("vendors",                      "number"),
     27:   ("items",                        "number"),
     74:   ("vatBusinessPostingGroups",     "code"),
-    91:   ("customerPostingGroups",        "code"),
-    92:   ("vendorPostingGroups",          "code"),
+    # CORRIGÉ (20/10/2026) — même fix que _REF_TABLE_CACHE_KEYS ci-dessus :
+    # 92/93 inversés depuis l'origine.
+    92:   ("customerPostingGroups",        "code"),
+    93:   ("vendorPostingGroups",          "code"),
     94:   ("inventoryPostingGroups",       "code"),
     204:  ("unitsOfMeasure",               "code"),
     251:  ("generalProductPostingGroups",  "code"),

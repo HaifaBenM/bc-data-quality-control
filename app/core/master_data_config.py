@@ -36,12 +36,17 @@ REFERENCE_TABLES = {
     "13":  "Vendeurs/Acheteurs",
     "14":  "Magasins",
     "204": "Unité de mesure",  # confirmé par metadata_db._TABLE_BC_ENTITY (unitsOfMeasure)
-    # Corrigé session 17/07/2026 — confirmé par metadata_db._TABLE_BC_ENTITY
-    # (91: customerPostingGroups, 92: vendorPostingGroups). L'ancienne
-    # version de ce dictionnaire avait 92/93 inversés par rapport à la
-    # réalité BC (92=client, 93=fournisseur) — corrigé ici.
-    "91":  "Groupes compta. client",
-    "92":  "Groupes compta. fournisseur",
+    # CORRIGÉ (20/10/2026) — la "correction" du 17/07/2026 était fausse :
+    # elle s'appuyait sur metadata_db._TABLE_BC_ENTITY (91=customer,
+    # 92=vendor), qui était lui-même erroné depuis l'origine et vient
+    # d'être corrigé (voir metadata_db.py). Vérifié cette fois contre un
+    # catalogue de tables AL externe (table 92 = Customer Posting Group,
+    # 93 = Vendor Posting Group) + cohérent avec level_config (Supabase),
+    # qui a toujours eu la bonne valeur sans jamais avoir été impliqué
+    # dans l'ancienne confusion. 91 n'existe pas comme Customer Posting
+    # Group dans BC — entrée retirée.
+    "92":  "Groupes compta. client",
+    "93":  "Groupes compta. fournisseur",
     "94":  "Groupes compta. stock",
     # ⚠️ CONFLIT NON RÉSOLU : deux tables candidates pour "VAT Business
     # Posting Group" — 74 (confirmé dans metadata_db._TABLE_BC_ENTITY) et
