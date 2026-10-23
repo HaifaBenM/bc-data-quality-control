@@ -47,7 +47,11 @@ _TABLE_RELATIONS: dict[str, dict[str, int]] = {
         # CORRIGÉ (20/10/2026) — pointait à tort sur 91 (table inexistante
         # comme Customer Posting Group) au lieu de 92 ; voir metadata_db.py.
         "Groupe compta. client":        92,
-        "Groupe compta. marché":        15,
+        # CORRIGÉ (21/10/2026) — pointait à tort sur 15 (G/L Account, la
+        # table où se trouve le champ lui-même) au lieu de 250 (Gen.
+        # Business Posting Group), confirmé par Rami sur BC. Ce champ
+        # n'était donc jamais réellement vérifié contre la bonne table.
+        "Groupe compta. marché":       250,
         "Code conditions paiement":      3,
         "Code conditions livraison":    10,
         "Code mode expédition":         10,
@@ -62,7 +66,9 @@ _TABLE_RELATIONS: dict[str, dict[str, int]] = {
         # CORRIGÉ (20/10/2026) — pointait à tort sur 92 (Customer Posting
         # Group) au lieu de 93 (Vendor Posting Group) ; voir metadata_db.py.
         "Groupe compta. fourn.":        93,
-        "Groupe compta. marché":        15,
+        # CORRIGÉ (21/10/2026) — même bug que pour Customer ci-dessus ; voir
+        # metadata_db.py.
+        "Groupe compta. marché":       250,
         "Code conditions paiement":      3,
         "Code conditions livraison":    10,
         "Code mode expédition":         10,
@@ -77,11 +83,15 @@ _TABLE_RELATIONS: dict[str, dict[str, int]] = {
         "Code catégorie article":     5722,
         "Unité de base":               204,
         "Code traçabilité":           6502,
-        "Groupe compta. produit TVA":   74,
+        # CORRIGÉ (21/10/2026) — pointait à tort sur 74 (VAT Business
+        # Posting Group) au lieu de 324 (VAT Product Posting Group,
+        # confirmé par Rami sur BC).
+        "Groupe compta. produit TVA":  324,
     },
     "15": {   # G/L Account
         "Groupe compta. produit":       15,
-        "Groupe compta. produit TVA":   74,
+        # CORRIGÉ (21/10/2026) — même correctif que ci-dessus (table 27).
+        "Groupe compta. produit TVA":  324,
     },
     "3": {},  # Payment Terms — pas de relation externe
     "4": {},  # Currency

@@ -48,6 +48,10 @@ REFERENCE_TABLES = {
     "92":  "Groupes compta. client",
     "93":  "Groupes compta. fournisseur",
     "94":  "Groupes compta. stock",
+    # AJOUTÉ (21/10/2026) — Gen. Business Posting Group, confirmé par Rami
+    # directement sur BC. Absent jusqu'ici de ce fichier ET de metadata_db.py
+    # (donc jamais validé par Axe B avant ce correctif).
+    "250": "Groupes compta. marché",
     # ⚠️ CONFLIT NON RÉSOLU : deux tables candidates pour "VAT Business
     # Posting Group" — 74 (confirmé dans metadata_db._TABLE_BC_ENTITY) et
     # 323 (déjà présent ici de longue date). Impossible de trancher sans
@@ -77,10 +81,11 @@ REFERENCE_TABLES = {
     # ⚠️ NON confirmé dans metadata_db._TABLE_BC_ENTITY — libellé conservé
     # tel quel depuis les sessions précédentes, pas re-vérifié cette session.
     "322": "Groupes taxes",
-    # Corrigé session 17/07/2026 — remplace la précédente entrée "324"
-    # (devinée à tort). Confirmé par metadata_db._TABLE_BC_ENTITY
-    # (325: vatProductPostingGroups).
-    "325": "Groupes compta. produit TVA",
+    # CORRIGÉ (21/10/2026) — était "325" (confirmé à tort le 17/07/2026 sur
+    # la seule foi de metadata_db._TABLE_BC_ENTITY, qui avait lui-même cette
+    # valeur fausse). Rami a confirmé directement sur BC : VAT Product
+    # Posting Group est la table 324, pas 325.
+    "324": "Groupes compta. produit TVA",
     # Ajouté session 17/07/2026 — confirmé (metadata_db._TABLE_BC_ENTITY,
     # cas "ACC" table 5722 déjà rencontré en session).
     "5722": "Catégorie d'article",

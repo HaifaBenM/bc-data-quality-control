@@ -271,11 +271,18 @@ _REF_TABLE_CACHE_KEYS: dict[int, str] = {
     94:   "inventoryPostingGroups",
     156:  "resources",
     204:  "unitsOfMeasure",
+    # AJOUTÉ (21/10/2026) — Gen. Business Posting Group, confirmé par Rami
+    # directement sur BC. Manquait entièrement : "Groupe compta. marché"
+    # n'était jusqu'ici jamais validé par Axe B.
+    250:  "generalBusinessPostingGroups",
     251:  "generalProductPostingGroups",
     289:  "paymentMethods",
     308:  "noSeries",
     322:  "taxGroups",
-    325:  "vatProductPostingGroups",
+    # CORRIGÉ (21/10/2026) — était 325, confirmé faux par Rami : VAT
+    # Product Posting Group ("Groupe compta. produit TVA") est la table
+    # 324 sur son environnement BC, pas 325.
+    324:  "vatProductPostingGroups",
     340:  "itemDiscountGroups",
     5722: "itemCategories",
     6502: "itemTrackingCodes",
@@ -299,9 +306,12 @@ _TABLE_BC_ENTITY: dict[int, tuple[str, str]] = {
     93:   ("vendorPostingGroups",          "code"),
     94:   ("inventoryPostingGroups",       "code"),
     204:  ("unitsOfMeasure",               "code"),
+    # AJOUTÉ (21/10/2026) — voir _REF_TABLE_CACHE_KEYS ci-dessus.
+    250:  ("generalBusinessPostingGroups", "code"),
     251:  ("generalProductPostingGroups",  "code"),
     289:  ("paymentMethods",               "code"),
-    325:  ("vatProductPostingGroups",      "code"),
+    # CORRIGÉ (21/10/2026) — était 325 ; voir _REF_TABLE_CACHE_KEYS ci-dessus.
+    324:  ("vatProductPostingGroups",      "code"),
     340:  ("itemDiscountGroups",           "code"),
     5722: ("itemCategories",               "code"),
 }

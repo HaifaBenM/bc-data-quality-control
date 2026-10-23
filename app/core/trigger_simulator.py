@@ -44,7 +44,10 @@ ONINSERT_RULES: dict[int, list[dict]] = {
         },
         {
             "field":         "Groupe compta. marché",
-            "ref_table_id":  15,
+            # CORRIGÉ (21/10/2026) — 15 est G/L Account (la table où se
+            # trouve le champ lui-même), pas Gen. Business Posting Group ;
+            # la vraie table est 250, confirmée par Rami sur BC.
+            "ref_table_id":  250,
             "description":   "Groupe compta. marché (Gen. Bus. Posting Group) doit exister",
             "severity":      "Majeure",
         },
@@ -63,7 +66,9 @@ ONINSERT_RULES: dict[int, list[dict]] = {
         },
         {
             "field":         "Groupe compta. marché",
-            "ref_table_id":  15,
+            # CORRIGÉ (21/10/2026) — même correctif que pour Customer
+            # ci-dessus ; voir metadata_db.py.
+            "ref_table_id":  250,
             "description":   "Groupe compta. marché (Gen. Bus. Posting Group) doit exister",
             "severity":      "Majeure",
         },
