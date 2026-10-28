@@ -60,6 +60,41 @@ def get_roadmap_table_history(profile_code: str, company_id: str, pkg_code: str)
         return set()
 
 
+def mark_table_integrated(profile_code: str, company_id: str, table_id: int) -> tuple[bool, str]:
+    """
+    AJOUTÉ (28/10/2026) — demande Rami, suite au cahier des charges du
+    manager sur le pop-up "Prérequis manquant" : le blocage doit se baser
+    sur "cette table a-t-elle déjà été intégrée (Appliquer dans BC) avec
+    succès ?", PAS sur "roadmap_table_history" (qui ne contient que les
+    tables ayant eu une anomalie Axe B détectée dans le fichier en cours —
+    si le fichier est propre, roadmap est vide, le blocage ne se déclenche
+    jamais, même si le prérequis réel n'a pas été intégré — confirmé fautif
+    par comparaison avec l'exemple du cahier des charges).
+
+    Entity_name volontairement SANS pkg_code (contrairement à
+    roadmap_table_history) : un prérequis comme Plan comptable doit rester
+    "intégré" pour TOUS les packages (Compta/Achat/Vente), pas seulement
+    celui depuis lequel il a été appliqué — même société, même suivi.
+    """
+    _existing = get_integrated_tables(profile_code, company_id)
+    _existing.add(int(table_id))
+    return save_metadata(
+        profile_code, company_id, "integrated_tables",
+        "integrated_tables", sorted(_existing),
+    )
+
+
+def get_integrated_tables(profile_code: str, company_id: str) -> set:
+    """Voir mark_table_integrated. set() si rien de persisté encore."""
+    row = get_cached_metadata(profile_code, company_id, "integrated_tables")
+    if not row:
+        return set()
+    try:
+        return set(int(t) for t in row.get("fields", []))
+    except (TypeError, ValueError):
+        return set()
+
+
 def save_reference_data(
     profile_code: str,
     company_id:   str,

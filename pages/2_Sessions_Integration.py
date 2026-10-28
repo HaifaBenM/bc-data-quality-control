@@ -27,6 +27,7 @@ from app.db.metadata_db import (
     persist_gl_account_posting_fields, get_gl_account_posting_fields,
     get_table_caption_cached, clear_reference_cache,
     save_roadmap_table_history, get_roadmap_table_history,
+    mark_table_integrated, get_integrated_tables,
 )
 from app.db.profiles_db import get_profile_by_code
 from app.core.bc_api import (
@@ -1198,47 +1199,67 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
                 # AJOUTÉ (14/10/2026) — demande du supérieur de Rami : bloquer
                 # l'intégration BC d'une table tant que ses niveaux prérequis
                 # (Plan comptable, Mode de règlement, etc.) ne sont pas
-                # validés dans la roadmap, avec un message explicite nommant
-                # la prochaine table à intégrer en premier — un seul message
-                # à la fois, qui se répète au clic suivant si une autre
-                # dépendance manque encore. Réutilise telle quelle la
-                # roadmap déjà calculée à l'Étape 3 (paramètre `roadmap` de
-                # cette fonction) et is_level_unlocked() — aucune nouvelle
-                # logique de dépendances, juste un contrôle au clic qui
-                # n'existait pas avant.
+                # validés, avec un message explicite nommant la prochaine
+                # table à intégrer en premier — un seul message à la fois,
+                # qui se répète au clic suivant si une autre dépendance
+                # manque encore.
+                #
+                # CORRIGÉ (28/10/2026) — demande Rami, suite au cahier des
+                # charges du manager : la version précédente basait ce
+                # blocage sur `roadmap` (is_level_unlocked), qui ne contient
+                # QUE les tables ayant une anomalie Axe B réellement détectée
+                # dans le fichier en cours d'import. Si le fichier importé
+                # est propre (toutes ses références internes cohérentes),
+                # roadmap est vide et le blocage ne se déclenche JAMAIS —
+                # même si Plan comptable/Mode de règlement n'ont en réalité
+                # jamais été intégrés dans BC. Ce n'est pas ce que demande le
+                # cahier des charges : l'exemple donné parle explicitement de
+                # "la table a-t-elle déjà été intégrée", pas "le fichier
+                # actuel a-t-il une anomalie dessus". Remplacé par un suivi
+                # dédié (mark_table_integrated/get_integrated_tables,
+                # metadata_db.py) : vrai/faux par table_id, par société,
+                # partagé entre tous les packages (Plan comptable intégré
+                # depuis Compta reste "intégré" pour Achat/Vente aussi) —
+                # indépendant de roadmap et des anomalies Axe B.
                 _target_level_info = None
                 _target_table_id = cfg.get("table_id")
+                _level_cfg_check = st.session_state.get("level_config", {})
                 if _target_table_id is not None:
                     try:
-                        _target_level_info = st.session_state.get("level_config", {}).get(int(_target_table_id))
+                        _target_level_info = _level_cfg_check.get(int(_target_table_id))
                     except (TypeError, ValueError):
                         _target_level_info = None
 
                 _blocked = False
-                if _target_level_info is not None and _target_level_info.level is not None and roadmap:
-                    if not is_level_unlocked(_target_level_info.level, roadmap):
-                        _blocker = next(
-                            (e for e in roadmap
-                             if e.level_info.level is not None
-                             and e.level_info.level < _target_level_info.level
-                             and e.status != "validated"),
-                            None,
-                        )
-                        if _blocker is not None:
-                            _target_label = _target_level_info.table_name
-                            _blocker_label = _blocker.level_info.table_name
-                            _blocked = True
+                if _target_level_info is not None and _target_level_info.level is not None:
+                    _integrated_ids = get_integrated_tables(
+                        cfg.get("client_code", ""), cfg.get("company_id", "")
+                    )
+                    _prereq_blockers = sorted(
+                        (
+                            info for tid, info in _level_cfg_check.items()
+                            if info.level is not None
+                            and not info.ignored
+                            and info.level < _target_level_info.level
+                            and tid not in _integrated_ids
+                        ),
+                        key=lambda i: (i.level, i.sub_level or "", i.table_id),
+                    )
+                    if _prereq_blockers:
+                        _target_label = _target_level_info.table_name
+                        _blocker_label = _prereq_blockers[0].table_name
+                        _blocked = True
 
-                            @st.dialog("Prérequis manquant")
-                            def _dialog_prereq_missing():
-                                st.warning(
-                                    f"Vous ne pouvez pas intégrer la table **{_target_label}**. "
-                                    f"Veuillez d'abord intégrer la table **{_blocker_label}**."
-                                )
-                                if st.button("Fermer", use_container_width=True, key=f"close_prereq_dialog_{sn}"):
-                                    st.rerun()
+                        @st.dialog("Prérequis manquant")
+                        def _dialog_prereq_missing():
+                            st.warning(
+                                f"Vous ne pouvez pas intégrer la table **{_target_label}**. "
+                                f"Veuillez d'abord intégrer la table **{_blocker_label}**."
+                            )
+                            if st.button("Fermer", use_container_width=True, key=f"close_prereq_dialog_{sn}"):
+                                st.rerun()
 
-                            _dialog_prereq_missing()
+                        _dialog_prereq_missing()
 
                 if _blocked:
                     st.stop()
@@ -1247,6 +1268,22 @@ def display_merged_analysis(merged: dict, axe_c: dict, cfg: dict, pr: dict = Non
                     try:
                         _tid, _env, _company_id, _tok = _integ["creds"]
                         apply_configuration_package(_tid, _env, _company_id, _tok, _integ["package_id"])
+
+                        # AJOUTÉ (28/10/2026) — marque cette table comme
+                        # "intégrée dans BC" pour ce (profil, société) —
+                        # c'est ce suivi, et non plus `roadmap`, qui pilote
+                        # le pop-up "Prérequis manquant" ci-dessus. Jamais
+                        # bloquant : un échec de ce marquage ne doit pas
+                        # empêcher de considérer l'intégration BC elle-même
+                        # comme réussie.
+                        if cfg.get("table_id") is not None:
+                            try:
+                                mark_table_integrated(
+                                    cfg.get("client_code", ""), cfg.get("company_id", ""),
+                                    int(cfg["table_id"]),
+                                )
+                            except Exception:
+                                pass
 
                         # AJOUTÉ (27/08/2026) — après une intégration réussie :
                         # marque automatiquement la session comme "Terminée"
